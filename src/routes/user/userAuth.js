@@ -7,6 +7,5 @@ router.post("/verify-otp", userController.verifyOTP);
 router.post("/resent-otp", userController.resendOTP);
 router.put("/save-address/:id", userController.addAddress);
 router.get("/get-user-address/:id", userController.getUserAddressByUserId);
-router.get("/get-address-by-userid/:id", userController.addAddress);
 
 module.exports = router;

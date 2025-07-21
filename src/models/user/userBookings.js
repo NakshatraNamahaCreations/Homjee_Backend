@@ -55,6 +55,7 @@ const userBookingSchema = new mongoose.Schema({
     long: Number,
   },
   selectedSlot: selectedSlot,
+  isEnquiry: Boolean,
 });
 
 module.exports = mongoose.model("UserBookings", userBookingSchema);

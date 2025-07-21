@@ -9,6 +9,7 @@ exports.createBooking = async (req, res) => {
       assignedProfessional,
       address,
       selectedSlot,
+      isEnquiry,
     } = req.body;
 
     if (!service || !Array.isArray(service) || service.length === 0) {
@@ -21,7 +22,7 @@ exports.createBooking = async (req, res) => {
         name: customer.name,
         phone: customer.phone,
       },
-
+      isEnquiry,
       service: service.map((s) => ({
         category: s.category,
         serviceName: s.serviceName,

@@ -155,22 +155,3 @@ exports.getUserAddressByUserId = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error });
   }
 };
-
-exports.getAddressByUserId = async (req, res) => {
-  try {
-    const user = await userSchema.findOne({ _id: req.params.id });
-    if (!user) {
-      console.log("User Not Found");
-      return res.status(400).json({ message: "User Not Found" });
-    }
-
-    res.status(200).json({
-      message: "Address Saved!",
-      user,
-      otp: otp,
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
-  }
-};
