@@ -4,83 +4,68 @@ const crypto = require("crypto");
 
 exports.saveUser = async (req, res) => {
   try {
-    const { mobileNumber, userName } = req.body;
+    const { mobileNumber } = req.body;
 
     if (!mobileNumber) {
       return res.status(400).json({ message: "Mobile number is required" });
     }
 
     // Generate OTP and expiry
-    const otp = crypto.randomInt(100000, 999999);
+    const otp = crypto.randomInt(1000, 10000);
     const expiry = new Date(Date.now() + 60 * 1000);
     await otpSchema.create({ mobileNumber, otp, expiry });
 
-    // Find user by mobile number
-    let user = await userSchema.findOne({ mobileNumber });
+    // Just check if user exists, do not create
+    const user = await userSchema.findOne({ mobileNumber });
 
-    if (user) {
-      // ✅ Update userName if provided
-      if (userName) {
-        user.userName = userName;
-        await user.save();
-      }
-
-      return res.status(200).json({
-        message: "OTP Sent successfully!",
-        data: user,
-        otp: otp,
-        isNewUser: false,
-      });
-    }
-
-    // If user doesn't exist, create new user with userName
-    const newUser = new userSchema({
-      mobileNumber,
-      userName: userName || "", // fallback if empty
-    });
-
-    await newUser.save();
-
-    res.status(201).json({
+    res.status(200).json({
       message: "OTP Sent successfully!",
-      data: newUser,
       otp: otp,
-      isNewUser: true,
+      isNewUser: user ? false : true,
     });
   } catch (error) {
-    console.error("Error creating user:", error);
+    console.error("Error generating OTP:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
 exports.verifyOTP = async (req, res) => {
-  const { mobileNumber, otp } = req.body;
+  const { mobileNumber, otp, userName } = req.body;
+
   try {
-    const record = await otpSchema.findOne({
-      mobileNumber,
-      otp,
-    });
+    const record = await otpSchema.findOne({ mobileNumber, otp });
+
     if (!record) {
       return res.status(400).json({ message: "Invalid OTP" });
     }
+
     if (record.expiry < new Date()) {
       return res.status(400).json({ message: "OTP expired" });
     }
+
     await otpSchema.deleteMany({ mobileNumber });
 
-    const user = await userSchema.findOne({ mobileNumber });
+    let user = await userSchema.findOne({ mobileNumber });
 
+    // If user does not exist, create after successful OTP
+    let isNewUser = false;
     if (!user) {
-      return res.status(404).json({ message: "User not found" });
+      isNewUser = true;
+      user = new userSchema({
+        mobileNumber,
+        userName: userName || "",
+      });
+      await user.save();
     }
 
     res.status(200).json({
       message: "OTP verified successfully",
       data: user,
       status: "Online",
+      isNewUser: isNewUser,
     });
   } catch (error) {
-    console.error(error);
+    console.error("OTP verification error:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
@@ -94,7 +79,7 @@ exports.resendOTP = async (req, res) => {
       return res.status(400).json({ message: "mobile number not match" });
     }
 
-    const otp = crypto.randomInt(100000, 999999);
+    const otp = crypto.randomInt(1000, 10000);
     const expiry = new Date(Date.now() + 60 * 1000);
 
     await otpSchema.create({ mobileNumber, otp, expiry });
@@ -123,14 +108,15 @@ exports.addAddress = async (req, res) => {
 
     const updateData = await userSchema.findOneAndUpdate(
       { _id: req.params.id },
-      { $push: { savedAddress: savedAddress } },
+      // { $push: { savedAddress: savedAddress } }, //for array of object address
+      { savedAddress },
       { new: true }
     );
 
     res.status(200).json({
       status: true,
       message: "Address saved successfully",
-      address: updateData,
+      address: updateData.savedAddress,
     });
   } catch (error) {
     console.error(error);

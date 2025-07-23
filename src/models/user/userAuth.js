@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const userSchema = new mongoose.Schema({
   userName: String,
   mobileNumber: Number,
-  savedAddress: Array,
+  savedAddress: Object,
   createdAt: {
     type: Date,
     default: Date.now,
