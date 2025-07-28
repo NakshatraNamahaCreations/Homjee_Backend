@@ -51,8 +51,17 @@ const userBookingSchema = new mongoose.Schema({
     houseFlatNumber: String,
     streetArea: String,
     landMark: String,
-    lat: Number,
-    long: Number,
+    location: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number],
+        required: true,
+      },
+    },
   },
   selectedSlot: selectedSlot,
   isEnquiry: Boolean,

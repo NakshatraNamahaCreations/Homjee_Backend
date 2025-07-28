@@ -2,7 +2,7 @@ const mongoose = require("mongoose");
 
 const vendorInfo = new mongoose.Schema({
   vendorName: String,
-  phoneNumber: Number,
+  mobileNumber: Number,
   profileImage: String,
   dateOfBirth: String,
   yearOfWorking: String,
@@ -29,10 +29,15 @@ const accountInfo = new mongoose.Schema({
   accountType: String,
   gstNumber: String,
 });
-
+const addressDetails = new mongoose.Schema({
+  location: String,
+  latitude: Number,
+  longitude: Number,
+});
 const vendorAuthSchema = new mongoose.Schema({
   vendor: vendorInfo,
   documents: documentInfo,
+  address: addressDetails,
   bankDetails: accountInfo,
   activeStatus: Boolean,
 });

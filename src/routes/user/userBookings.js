@@ -12,5 +12,9 @@ router.get(
   "/get-bookings-by-customerid/:customerId",
   bookingController.getBookingsByCustomerId
 );
+router.get(
+  "/get-nearest-booking-by-location/:lat/:long",
+  bookingController.getBookingForNearByVendors
+);
 
 module.exports = router;

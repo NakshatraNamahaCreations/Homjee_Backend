@@ -16,6 +16,22 @@ exports.createBooking = async (req, res) => {
       return res.status(400).json({ message: "Service list cannot be empty." });
     }
 
+    // console.log("Address in request body:", JSON.stringify(address, null, 2));
+
+    let coords = [0, 0];
+    if (
+      address.location &&
+      Array.isArray(address.location.coordinates) &&
+      address.location.coordinates.length === 2 &&
+      typeof address.location.coordinates[0] === "number" &&
+      typeof address.location.coordinates[1] === "number"
+    ) {
+      coords = address.location.coordinates;
+    } else {
+      // Handle invalid or missing coordinates (throw error or default)
+      throw new Error("Invalid or missing address.location.coordinates");
+    }
+
     const booking = new UserBooking({
       customer: {
         customerId: customer.customerId,
@@ -49,11 +65,13 @@ exports.createBooking = async (req, res) => {
         houseFlatNumber: address.houseFlatNumber,
         streetArea: address.streetArea,
         landMark: address.landMark,
-        lat: address.lat,
-        long: address.long,
+        location: {
+          type: "Point",
+          coordinates: coords,
+        },
       },
+
       selectedSlot: {
-        // slotId: selectedSlot.slotId,
         slotDate: selectedSlot.slotDate,
         slotTime: selectedSlot.slotTime,
       },
@@ -110,6 +128,38 @@ exports.getBookingsByCustomerId = async (req, res) => {
     res.status(200).json({ bookings });
   } catch (error) {
     console.error("Error fetching bookings by customerId:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getBookingForNearByVendors = async (req, res) => {
+  try {
+    const { lat, long } = req.params;
+    if (!lat || !long) {
+      return res.status(400).json({ message: "Coordinates required" });
+    }
+    const nearbyBookings = await UserBooking.find({
+      "address.location": {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [parseFloat(long), parseFloat(lat)],
+          },
+          $maxDistance: 5000, // 5 km
+        },
+      },
+      isEnquiry: false, // <--- Additional filter
+    }).sort({ createdAt: -1 });
+
+    if (!nearbyBookings.length) {
+      return res
+        .status(404)
+        .json({ message: "No bookings found near this location" });
+    }
+
+    res.status(200).json({ bookings: nearbyBookings });
+  } catch (error) {
+    console.error("Error finding nearby bookings:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
