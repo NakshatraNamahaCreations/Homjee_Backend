@@ -19,7 +19,14 @@ const bookingDetailsSchema = new mongoose.Schema({
   bookingTime: String,
   status: {
     type: String,
-    enum: ["Pending", "Confirmed", "Completed", "Cancelled"],
+    enum: [
+      "Pending",
+      "Confirmed", //accepted or responded
+      "Ongoing", //started
+      "Waiting for final payment", //if amount has edit
+      "Completed", //ended
+      "Cancelled",
+    ],
     default: "Pending",
   },
   paymentMethod: {
@@ -31,16 +38,28 @@ const bookingDetailsSchema = new mongoose.Schema({
     enum: ["Paid", "Unpaid", "Refunded"],
   },
   paidAmount: Number,
+  amountYetToPay: Number,
+  otp: Number,
+  addedAmount: Number,
+  reasonForChanging: String,
+  scope: String,
+  hasUpdated: { type: Boolean, default: false },
 });
 
 const assignedProfessionalSchema = new mongoose.Schema({
   professionalId: String,
   name: String,
   phone: String,
+  acceptedDate: Date,
+  acceptedTime: String,
+  startedDate: Date,
+  startedTime: String,
+  endedDate: Date,
+  endedTime: String,
 });
 const selectedSlot = new mongoose.Schema({
   slotTime: String,
-  slotDate: String,
+  slotDate: Date,
 });
 const userBookingSchema = new mongoose.Schema({
   customer: customerSchema,

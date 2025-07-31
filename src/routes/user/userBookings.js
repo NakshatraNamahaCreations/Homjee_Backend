@@ -16,5 +16,16 @@ router.get(
   "/get-nearest-booking-by-location/:lat/:long",
   bookingController.getBookingForNearByVendors
 );
+router.post(
+  "/update-confirm-job-status",
+  bookingController.updateConfirmedStatus
+);
 
+router.get(
+  "/get-confirm-bookings-by-vendorId/:professionalId",
+  bookingController.getBookingExceptPending
+);
+router.post("/start-job", bookingController.startJob);
+router.post("/end-job", bookingController.endJob);
+router.post("/update-price", bookingController.updatePricing);
 module.exports = router;

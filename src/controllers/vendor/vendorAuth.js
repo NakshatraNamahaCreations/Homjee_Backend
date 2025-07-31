@@ -92,7 +92,9 @@ exports.loginWithMobile = async (req, res) => {
 
     console.log(`OTP for ${mobileNumber}: ${otp}`);
 
-    res.status(200).json({ message: "OTP sent successfully", mobileNumber });
+    res
+      .status(200)
+      .json({ message: "OTP sent successfully", mobileNumber, otp: otp });
   } catch (error) {
     console.error("Error during vendor login:", error);
     if (error.name === "ValidationError") {

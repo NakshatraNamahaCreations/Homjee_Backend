@@ -1,5 +1,9 @@
 const UserBooking = require("../../models/user/userBookings");
+const moment = require("moment");
 
+function generateOTP() {
+  return Math.floor(1000 + Math.random() * 10000).toString();
+}
 exports.createBooking = async (req, res) => {
   try {
     const {
@@ -53,6 +57,8 @@ exports.createBooking = async (req, res) => {
         paymentMethod: bookingDetails.paymentMethod || "Cash",
         paymentStatus: bookingDetails.paymentStatus || "Unpaid",
         paidAmount: bookingDetails.paidAmount,
+        amountYetToPay: bookingDetails.amountYetToPay,
+        otp: generateOTP(),
       },
       assignedProfessional: assignedProfessional
         ? {
@@ -131,6 +137,69 @@ exports.getBookingsByCustomerId = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+// only for today
+// exports.getBookingForNearByVendors = async (req, res) => {
+//   try {
+//     const { lat, long } = req.params;
+//     if (!lat || !long) {
+//       return res.status(400).json({ message: "Coordinates required" });
+//     }
+//     const now = new Date();
+//     const todayStart = new Date(
+//       now.getFullYear(),
+//       now.getMonth(),
+//       now.getDate()
+//     );
+//     const todayEnd = new Date(
+//       now.getFullYear(),
+//       now.getMonth(),
+//       now.getDate() + 2
+//     );
+
+//     const nearbyBookings = await UserBooking.find({
+//       "address.location": {
+//         $near: {
+//           $geometry: {
+//             type: "Point",
+//             coordinates: [parseFloat(long), parseFloat(lat)],
+//           },
+//           $maxDistance: 5000, // 5 km
+//         },
+//       },
+//       isEnquiry: false,
+//       "bookingDetails.status": "Pending",
+//       "selectedSlot.slotDate": {
+//         $gte: todayStart,
+//         $lt: todayEnd,
+//       },
+//     }).sort({ createdAt: -1 });
+
+//     const filteredBookings = nearbyBookings.filter((booking) => {
+//       const slotDate = moment(booking.selectedSlot.slotDate); // This is a Date object
+//       const slotTimeStr = booking.selectedSlot.slotTime; // e.g., "01:00 PM"
+
+//       // Combine slot date + slot time into one moment object
+//       const slotDateTime = moment(
+//         `${slotDate.format("YYYY-MM-DD")} ${slotTimeStr}`,
+//         "YYYY-MM-DD hh:mm A"
+//       );
+
+//       // Keep only future slots
+//       return slotDateTime.isAfter(moment());
+//     });
+
+//     if (!filteredBookings.length) {
+//       return res
+//         .status(404)
+//         .json({ message: "No bookings found near this location" });
+//     }
+
+//     res.status(200).json({ bookings: filteredBookings });
+//   } catch (error) {
+//     console.error("Error finding nearby bookings:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
 
 exports.getBookingForNearByVendors = async (req, res) => {
   try {
@@ -138,6 +207,20 @@ exports.getBookingForNearByVendors = async (req, res) => {
     if (!lat || !long) {
       return res.status(400).json({ message: "Coordinates required" });
     }
+
+    const now = new Date();
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+    const dayAfterTomorrow = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 2
+    );
+
+    // Fetch bookings for today and tomorrow
     const nearbyBookings = await UserBooking.find({
       "address.location": {
         $near: {
@@ -148,42 +231,289 @@ exports.getBookingForNearByVendors = async (req, res) => {
           $maxDistance: 5000, // 5 km
         },
       },
-      isEnquiry: false, // <--- Additional filter
+      isEnquiry: false,
+      "bookingDetails.status": "Pending",
+      "selectedSlot.slotDate": {
+        $gte: todayStart,
+        $lt: dayAfterTomorrow,
+      },
     }).sort({ createdAt: -1 });
 
-    if (!nearbyBookings.length) {
+    const nowMoment = moment();
+
+    const filteredBookings = nearbyBookings.filter((booking) => {
+      const slotDateObj = booking.selectedSlot?.slotDate;
+      const slotTimeStr = booking.selectedSlot?.slotTime;
+      if (!slotDateObj || !slotTimeStr) return false;
+
+      const slotDateMoment = moment(slotDateObj);
+      const slotDateStr = slotDateMoment.format("YYYY-MM-DD");
+      const slotDateTime = moment(
+        `${slotDateStr} ${slotTimeStr}`,
+        "YYYY-MM-DD hh:mm A"
+      );
+
+      // Today: keep only future-times
+      if (slotDateMoment.isSame(nowMoment, "day")) {
+        return slotDateTime.isAfter(nowMoment);
+      }
+      // Tomorrow: keep all
+      if (slotDateMoment.isSame(nowMoment.clone().add(1, "day"), "day")) {
+        return true;
+      }
+      // Should not reach here due to date range, but just in case
+      return false;
+    });
+
+    if (!filteredBookings.length) {
       return res
         .status(404)
         .json({ message: "No bookings found near this location" });
     }
 
-    res.status(200).json({ bookings: nearbyBookings });
+    res.status(200).json({ bookings: filteredBookings });
   } catch (error) {
     console.error("Error finding nearby bookings:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
-// // Update booking status
-// exports.updateBookingStatus = async (req, res) => {
+exports.updateConfirmedStatus = async (req, res) => {
+  try {
+    const { bookingId, status, assignedProfessional } = req.body;
+    console.log("bookingId", bookingId);
+    if (!bookingId) {
+      return res.status(400).json({ message: "bookingId is required" });
+    }
+    const updateFields = {};
+    if (status) updateFields["bookingDetails.status"] = status;
+    if (assignedProfessional)
+      updateFields.assignedProfessional = assignedProfessional;
+
+    const booking = await UserBooking.findByIdAndUpdate(
+      bookingId,
+      { $set: updateFields },
+      { new: true }
+    );
+
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    res.status(200).json({ message: "Booking updated", booking });
+  } catch (error) {
+    console.error("Error updating booking:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getBookingExceptPending = async (req, res) => {
+  try {
+    const { professionalId } = req.params;
+    if (!professionalId) {
+      return res.status(400).json({ message: "Professional ID is required" });
+    }
+
+    const now = new Date();
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate()
+    );
+    const todayEnd = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate() + 1
+    );
+
+    const bookings = await UserBooking.find({
+      "assignedProfessional.professionalId": professionalId,
+      "bookingDetails.status": { $ne: "Pending" },
+      "selectedSlot.slotDate": {
+        $gte: todayStart,
+        $lt: todayEnd,
+      },
+    }).lean();
+
+    const filtered = bookings.filter((booking) => {
+      const { slotDate, slotTime } = booking.selectedSlot || {};
+      if (!slotDate || !slotTime) return false;
+
+      // slotDate is Date, slotTime is string like '02:00 PM'
+      const dateStr = moment(slotDate).format("YYYY-MM-DD");
+      const slotDateTime = moment(
+        `${dateStr} ${slotTime}`,
+        "YYYY-MM-DD hh:mm A"
+      );
+
+      return slotDateTime.isSameOrAfter(moment());
+    });
+
+    return res.status(200).json({ leadsList: filtered });
+  } catch (error) {
+    console.error("Error finding confirmed bookings:", error);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// exports.getBookingExceptPending = async (req, res) => {
 //   try {
-//     const booking = await userBookingSchema.findByIdAndUpdate(
-//       req.params.id,
-//       { status: req.body.status },
-//       { new: true }
+//     const { professionalId } = req.params;
+
+//     if (!professionalId) {
+//       return res.status(400).json({ message: "Professional ID is required" });
+//     }
+//     const now = new Date();
+//     const todayStart = new Date(
+//       now.getFullYear(),
+//       now.getMonth(),
+//       now.getDate()
+//     );
+//     const todayEnd = new Date(
+//       now.getFullYear(),
+//       now.getMonth(),
+//       now.getDate() + 1
 //     );
 
-//     if (!booking) {
-//       return res.status(404).json({ message: "Booking not found" });
-//     }
+//     const confirmedBookings = await UserBooking.find({
+//       "assignedProfessional.professionalId": professionalId,
+//       "bookingDetails.status": { $ne: "Pending" },
+//       "selectedSlot.slotDate": {
+//         $gte: todayStart,
+//         $lt: todayEnd,
+//       },
+//       // If you want to exclude multiple statuses (for example, "Pending" and "Cancelled"), use $nin (Not In)
+//       //  "bookingDetails.status": { $nin: ["Pending", "Cancelled"] },
+//     })
+//       // .sort({ createdAt: -1 })
+//       .lean();
 
-//     res.status(200).json({ message: "Booking updated", booking });
+//     return res.status(200).json({ leadsList: confirmedBookings });
 //   } catch (error) {
-//     console.error("Error updating booking:", error);
-//     res.status(500).json({ message: "Server error" });
+//     console.error("Error finding confirmed bookings:", error);
+//     return res.status(500).json({ message: "Server error" });
 //   }
 // };
 
+exports.startJob = async (req, res) => {
+  try {
+    const { bookingId, status, assignedProfessional, otp } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({ message: "bookingId is required" });
+    }
+    if (!otp) {
+      return res.status(400).json({ message: "OTP is required" });
+    }
+
+    // Step 1: Find the booking
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    // Step 2: Compare OTP
+    const storedOtp = booking.bookingDetails?.otp;
+    if (parseInt(storedOtp) !== parseInt(otp)) {
+      return res.status(401).json({ message: "Invalid OTP" });
+    }
+
+    // Step 3: Prepare update fields
+    const updateFields = {};
+    if (status) updateFields["bookingDetails.status"] = status;
+    if (assignedProfessional)
+      updateFields.assignedProfessional = assignedProfessional;
+
+    // Step 4: Update the booking
+    const updatedBooking = await UserBooking.findByIdAndUpdate(
+      bookingId,
+      { $set: updateFields },
+      { new: true }
+    );
+
+    res.status(200).json({ message: "Job Started", booking: updatedBooking });
+  } catch (error) {
+    console.error("Error updating booking:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.endJob = async (req, res) => {
+  try {
+    const { bookingId, status, assignedProfessional } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({ message: "bookingId is required" });
+    }
+
+    // Step 1: Find the booking
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    // Step 2: Prepare update fields
+    const updateFields = {};
+    if (status) updateFields["bookingDetails.status"] = status;
+    if (assignedProfessional)
+      updateFields.assignedProfessional = assignedProfessional;
+
+    // Step 3: Update the booking
+    const updatedBooking = await UserBooking.findByIdAndUpdate(
+      bookingId,
+      { $set: updateFields },
+      { new: true }
+    );
+
+    res.status(200).json({ message: "Job Completed", booking: updatedBooking });
+  } catch (error) {
+    console.error("Error updating booking:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.updatePricing = async (req, res) => {
+  try {
+    const {
+      bookingId,
+      paidAmount,
+      addedAmount,
+      payToPay,
+      reason,
+      scope,
+      hasUpdated,
+    } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({ message: "bookingId is required" });
+    }
+
+    // Step 1: Find the booking
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    // Step 2: Prepare update fields
+    const updateFields = {};
+    if (paidAmount) updateFields["bookingDetails.paidAmount"] = paidAmount;
+    if (addedAmount) updateFields["bookingDetails.addedAmount"] = addedAmount;
+    if (payToPay) updateFields["bookingDetails.amountYetToPay"] = payToPay;
+    if (reason) updateFields["bookingDetails.reasonForChanging"] = reason;
+    if (scope) updateFields["bookingDetails.scope"] = scope;
+    if (hasUpdated) updateFields["bookingDetails.hasUpdated"] = hasUpdated;
+
+    // Step 3: Update the booking
+    const updatedBooking = await UserBooking.findByIdAndUpdate(
+      bookingId,
+      { $set: updateFields },
+      { new: true }
+    );
+
+    res.status(200).json({ message: "Price Updated", booking: updatedBooking });
+  } catch (error) {
+    console.error("Error updating price:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 // // Delete booking
 // exports.deleteBooking = async (req, res) => {
 //   try {
