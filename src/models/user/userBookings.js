@@ -23,9 +23,9 @@ const bookingDetailsSchema = new mongoose.Schema({
       "Pending",
       "Confirmed", //accepted or responded
       "Ongoing", //started
-      "Waiting for final payment", //if amount has edit
       "Completed", //ended
-      "Cancelled",
+      "Customer Cancelled",
+      "Customer Not Reachable",
     ],
     default: "Pending",
   },
@@ -35,15 +35,16 @@ const bookingDetailsSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ["Paid", "Unpaid", "Refunded"],
+    enum: ["Paid", "Unpaid", "Refunded", "Waiting for final payment"],
   },
   paidAmount: Number,
   amountYetToPay: Number,
   otp: Number,
   addedAmount: Number,
   reasonForChanging: String,
+  reasonForCancelled: String,
   scope: String,
-  hasUpdated: { type: Boolean, default: false },
+  hasPriceUpdated: { type: Boolean, default: false },
 });
 
 const assignedProfessionalSchema = new mongoose.Schema({

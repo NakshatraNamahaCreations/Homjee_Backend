@@ -323,7 +323,7 @@ exports.getBookingExceptPending = async (req, res) => {
     const todayEnd = new Date(
       now.getFullYear(),
       now.getMonth(),
-      now.getDate() + 1
+      now.getDate() + 2
     );
 
     const bookings = await UserBooking.find({
@@ -480,7 +480,8 @@ exports.updatePricing = async (req, res) => {
       payToPay,
       reason,
       scope,
-      hasUpdated,
+      hasPriceUpdated,
+      paymentStatus,
     } = req.body;
 
     if (!bookingId) {
@@ -499,7 +500,10 @@ exports.updatePricing = async (req, res) => {
     if (payToPay) updateFields["bookingDetails.amountYetToPay"] = payToPay;
     if (reason) updateFields["bookingDetails.reasonForChanging"] = reason;
     if (scope) updateFields["bookingDetails.scope"] = scope;
-    if (hasUpdated) updateFields["bookingDetails.hasUpdated"] = hasUpdated;
+    if (hasPriceUpdated)
+      updateFields["bookingDetails.hasPriceUpdated"] = hasPriceUpdated;
+    if (paymentStatus)
+      updateFields["bookingDetails.paymentStatus"] = paymentStatus;
 
     // Step 3: Update the booking
     const updatedBooking = await UserBooking.findByIdAndUpdate(
@@ -514,6 +518,74 @@ exports.updatePricing = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
+exports.updateStatus = async (req, res) => {
+  try {
+    const { bookingId, status, reasonForCancelled } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({ message: "bookingId is required" });
+    }
+
+    // Step 1: Find the booking
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+    // Step 2: Prepare update fields
+    const updateFields = {};
+    if (status) updateFields["bookingDetails.status"] = status;
+    if (reasonForCancelled)
+      updateFields["bookingDetails.reasonForCancelled"] = reasonForCancelled;
+
+    // Step 3: Update the booking
+    const updatedBooking = await UserBooking.findByIdAndUpdate(
+      bookingId,
+      { $set: updateFields },
+      { new: true }
+    );
+
+    res.status(200).json({
+      message: "Status Updated",
+      booking: updatedBooking,
+    });
+  } catch (error) {
+    console.error("Error updating booking:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.cancelJob = async (req, res) => {
+  try {
+    const { bookingId, status, assignedProfessional } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({ message: "bookingId is required" });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    const updateFields = {};
+    if (status) updateFields["bookingDetails.status"] = status;
+    if (assignedProfessional)
+      updateFields.assignedProfessional = assignedProfessional;
+
+    const updatedBooking = await UserBooking.findByIdAndUpdate(
+      bookingId,
+      { $set: updateFields },
+      { new: true }
+    );
+
+    res.status(200).json({ message: "Job Cancelled", booking: updatedBooking });
+  } catch (error) {
+    console.error("Error updating booking:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
 // // Delete booking
 // exports.deleteBooking = async (req, res) => {
 //   try {

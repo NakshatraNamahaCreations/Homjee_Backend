@@ -28,4 +28,5 @@ router.get(
 router.post("/start-job", bookingController.startJob);
 router.post("/end-job", bookingController.endJob);
 router.post("/update-price", bookingController.updatePricing);
+router.post("/update-status", bookingController.updateStatus);
 module.exports = router;
