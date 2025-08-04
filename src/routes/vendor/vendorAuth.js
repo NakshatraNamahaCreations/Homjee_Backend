@@ -20,5 +20,6 @@ router.get(
   "/get-vendor-by-vendorId/:id",
   vendorAuthController.getVendorByVendorId
 );
+router.get("/get-all-vendor", vendorAuthController.getAllVendors);
 
 module.exports = router;

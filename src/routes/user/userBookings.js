@@ -3,7 +3,10 @@ const router = express.Router();
 const bookingController = require("../../controllers/user/userBookings");
 
 router.post("/create-user-booking", bookingController.createBooking);
+router.get("/get-all-leads", bookingController.getAllLeadsBookings);
+router.get("/get-all-enquiries", bookingController.getAllEnquiries);
 router.get("/get-all-bookings", bookingController.getAllBookings);
+
 router.get(
   "/get-bookings-by-bookingid/:id",
   bookingController.getBookingsByBookingId

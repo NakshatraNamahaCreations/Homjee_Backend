@@ -194,3 +194,20 @@ exports.getVendorByVendorId = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error });
   }
 };
+
+exports.getAllVendors = async (req, res) => {
+  try {
+    const vendor = await vendorAuthSchema.find();
+    if (vendor.length === 0) {
+      return res.status(400).json({ message: "Vendor Not Found" });
+    }
+    res.status(200).json({
+      status: true,
+      message: "Vendor Found",
+      vendor,
+    });
+  } catch (error) {
+    console.log(error);
+    res.status(500).json({ message: "Server error", error: error });
+  }
+};

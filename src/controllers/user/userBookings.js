@@ -102,6 +102,30 @@ exports.getAllBookings = async (req, res) => {
   }
 };
 
+exports.getAllLeadsBookings = async (req, res) => {
+  try {
+    const bookings = await UserBooking.find({ isEnquiry: false }).sort({
+      createdAt: -1,
+    });
+    res.status(200).json({ allLeads: bookings });
+  } catch (error) {
+    console.error("Error fetching all leads:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getAllEnquiries = async (req, res) => {
+  try {
+    const bookings = await UserBooking.find({ isEnquiry: true }).sort({
+      createdAt: -1,
+    });
+    res.status(200).json({ allEnquies: bookings });
+  } catch (error) {
+    console.error("Error fetching all leads:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.getBookingsByBookingId = async (req, res) => {
   try {
     const booking = await UserBooking.findById({ _id: req.params.id });
@@ -476,7 +500,7 @@ exports.updatePricing = async (req, res) => {
     const {
       bookingId,
       paidAmount,
-      addedAmount,
+      editedPrice,
       payToPay,
       reason,
       scope,
@@ -496,7 +520,7 @@ exports.updatePricing = async (req, res) => {
     // Step 2: Prepare update fields
     const updateFields = {};
     if (paidAmount) updateFields["bookingDetails.paidAmount"] = paidAmount;
-    if (addedAmount) updateFields["bookingDetails.addedAmount"] = addedAmount;
+    if (editedPrice) updateFields["bookingDetails.editedPrice"] = editedPrice;
     if (payToPay) updateFields["bookingDetails.amountYetToPay"] = payToPay;
     if (reason) updateFields["bookingDetails.reasonForChanging"] = reason;
     if (scope) updateFields["bookingDetails.scope"] = scope;
@@ -521,7 +545,10 @@ exports.updatePricing = async (req, res) => {
 
 exports.updateStatus = async (req, res) => {
   try {
-    const { bookingId, status, reasonForCancelled } = req.body;
+    const {
+      bookingId,
+      status, //reasonForCancelled
+    } = req.body;
 
     if (!bookingId) {
       return res.status(400).json({ message: "bookingId is required" });
@@ -535,8 +562,8 @@ exports.updateStatus = async (req, res) => {
     // Step 2: Prepare update fields
     const updateFields = {};
     if (status) updateFields["bookingDetails.status"] = status;
-    if (reasonForCancelled)
-      updateFields["bookingDetails.reasonForCancelled"] = reasonForCancelled;
+    // if (reasonForCancelled)
+    //   updateFields["bookingDetails.reasonForCancelled"] = reasonForCancelled;
 
     // Step 3: Update the booking
     const updatedBooking = await UserBooking.findByIdAndUpdate(

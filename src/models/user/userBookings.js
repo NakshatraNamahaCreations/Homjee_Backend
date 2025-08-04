@@ -40,9 +40,9 @@ const bookingDetailsSchema = new mongoose.Schema({
   paidAmount: Number,
   amountYetToPay: Number,
   otp: Number,
-  addedAmount: Number,
+  editedPrice: Number,
   reasonForChanging: String,
-  reasonForCancelled: String,
+  // reasonForCancelled: String,
   scope: String,
   hasPriceUpdated: { type: Boolean, default: false },
 });
