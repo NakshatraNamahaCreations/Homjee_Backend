@@ -9,6 +9,7 @@ const customerSchema = new mongoose.Schema({
 const serviceSchema = new mongoose.Schema({
   // serviceId: String,
   category: String,
+  subCategory: String,
   serviceName: String,
   price: Number,
   quantity: Number,
@@ -25,7 +26,7 @@ const bookingDetailsSchema = new mongoose.Schema({
       "Ongoing", //started
       "Completed", //ended
       "Customer Cancelled",
-      "Customer Not Reachable",
+      "Customer Unreachable",
     ],
     default: "Pending",
   },

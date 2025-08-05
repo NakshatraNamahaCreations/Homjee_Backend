@@ -5,6 +5,10 @@ const parser = require("../../middleware/cloudinaryStorage");
 
 router.post(
   "/create-vendor",
+  (req, res, next) => {
+    req.body.folder = "vendorDocs";
+    next();
+  },
   parser.fields([
     { name: "profileImage", maxCount: 1 },
     { name: "aadhaarImage", maxCount: 1 },

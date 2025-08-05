@@ -45,6 +45,7 @@ exports.createBooking = async (req, res) => {
       isEnquiry,
       service: service.map((s) => ({
         category: s.category,
+        subCategory: s.subCategory,
         serviceName: s.serviceName,
         price: s.price,
         quantity: s.quantity,
