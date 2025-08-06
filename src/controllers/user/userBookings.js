@@ -1,8 +1,10 @@
 const UserBooking = require("../../models/user/userBookings");
 const moment = require("moment");
+const crypto = require("crypto");
 
 function generateOTP() {
-  return Math.floor(1000 + Math.random() * 10000).toString();
+  return crypto.randomInt(1000, 10000);
+  // return Math.floor(1000 + Math.random() * 10000).toString();
 }
 exports.createBooking = async (req, res) => {
   try {

@@ -1,8 +1,10 @@
 const vendorAuthSchema = require("../../models/vendor/vendorAuth");
 const otpSchema = require("../../models/user/otp");
+const crypto = require("crypto");
 
 function generateOTP() {
-  return Math.floor(1000 + Math.random() * 10000).toString();
+  // return Math.floor(1000 + Math.random() * 10000).toString();
+  return crypto.randomInt(1000, 10000);
 }
 
 exports.createVendor = async (req, res) => {
