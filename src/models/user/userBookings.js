@@ -61,7 +61,7 @@ const assignedProfessionalSchema = new mongoose.Schema({
 });
 const selectedSlot = new mongoose.Schema({
   slotTime: String,
-  slotDate: Date,
+  slotDate: String,
 });
 const userBookingSchema = new mongoose.Schema({
   customer: customerSchema,

@@ -22,9 +22,9 @@ exports.createBooking = async (req, res) => {
       return res.status(400).json({ message: "Service list cannot be empty." });
     }
 
-    // console.log("Address in request body:", JSON.stringify(address, null, 2));
-
     let coords = [0, 0];
+    let slotDateUtc;
+
     if (
       address.location &&
       Array.isArray(address.location.coordinates) &&
@@ -34,7 +34,6 @@ exports.createBooking = async (req, res) => {
     ) {
       coords = address.location.coordinates;
     } else {
-      // Handle invalid or missing coordinates (throw error or default)
       throw new Error("Invalid or missing address.location.coordinates");
     }
 
@@ -236,17 +235,18 @@ exports.getBookingForNearByVendors = async (req, res) => {
     }
 
     const now = new Date();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    );
+    const todayStart = now.toISOString().slice(0, 10);
+    // const todayStart = new Date(
+    //   now.getFullYear(),
+    //   now.getMonth(),
+    //   now.getDate()
+    // );
     const dayAfterTomorrow = new Date(
       now.getFullYear(),
       now.getMonth(),
       now.getDate() + 2
     );
-
+    const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().slice(0, 10);
     // Fetch bookings for today and tomorrow
     const nearbyBookings = await UserBooking.find({
       "address.location": {
@@ -262,7 +262,7 @@ exports.getBookingForNearByVendors = async (req, res) => {
       "bookingDetails.status": "Pending",
       "selectedSlot.slotDate": {
         $gte: todayStart,
-        $lt: dayAfterTomorrow,
+        $lt: dayAfterTomorrowStr,
       },
     }).sort({ createdAt: -1 });
 
@@ -342,11 +342,12 @@ exports.getBookingExceptPending = async (req, res) => {
     }
 
     const now = new Date();
-    const todayStart = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate()
-    );
+    // const todayStart = new Date(
+    //   now.getFullYear(),
+    //   now.getMonth(),
+    //   now.getDate()
+    // );
+    const todayStart = now.toISOString().slice(0, 10);
     const todayEnd = new Date(
       now.getFullYear(),
       now.getMonth(),
