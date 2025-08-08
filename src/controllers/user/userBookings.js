@@ -227,7 +227,108 @@ exports.getBookingsByCustomerId = async (req, res) => {
 //   }
 // };
 
-exports.getBookingForNearByVendors = async (req, res) => {
+exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
+  try {
+    const { lat, long } = req.params;
+    if (!lat || !long) {
+      return res.status(400).json({ message: "Coordinates required" });
+    }
+
+    const now = new Date();
+    // todayStart: "YYYY-MM-DD" string of today
+    // const todayStart = now.toISOString().slice(0, 10);
+
+    const todayStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    )
+      .toISOString()
+      .slice(0, 10);
+
+    // dayAfterTomorrowStr: today + 2 days as "YYYY-MM-DD" string
+    const dayAfterTomorrow = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2)
+    );
+
+    // const dayAfterTomorrow = new Date(
+    //   now.getFullYear(),
+    //   now.getMonth(),
+    //   now.getDate() + 2
+    // );
+    const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().slice(0, 10);
+
+    console.log("todayStart:", todayStart);
+    console.log("dayAfterTomorrowStr:", dayAfterTomorrowStr);
+
+    // Fetch bookings for today and tomorrow
+    const nearbyBookings = await UserBooking.find({
+      "address.location": {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [parseFloat(long), parseFloat(lat)],
+          },
+          $maxDistance: 5000,
+        },
+      },
+      isEnquiry: false,
+      "service.category": "Deep Cleaning",
+      "bookingDetails.status": "Pending",
+      "selectedSlot.slotDate": {
+        $gte: todayStart,
+        $lt: dayAfterTomorrowStr,
+      },
+    }).sort({ createdAt: -1 });
+
+    console.log("Bookings found for date range:", nearbyBookings.length);
+
+    nearbyBookings.forEach((b) => {
+      console.log(
+        "Booking slotDate:",
+        b.selectedSlot.slotDate,
+        "slotTime:",
+        b.selectedSlot.slotTime
+      );
+    });
+
+    const nowMoment = moment();
+    const filteredBookings = nearbyBookings.filter((booking) => {
+      const slotDateObj = booking.selectedSlot?.slotDate;
+      const slotTimeStr = booking.selectedSlot?.slotTime;
+      if (!slotDateObj || !slotTimeStr) return false;
+
+      const slotDateMoment = moment(slotDateObj);
+      const slotDateStr = slotDateMoment.format("YYYY-MM-DD");
+      const slotDateTime = moment(
+        `${slotDateStr} ${slotTimeStr}`,
+        "YYYY-MM-DD hh:mm A"
+      );
+
+      // Today: keep only future-times
+      if (slotDateMoment.isSame(nowMoment, "day")) {
+        return slotDateTime.isAfter(nowMoment);
+      }
+      // Tomorrow: keep all
+      if (slotDateMoment.isSame(nowMoment.clone().add(1, "day"), "day")) {
+        return true;
+      }
+      // Should not reach here due to date range, but just in case
+      return false;
+    });
+
+    if (!filteredBookings.length) {
+      return res
+        .status(404)
+        .json({ message: "No bookings found near this location" });
+    }
+
+    res.status(200).json({ bookings: filteredBookings });
+  } catch (error) {
+    console.error("Error finding nearby bookings:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
   try {
     const { lat, long } = req.params;
     if (!lat || !long) {
@@ -259,6 +360,7 @@ exports.getBookingForNearByVendors = async (req, res) => {
         },
       },
       isEnquiry: false,
+      "service.category": "House Painting",
       "bookingDetails.status": "Pending",
       "selectedSlot.slotDate": {
         $gte: todayStart,
