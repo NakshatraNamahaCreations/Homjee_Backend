@@ -6,7 +6,7 @@ const parser = require("../../middleware/cloudinaryStorage");
 router.post(
   "/create-vendor",
   (req, res, next) => {
-    req.body.folder = "vendorDocs";
+    req.folder = "vendorDocs";
     next();
   },
   parser.fields([

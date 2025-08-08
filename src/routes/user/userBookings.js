@@ -16,9 +16,14 @@ router.get(
   bookingController.getBookingsByCustomerId
 );
 router.get(
-  "/get-nearest-booking-by-location/:lat/:long",
-  bookingController.getBookingForNearByVendors
+  "/get-nearest-booking-by-location-deep-cleaning/:lat/:long",
+  bookingController.getBookingForNearByVendorsDeepCleaning
 );
+router.get(
+  "/get-nearest-booking-by-location-house-painting/:lat/:long",
+  bookingController.getBookingForNearByVendorsHousePainting
+);
+
 router.post(
   "/update-confirm-job-status",
   bookingController.updateConfirmedStatus
