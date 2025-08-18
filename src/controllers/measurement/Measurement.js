@@ -1,74 +1,72 @@
-// controllers/measurementController.js
 const Measurement = require("../../models/measurement/Measurement");
 
-// Save or Update measurement
-// exports.saveMeasurement = async (req, res) => {
-//   const { vendorId, leadId, category, rooms } = req.body;
-
-//   console.log("vendorId, leadId,rooms", vendorId, leadId, rooms);
-
-//   if (!vendorId || !leadId || !rooms) {
-//     return res.status(400).json({ message: "Missing required fields" });
-//   }
-
-//   try {
-//     let measurement = await Measurement.findOne({ vendorId, leadId });
-
-//     if (measurement) {
-//       // Update existing
-//       measurement.rooms = rooms;
-//       await measurement.save();
-//     } else {
-//       // Create new
-//       measurement = await Measurement.create({
-//         vendorId,
-//         leadId,
-//         category,
-//         rooms,
-//       });
-//     }
-
-//     return res
-//       .status(200)
-//       .json({ message: "Measurement saved successfully", measurement });
-//   } catch (error) {
-//     console.error("Error saving measurement:", error);
-//     return res.status(500).json({ message: "Server error" });
-//   }
-// };
-
+const PUTTY_RATE_PER_SQFT = 10;
 const toNum = (v) => (Number.isFinite(+v) ? +v : 0);
+const getNet = (it) => toNum(it.totalSqt ?? it.area ?? it.width * it.height);
 const area = (w, h) => +Math.max(toNum(w) * toNum(h), 0).toFixed(2);
 
-/** normalize legacy { measurements:[{type,sections:[{sectionName,width,height}]}] } into rooms map */
 function normalizeLegacy(payload) {
   if (!Array.isArray(payload?.measurements)) return null;
   const map = {};
   payload.measurements.forEach((m) => {
-    const walls = (m.sections || []).map((s) => ({
-      width: toNum(s.width),
-      height: toNum(s.height),
-      area: area(s.width, s.height),
-      windows: [],
-      doors: [],
-      cupboards: [],
-    }));
-    map[m.type] = { mode: "REPAINT", unit: "FT", ceilings: [], walls };
+    const walls = (m.sections || []).map((s) => {
+      const gross = area(s.width, s.height);
+      return {
+        width: toNum(s.width),
+        height: toNum(s.height),
+        area: gross, // gross
+        totalSqt: gross, // net == gross (legacy had no openings)
+        windows: [],
+        doors: [],
+        cupboards: [],
+        mode: "REPAINT",
+      };
+    });
+
+    const ceilings = (m.sections || []).map((s) => {
+      const gross = area(s.width, s.height);
+      return {
+        width: toNum(s.width),
+        height: toNum(s.height),
+        area: gross, // gross
+        totalSqt: gross, // net == gross
+        windows: [],
+        doors: [],
+        cupboards: [],
+        mode: "REPAINT",
+      };
+    });
+
+    const measurements = (m.measurements || []).map((s) => {
+      const gross = area(s.width, s.height);
+      return {
+        width: toNum(s.width),
+        height: toNum(s.height),
+        area: gross,
+        totalSqt: gross,
+        mode: "REPAINT",
+      };
+    });
+
+    map[m.type] = {
+      mode: "REPAINT",
+      unit: "FT",
+      ceilings,
+      walls,
+      measurements,
+    };
   });
   return map;
 }
 
 function recomputeTotals(doc) {
   let wallsArea = 0,
-    ceilingsArea = 0;
-  // exterior = 0;
-  other = 0;
+    ceilingsArea = 0,
+    other = 0;
+
   for (const [, room] of doc.rooms) {
-    ceilingsArea += (room.ceilings || []).reduce(
-      (s, c) => s + toNum(c.area ?? area(c.width, c.height)),
-      0
-    );
-    wallsArea += (room.walls || []).reduce((s, w) => {
+    ceilingsArea += (room.ceilings || []).reduce((s, w) => {
+      if (w.totalSqt != null) return s + toNum(w.totalSqt);
       const gross = area(w.width, w.height);
       const openings = [
         ...(w.windows || []),
@@ -77,16 +75,65 @@ function recomputeTotals(doc) {
       ].reduce((ss, o) => ss + toNum(o.area ?? area(o.width, o.height)), 0);
       return s + Math.max(gross - openings, 0);
     }, 0);
-    other += (room.measurements || []).reduce(
-      (s, c) => s + toNum(c.area ?? area(c.width, c.height)),
-      0
-    );
+
+    wallsArea += (room.walls || []).reduce((s, w) => {
+      if (w.totalSqt != null) return s + toNum(w.totalSqt);
+      const gross = area(w.width, w.height);
+      const openings = [
+        ...(w.windows || []),
+        ...(w.doors || []),
+        ...(w.cupboards || []),
+      ].reduce((ss, o) => ss + toNum(o.area ?? area(o.width, o.height)), 0);
+      return s + Math.max(gross - openings, 0);
+    }, 0);
+
+    other += (room.measurements || []).reduce((s, c) => {
+      // measurements have no openings: use totalSqt if present, else area
+      const val =
+        c.totalSqt != null
+          ? toNum(c.totalSqt)
+          : toNum(c.area ?? area(c.width, c.height));
+      return s + val;
+    }, 0);
   }
+
   doc.totals = {
     wallsArea: +wallsArea.toFixed(2),
     ceilingsArea: +ceilingsArea.toFixed(2),
     measurementsArea: +other.toFixed(2),
   };
+}
+
+function paintUnitRate(paint, mode, sectionType) {
+  // One base price + optional putty
+  const base = toNum(paint?.price);
+  const needsPutty =
+    mode === "FRESH"
+      ? !!paint?.includePuttyOnFresh
+      : !!paint?.includePuttyOnRepaint;
+
+  // If your client ever says "Others never add putty", uncomment:
+  // if (sectionType === "Others") return base;
+
+  return base + (needsPutty ? PUTTY_RATE_PER_SQFT : 0);
+}
+
+function displayPaintName(paint, mode, sectionType) {
+  if (!paint) return "";
+  const isOthers = (sectionType || "").trim() === "Others";
+
+  // Prefix for special paints
+  const specialPrefix = paint.isSpecial ? "★ " : "";
+
+  // For Others: never append process per client decision
+  if (isOthers) return `${specialPrefix}${paint.name}`;
+
+  // For Normal: append process after the name
+  const process = mode === "FRESH" ? "Fresh Paint" : "Repaint With Primer";
+
+  return paint.isSpecial
+    ? `${specialPrefix}${paint.name}` // special paints: name only, plus the star
+    : `${paint.name} ${process}`; // normal paints: append process
 }
 
 exports.saveMeasurement = async (req, res) => {
@@ -125,247 +172,132 @@ exports.saveMeasurement = async (req, res) => {
   }
 };
 
-// exports.updateRoomPricing = async (req, res) => {
-//   try {
-//     const { leadId, roomName, selectedPackage } = req.body;
-
-//     if (!leadId || !roomName || !selectedPackage) {
-//       return res
-//         .status(400)
-//         .json({ message: "Missing leadId, roomName, or selectedPackage" });
-//     }
-
-//     // Find measurement doc
-//     const doc = await Measurement.findOne({ leadId });
-//     if (!doc) {
-//       return res.status(404).json({ message: "Measurement not found" });
-//     }
-
-//     const room = doc.rooms.get(roomName);
-//     if (!room) {
-//       return res.status(404).json({ message: `Room "${roomName}" not found` });
-//     }
-
-//     // Calculate total pricing for the given room based on selected package
-//     let totalRoomPrice = 0;
-//     let pricingBreakdown = [];
-
-//     // Ceiling pricing
-//     if (room.ceilings && room.ceilings.length > 0) {
-//       const ceilingArea = room.ceilings.reduce(
-//         (sum, c) => sum + (c.area || 0),
-//         0
-//       );
-//       const ceilingPackage = selectedPackage.details.find(
-//         (d) =>
-//           d.name.toLowerCase().includes(room.mode.toLowerCase()) &&
-//           d.name.toLowerCase().includes("ceiling")
-//       );
-//       if (ceilingPackage) {
-//         const price =
-//           (ceilingArea / ceilingPackage.sqft) * ceilingPackage.price;
-//         totalRoomPrice += price;
-//         pricingBreakdown.push({
-//           type: "Ceiling",
-//           sqft: ceilingArea,
-//           unitPrice: ceilingPackage.price / ceilingPackage.sqft,
-//           price,
-//         });
-//       }
-//     }
-
-//     // Wall pricing
-//     if (room.walls && room.walls.length > 0) {
-//       const wallArea = room.walls.reduce((sum, w) => sum + (w.area || 0), 0);
-//       const wallPackage = selectedPackage.details.find(
-//         (d) =>
-//           d.name.toLowerCase().includes(room.mode.toLowerCase()) &&
-//           d.name.toLowerCase().includes("wall")
-//       );
-//       if (wallPackage) {
-//         const price = (wallArea / wallPackage.sqft) * wallPackage.price;
-//         totalRoomPrice += price;
-//         pricingBreakdown.push({
-//           type: "Wall",
-//           sqft: wallArea,
-//           unitPrice: wallPackage.price / wallPackage.sqft,
-//           price,
-//         });
-//       }
-//     }
-
-//     // Save pricing info inside room (optional)
-//     room.pricing = {
-//       packageId: selectedPackage.id,
-//       packageName: selectedPackage.name,
-//       total: totalRoomPrice,
-//       breakdown: pricingBreakdown,
-//     };
-
-//     doc.rooms.set(roomName, room);
-//     await doc.save();
-
-//     return res.status(200).json({
-//       message: "Room pricing updated successfully",
-//       data: {
-//         roomName,
-//         totalRoomPrice,
-//         pricingBreakdown,
-//       },
-//     });
-//   } catch (err) {
-//     console.error("Error updating room pricing:", err);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// };
-
-// Get measurement summary
-
-exports.updateRoomPricing = async (req, res) => {
+exports.updateRoomPaintPricing = async (req, res) => {
   try {
     const {
       leadId,
       roomName,
       newRoomName,
-      selectedPackage,
-      selectedPackageItems,
+      selections, // { paints: {ceiling, wall, measurements}, items: {ceilings, walls, measurements} }
     } = req.body;
 
-    // Validate input
-    if (!leadId || !roomName || !selectedPackage) {
+    if (!leadId || !roomName || !selections) {
       return res
         .status(400)
-        .json({ message: "Missing leadId, roomName, or selectedPackage" });
+        .json({ message: "Missing leadId, roomName or selections" });
     }
 
-    // Find measurement doc
     const doc = await Measurement.findOne({ leadId });
-    if (!doc) {
-      return res.status(404).json({ message: "Measurement not found" });
-    }
+    if (!doc) return res.status(404).json({ message: "Measurement not found" });
 
-    // Get the room
     const room = doc.rooms.get(roomName);
-    if (!room) {
+    if (!room)
       return res.status(404).json({ message: `Room "${roomName}" not found` });
-    }
 
-    // Update room name if newRoomName is provided
-    if (newRoomName && newRoomName !== roomName) {
-      if (doc.rooms.has(newRoomName)) {
+    // Rename room if needed
+    const finalRoomName =
+      newRoomName && newRoomName !== roomName ? newRoomName : roomName;
+    if (finalRoomName !== roomName) {
+      if (doc.rooms.has(finalRoomName)) {
         return res
           .status(400)
-          .json({ message: `Room "${newRoomName}" already exists` });
+          .json({ message: `Room "${finalRoomName}" already exists` });
       }
-      room.name = newRoomName;
+      room.name = finalRoomName;
       doc.rooms.delete(roomName);
-      doc.rooms.set(newRoomName, room);
+      doc.rooms.set(finalRoomName, room);
     }
 
-    if (selectedPackageItems && Array.isArray(selectedPackageItems)) {
-      room.packages = selectedPackageItems.map((item) => ({
-        width: item.width,
-        height: item.height,
-        area: item.area,
-      }));
-    }
+    const sectionType = room.sectionType; // "Interior" | "Exterior" | "Others"
 
-    // Calculate total pricing
-    let totalRoomPrice = 0;
-    let pricingBreakdown = [];
+    // Selections from client (send back exactly what you picked on the app)
+    const paintCeil = selections?.paints?.ceiling ?? null;
+    const paintWall = selections?.paints?.wall ?? null;
+    const paintMeas = selections?.paints?.measurements ?? null;
 
-    // Ceiling pricing
-    if (room.ceilings && room.ceilings.length > 0) {
-      const ceilingArea = room.ceilings.reduce(
-        (sum, c) => sum + (c.area || 0),
-        0
-      );
-      const ceilingPackage = selectedPackage.details.find(
-        (d) =>
-          d.name.toLowerCase().includes(room.mode.toLowerCase()) &&
-          d.name.toLowerCase().includes("ceiling")
-      );
-      if (ceilingPackage) {
-        const price =
-          (ceilingArea / ceilingPackage.sqft) * ceilingPackage.price;
-        totalRoomPrice += price;
-        pricingBreakdown.push({
-          type: "Ceiling",
-          sqft: ceilingArea,
-          unitPrice: ceilingPackage.price / ceilingPackage.sqft,
-          price,
+    // Items: minimal per-item info is enough (mode + sqft)
+    const selCeil = Array.isArray(selections?.items?.ceilings)
+      ? selections.items.ceilings
+      : [];
+    const selWall = Array.isArray(selections?.items?.walls)
+      ? selections.items.walls
+      : [];
+    const selMeas = Array.isArray(selections?.items?.measurements)
+      ? selections.items.measurements
+      : [];
+
+    // Build breakdown lines
+    const breakdown = [];
+    let total = 0;
+
+    const addLines = (kind, items, paint) => {
+      items.forEach((it) => {
+        const sqft = +getNet(it).toFixed(2);
+        if (!sqft) return;
+
+        const unitPrice = paintUnitRate(paint, it.mode, sectionType);
+        const linePrice = +(unitPrice * sqft).toFixed(2);
+
+        breakdown.push({
+          type: kind, // "Ceiling" | "Wall" | "Measurement"
+          mode: it.mode, // "FRESH" | "REPAINT"
+          sqft,
+          unitPrice, // base + maybe putty
+          price: linePrice,
+          paintId: paint?.id ?? null,
+          paintName: paint?.name ?? "",
+          isSpecial: !!paint?.isSpecial,
+          displayPaint: displayPaintName(paint, it.mode, sectionType),
+          components: {
+            paintPrice: toNum(paint?.price),
+            puttyPrice:
+              unitPrice - toNum(paint?.price) > 0 ? PUTTY_RATE_PER_SQFT : 0,
+            puttyApplied: unitPrice - toNum(paint?.price) > 0,
+          },
         });
-      }
-    }
 
-    // Wall pricing
-    if (room.walls && room.walls.length > 0) {
-      const wallArea = room.walls.reduce((sum, w) => sum + (w.area || 0), 0);
-      const wallPackage = selectedPackage.details.find(
-        (d) =>
-          d.name.toLowerCase().includes(room.mode.toLowerCase()) &&
-          d.name.toLowerCase().includes("wall")
-      );
-      if (wallPackage) {
-        const price = (wallArea / wallPackage.sqft) * wallPackage.price;
-        totalRoomPrice += price;
-        pricingBreakdown.push({
-          type: "Wall",
-          sqft: wallArea,
-          unitPrice: wallPackage.price / wallPackage.sqft,
-          price,
-        });
-      }
-    }
-
-    if (room.packages && room.packages.length > 0) {
-      const packageArea = room.packages.reduce(
-        (sum, p) => sum + (p.area || 0),
-        0
-      );
-      const packagePricing = selectedPackage.details.find(
-        (d) =>
-          d.name.toLowerCase().includes(room.mode.toLowerCase()) &&
-          d.name.toLowerCase().includes("package")
-      );
-      if (packagePricing) {
-        const price =
-          (packageArea / packagePricing.sqft) * packagePricing.price;
-        totalRoomPrice += price;
-        pricingBreakdown.push({
-          type: "Package",
-          sqft: packageArea,
-          unitPrice: packagePricing.price / packagePricing.sqft,
-          price,
-        });
-      }
-    }
-
-    // Save pricing info
-    room.pricing = {
-      packageId: selectedPackage.id,
-      packageName: selectedPackage.name,
-      total: totalRoomPrice,
-      breakdown: pricingBreakdown,
-      packages: room.packages || [],
+        total += linePrice;
+      });
     };
 
-    // Update room in the document
-    doc.rooms.set(newRoomName || roomName, room);
-    doc.markModified(`rooms.${newRoomName || roomName}`);
-    await doc.save();
+    // Map kinds per section type
+    // Interior/Exterior: ceilings & walls; Others: measurements
+    if (sectionType === "Others") {
+      addLines("Measurement", selMeas, paintMeas);
+    } else {
+      addLines("Ceiling", selCeil, paintCeil);
+      addLines("Wall", selWall, paintWall);
+    }
 
-    return res.status(200).json({
-      message: "Room pricing and name updated successfully",
+    // Persist in pricing (don’t touch packages here)
+    room.pricing = {
+      ...(room.pricing || {}),
+      total: +total.toFixed(2),
+      breakdown,
+      selectedPaints: {
+        ceiling: paintCeil,
+        wall: paintWall,
+        measurements: paintMeas,
+      },
+    };
+
+    // Save
+    doc.rooms.set(finalRoomName, room);
+    doc.markModified(`rooms.${finalRoomName}`);
+    await doc.save();
+    console.log("whole documents", doc);
+    res.status(200).json({
+      message: "Room paint pricing saved",
       data: {
-        roomName: newRoomName || roomName,
-        totalRoomPrice,
-        pricingBreakdown,
-        packages: room.packages,
+        roomName: finalRoomName,
+        total: room.pricing.total,
+        breakdown: room.pricing.breakdown,
+        selectedPaints: room.pricing.selectedPaints,
+        whole: doc,
       },
     });
   } catch (err) {
-    console.error("Error updating room pricing:", err);
+    console.error("updateRoomPaintPricing error:", err);
     res.status(500).json({ message: "Server error" });
   }
 };

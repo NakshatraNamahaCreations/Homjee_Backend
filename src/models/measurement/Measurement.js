@@ -1,35 +1,3 @@
-// // models/Measurement.js
-// const mongoose = require("mongoose");
-
-// const surfaceSchema = new mongoose.Schema({
-//   area: { type: Number, required: true },
-//   repaint: { type: Boolean, default: false },
-//   fresh: { type: Boolean, default: false },
-//   label: { type: String }, // only for 'items'
-// });
-
-// const roomSchema = new mongoose.Schema({
-//   ceilings: [surfaceSchema],
-//   walls: [surfaceSchema],
-//   items: [surfaceSchema],
-// });
-
-// const measurementSchema = new mongoose.Schema(
-//   {
-//     vendorId: {
-//       type: mongoose.Schema.Types.ObjectId,
-//       ref: "Vendor",
-//       required: true,
-//     },
-//     leadId: { type: String, required: true },
-//     category: { type: String, default: "House Painting" },
-//     rooms: { type: Map, of: roomSchema },
-//   },
-//   { timestamps: true }
-// );
-
-// module.exports = mongoose.model("Measurement", measurementSchema);
-
 const { Schema, model, Types } = require("mongoose");
 
 const Opening = new Schema(
@@ -41,23 +9,21 @@ const Opening = new Schema(
   { _id: false }
 );
 
-const PricingBreakdownItem = new Schema(
+const ceilingOpening = new Schema(
   {
-    type: String, // "Ceiling", "Wall", "Package", etc.
-    sqft: Number,
-    unitPrice: Number,
-    price: Number,
+    width: Number,
+    height: Number,
+    area: Number,
   },
   { _id: false }
 );
 
-const PricingSchema = new Schema(
+const PricingBreakdownItem = new Schema(
   {
-    packageId: String,
-    packageName: String,
-    total: Number,
-    breakdown: [PricingBreakdownItem],
-    packages: [Opening],
+    type: String,
+    sqft: Number,
+    unitPrice: Number,
+    price: Number,
   },
   { _id: false }
 );
@@ -67,6 +33,8 @@ const Wall = new Schema(
     width: Number,
     height: Number,
     area: Number,
+    totalSqt: Number,
+    mode: { type: String, enum: ["REPAINT", "FRESH"], default: "REPAINT" },
     windows: [Opening],
     doors: [Opening],
     cupboards: [Opening],
@@ -79,6 +47,11 @@ const Ceiling = new Schema(
     width: Number,
     height: Number,
     area: Number,
+    totalSqt: Number,
+    mode: { type: String, enum: ["REPAINT", "FRESH"], default: "REPAINT" },
+    windows: [ceilingOpening],
+    doors: [ceilingOpening],
+    cupboards: [ceilingOpening],
   },
   { _id: false }
 );
@@ -88,6 +61,37 @@ const otherMeasurements = new Schema(
     width: Number,
     height: Number,
     area: Number,
+    totalSqt: Number,
+    mode: { type: String, enum: ["REPAINT", "FRESH"], default: "REPAINT" },
+  },
+  { _id: false }
+);
+
+const PaintSelection = new Schema(
+  {
+    id: String,
+    name: String, // e.g., "Asian Paints (Normal)" or "Asian Paints SPL"
+    isSpecial: Boolean, // true for SPL / special paints
+    price: Number, // your single unit price (₹/sq ft)
+    includePuttyOnFresh: Boolean, // flags that drive pricing
+    includePuttyOnRepaint: Boolean,
+  },
+  { _id: false }
+);
+
+const PricingSchema = new Schema(
+  {
+    packageId: String,
+    packageName: String,
+    total: Number,
+    breakdown: [PricingBreakdownItem],
+    packages: [Opening], // (legacy) leave as-is for backwards compat
+    selectedPaints: {
+      // NEW
+      ceiling: PaintSelection,
+      wall: PaintSelection,
+      measurements: PaintSelection, // used for "Others"
+    },
   },
   { _id: false }
 );

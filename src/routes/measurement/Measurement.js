@@ -8,7 +8,10 @@ router.post("/save-measurement", measurementController.saveMeasurement);
 
 // Get summary
 router.get("/:leadId/summary", measurementController.getMeasurementSummary);
-router.post("/updateRoomPricing", measurementController.updateRoomPricing);
+router.post(
+  "/update_Room_painy_pricing",
+  measurementController.updateRoomPaintPricing
+);
 
 // Get measurement by leadId
 router.get(
