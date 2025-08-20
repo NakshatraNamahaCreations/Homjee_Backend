@@ -20,10 +20,18 @@ const ceilingOpening = new Schema(
 
 const PricingBreakdownItem = new Schema(
   {
-    type: String,
+    // type: String,
+    // sqft: Number,
+    // unitPrice: Number,
+    // price: Number,
+    type: String, // 'Ceiling' | 'Wall' | 'Measurement'
+    mode: String, // 'FRESH' | 'REPAINT'
     sqft: Number,
     unitPrice: Number,
     price: Number,
+    paintId: String,
+    paintName: String,
+    displayIndex: Number,
   },
   { _id: false }
 );

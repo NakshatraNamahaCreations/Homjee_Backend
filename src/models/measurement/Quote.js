@@ -1,65 +1,78 @@
 // models/Quote.js
-const { Schema, model, Types } = require("mongoose");
+const mongoose = require("mongoose");
 
-// Reuse your PricingBreakdownItem if you want; duplicating here for clarity:
-const PricingBreakdownItem = new Schema(
-  { type: String, sqft: Number, unitPrice: Number, price: Number },
-  { _id: false }
-);
-
-const QuoteLine = new Schema(
+const LineBreakdownItem = new mongoose.Schema(
   {
-    roomName: String,
-    sectionType: { type: String, enum: ["Interior", "Exterior", "Others"] },
-    subtotal: Number, // room.pricing.total
-    ceilingsTotal: Number, // sum of breakdown 'Ceiling'
-    wallsTotal: Number, // sum of breakdown 'Wall'
-    othersTotal: Number, // any other breakdown types (usually 0)
-    selectedPaints: {
-      ceiling: Schema.Types.Mixed, // room.pricing.selectedPaints.ceiling (or null)
-      wall: Schema.Types.Mixed, // room.pricing.selectedPaints.wall
-      measurements: Schema.Types.Mixed, // room.pricing.selectedPaints.measurements
+    type: {
+      type: String,
+      enum: ["Ceiling", "Wall", "Measurement"],
+      required: true,
     },
-    breakdown: [PricingBreakdownItem], // copy of per-room lines
+    mode: { type: String, enum: ["REPAINT", "FRESH"] },
+    sqft: { type: Number, default: 0 },
+    unitPrice: { type: Number, default: 0 },
+    price: { type: Number, default: 0 },
+    paintId: { type: String }, // keep as string; cast client-side
+    paintName: { type: String },
   },
   { _id: false }
 );
 
-const QuoteSchema = new Schema(
+const QuoteLine = new mongoose.Schema(
   {
-    quoteNo: String, // e.g., Q1734412345678
-    leadId: String,
-    vendorId: String,
-    measurementId: { type: Types.ObjectId, ref: "Measurement" },
-    currency: { type: String, default: "INR" },
+    roomName: { type: String, required: true },
+    sectionType: {
+      type: String,
+      enum: ["Interior", "Exterior", "Others"],
+      required: true,
+    },
+    subtotal: { type: Number, default: 0 },
+    ceilingsTotal: { type: Number, default: 0 },
+    wallsTotal: { type: Number, default: 0 },
+    othersTotal: { type: Number, default: 0 },
+    selectedPaints: mongoose.Schema.Types.Mixed,
+    breakdown: [LineBreakdownItem],
+  },
+  { _id: false }
+);
 
-    // All rooms included in the quote
+const QuoteSchema = new mongoose.Schema(
+  {
+    quoteNo: String,
+    leadId: { type: String, required: true },
+    vendorId: String,
+    measurementId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Measurement",
+      required: true,
+    },
+    currency: { type: String, default: "INR" },
+    days: { type: Number, default: 1 },
+
+    discount: {
+      type: { type: String, enum: ["PERCENT", "FLAT"], default: "PERCENT" },
+      value: { type: Number, default: 0 },
+      amount: { type: Number, default: 0 },
+    },
+
     lines: [QuoteLine],
 
-    // Section totals + final totals
     totals: {
       interior: Number,
       exterior: Number,
       others: Number,
-      additionalServices: Number,
-      discount: Number,
-      dayCharge: Number,
-      totalBeforeDiscount: Number,
+      additionalServices: { type: Number, default: 0 },
+      subtotal: Number,
+      discountAmount: Number,
+      finalPerDay: Number,
       grandTotal: Number,
     },
 
-    // Meta coming from the UI
-    days: Number,
-    flatAmount: Number,
     comments: String,
-
-    status: {
-      type: String,
-      enum: ["draft", "sent", "accepted", "rejected"],
-      default: "draft",
-    },
+    status: { type: String, enum: ["draft", "finalized"], default: "draft" },
+    finalizedAt: Date,
   },
   { timestamps: true }
 );
 
-module.exports = model("Quote", QuoteSchema);
+module.exports = mongoose.model("Quote", QuoteSchema);
