@@ -1,18 +1,19 @@
 const express = require("express");
 const router = express.Router();
 const {
-  createProduct,
-  getProductsByType,
-  updateProduct,
-  deleteProduct,
-  getPaintNames,
+  addPaint,
+  getAllPaints,
+  updatePaint,
+  deletePaint,
+  addPackage,
+  getAllPackages,
 } = require("../../controllers/products/ProductController");
 
-router.post("/create", createProduct);
-router.get("/get-products-by-type", getProductsByType);
-router.put("/:productType/:productId", updateProduct);
-router.delete("/:productType/:productId", deleteProduct);
-
-router.get("/paints/names", getPaintNames);
+router.post("/add-paint", addPaint);
+router.get("/get-all-paints", getAllPaints);
+router.put("/update-paint/:id", updatePaint);
+router.delete("/delete-paint/:id", deletePaint);
+router.post("/add-package", addPackage);
+router.get("/get-all-Packages", getAllPackages);
 
 module.exports = router;

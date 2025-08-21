@@ -1,170 +1,145 @@
 const Product = require("../../models/products/Product");
 
-exports.createProduct = async (req, res) => {
+exports.addPaint = async (req, res) => {
   try {
     const {
-      productType,
       isSpecial,
       name,
       price,
       description,
       type,
-      interiorCeiling,
-      interiorWalls,
-      exteriorCeiling,
-      exteriorWalls,
-      others,
+      includePuttyOnFresh,
+      includePuttyOnRepaint,
     } = req.body;
 
-    // Validate required fields
-    // if (!productType || !name || !price || !description) {
-    //   return res.status(400).json({ message: "Product type, name, price, and description are required" });
-    // }
-
-    // Find or create a document for the product type
-    let productDoc = await Product.findOne({ productType });
-    if (!productDoc) {
-      productDoc = new Product({ productType, products: [] });
-    }
-
-    const newProduct = {
-      name,
+    const newPaint = {
       isSpecial,
+      name,
       price,
       description,
-      type: type || "Normal",
-      ...(productType === "Packages" && {
-        interiorCeiling: interiorCeiling || "",
-        interiorWalls: interiorWalls || "",
-        exteriorCeiling: exteriorCeiling || "",
-        exteriorWalls: exteriorWalls || "",
-        others: others || "",
-      }),
+      type,
+      includePuttyOnFresh,
+      includePuttyOnRepaint,
     };
 
-    productDoc.products.push(newProduct);
+    let productDoc = await Product.findOne();
+    if (!productDoc) {
+      productDoc = new Product();
+    }
 
+    productDoc.paint.push(newPaint);
     await productDoc.save();
 
-    res
-      .status(201)
-      .json({ message: "Product added successfully", data: productDoc });
+    res.status(201).json({
+      message: "Paint added successfully",
+      data: productDoc.paint[productDoc.paint.length - 1],
+    });
   } catch (error) {
-    console.error("Error adding product:", error);
+    console.error("Error adding paint:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
 
-exports.getProductsByType = async (req, res) => {
+exports.getAllPaints = async (req, res) => {
   try {
-    const { productType } = req.query;
-    const productDoc = await Product.findOne({ productType });
-
-    if (!productDoc) {
-      return res
-        .status(404)
-        .json({ message: `No products found for type: ${productType}` });
-    }
-
-    res.status(200).json({ success: true, data: productDoc.products });
-  } catch (error) {
-    console.error("Error fetching products:", error);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-};
-
-exports.updateProduct = async (req, res) => {
-  try {
-    const { productType, productId } = req.params;
-    const {
-      name,
-      price,
-      description,
-      type,
-      interiorCeiling,
-      interiorWalls,
-      exteriorCeiling,
-      exteriorWalls,
-      others,
-    } = req.body;
-
-    if (!name || !price || !description) {
-      return res
-        .status(400)
-        .json({ message: "Name, price, and description are required" });
-    }
-
-    const productDoc = await Product.findOne({ productType });
-    if (!productDoc) {
-      return res
-        .status(404)
-        .json({ message: `No products found for type: ${productType}` });
-    }
-
-    const product = productDoc.products.id(productId);
-    if (!product) {
-      return res.status(404).json({ message: "Product not found" });
-    }
-
-    product.name = name;
-    product.price = price;
-    product.description = description;
-    product.type = type || "Normal";
-    if (productType === "Packages") {
-      product.interiorCeiling = interiorCeiling || "";
-      product.interiorWalls = interiorWalls || "";
-      product.exteriorCeiling = exteriorCeiling || "";
-      product.exteriorWalls = exteriorWalls || "";
-      product.others = others || "";
-    }
-
-    await productDoc.save();
-
-    res
-      .status(200)
-      .json({ message: "Product updated successfully", data: productDoc });
-  } catch (error) {
-    console.error("Error updating product:", error);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-};
-
-exports.deleteProduct = async (req, res) => {
-  try {
-    const { productType, productId } = req.params;
-
-    const productDoc = await Product.findOne({ productType });
-    if (!productDoc) {
-      return res
-        .status(404)
-        .json({ message: `No products found for type: ${productType}` });
-    }
-
-    const product = productDoc.products.id(productId);
-    if (!product) {
-      return res.status(404).json({ message: "Product not found" });
-    }
-
-    productDoc.products.pull(productId);
-    await productDoc.save();
-
-    res.status(200).json({ message: "Product deleted successfully" });
-  } catch (error) {
-    console.error("Error deleting product:", error);
-    res.status(500).json({ message: "Internal Server Error" });
-  }
-};
-
-exports.getPaintNames = async (req, res) => {
-  try {
-    const productDoc = await Product.findOne({ productType: "Paints" });
-    if (!productDoc) {
+    const productDoc = await Product.findOne();
+    if (!productDoc || productDoc.paint.length === 0) {
       return res.status(404).json({ message: "No paints found" });
     }
-    const paintNames = productDoc.products.map((product) => product.name);
-    res.status(200).json({ success: true, data: paintNames });
+
+    res.json({ paints: productDoc.paint });
   } catch (error) {
-    console.error("Error fetching paint names:", error);
+    console.error("Error fetching paints:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.updatePaint = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = req.body;
+
+    const productDoc = await Product.findOne();
+    if (!productDoc) {
+      return res.status(404).json({ message: "Product document not found" });
+    }
+
+    const paint = productDoc.paint.id(id);
+    if (!paint) {
+      return res.status(404).json({ message: "Paint not found" });
+    }
+
+    Object.assign(paint, updates); // merge updates
+    await productDoc.save();
+
+    res.json({ message: "Paint updated successfully", data: paint });
+  } catch (error) {
+    console.error("Error updating paint:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+exports.deletePaint = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const productDoc = await Product.findOne();
+    if (!productDoc) {
+      return res.status(404).json({ message: "Product document not found" });
+    }
+
+    const paint = productDoc.paint.id(id);
+    if (!paint) {
+      return res.status(404).json({ message: "Paint not found" });
+    }
+
+    paint.remove();
+    await productDoc.save();
+
+    res.json({ message: "Paint deleted successfully" });
+  } catch (error) {
+    console.error("Error deleting paint:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.addPackage = async (req, res) => {
+  try {
+    const { packageName, packagePrice, details } = req.body;
+
+    const newPackage = {
+      packageName,
+      packagePrice,
+      details, // should be array of { packageName, price, sqft }
+    };
+
+    let productDoc = await Product.findOne();
+    if (!productDoc) {
+      productDoc = new Product();
+    }
+
+    productDoc.package.push(newPackage);
+    await productDoc.save();
+
+    res.status(201).json({
+      message: "Package added successfully",
+      data: productDoc.package[productDoc.package.length - 1],
+    });
+  } catch (error) {
+    console.error("Error adding package:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.getAllPackages = async (req, res) => {
+  try {
+    const packagesDoc = await Product.findOne();
+    if (!packagesDoc || packagesDoc.package.length === 0) {
+      return res.status(404).json({ message: "No package found" });
+    }
+
+    res.json({ package: packagesDoc.package });
+  } catch (error) {
+    console.error("Error fetching package:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };
