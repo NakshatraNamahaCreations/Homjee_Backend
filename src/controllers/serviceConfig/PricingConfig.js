@@ -2,15 +2,16 @@ const PricingConfig = require("../../models/serviceConfig/PricingConfig");
 
 exports.createPricingConfig = async (req, res) => {
   try {
-    const { siteVisitCharge, vendorCoins } = req.body;
+    const { siteVisitCharge, vendorCoins, puttyPrice } = req.body;
 
-    if (!siteVisitCharge || !vendorCoins) {
+    if (!siteVisitCharge || !vendorCoins || !puttyPrice) {
       return res.status(400).json({ message: "All fields are required" });
     }
 
     const pricing = new PricingConfig({
       siteVisitCharge,
       vendorCoins,
+      puttyPrice,
     });
 
     await pricing.save();
