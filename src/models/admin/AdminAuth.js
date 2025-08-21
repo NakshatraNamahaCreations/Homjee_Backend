@@ -13,12 +13,10 @@ const AdminAuthSchema = new mongoose.Schema(
     name: { type: String, trim: true }, // optional
 
     // OTP state (latest OTP for this admin)
-    otp: { type: String, default: null },            // 6-digit string
-    otpExpiresAt: { type: Date, default: null },     // expiry timestamp
+    otp: { type: String, default: null }, // 6-digit string
+    otpExpiresAt: { type: Date, default: null }, // expiry timestamp
   },
   { timestamps: true }
 );
-
-
 
 module.exports = mongoose.model("AdminAuth", AdminAuthSchema);
