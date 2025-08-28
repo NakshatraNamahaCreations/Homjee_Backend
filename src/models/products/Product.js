@@ -49,7 +49,6 @@
 
 // module.exports = mongoose.model("Product", ProductSchema);
 
-
 const mongoose = require("mongoose");
 
 const paintSchema = new mongoose.Schema({
@@ -102,13 +101,34 @@ const packageSchema = new mongoose.Schema({
   productType: { type: String, default: "Packages" },
 });
 
+const finishingType = new mongoose.Schema({
+  paintName: String,
+  paintPrice: Number,
+  paintType: {
+    type: String,
+    default: "Normal",
+  },
+  description: String,
+  productType: {
+    type: String,
+    enum: [
+      "Texture",
+      "Chemical Waterproofing",
+      "Terrace Waterproofing",
+      "Tile Grouting",
+      "POP",
+      "Wood Polish",
+    ],
+  },
+});
+
 const ProductSchema = new mongoose.Schema(
   {
     paint: [paintSchema],
     package: [packageSchema],
+    additionalPaints: [finishingType],
   },
   { timestamps: true }
 );
 
 module.exports = mongoose.model("Product", ProductSchema);
-

@@ -335,6 +335,123 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
   }
 };
 
+exports.upsertQuoteRoomAdditionalServices = async (req, res) => {
+  try {
+    const { quoteId, roomName } = req.params;
+    if (!Types.ObjectId.isValid(quoteId)) {
+      return res.status(400).json({ message: "Invalid quote id" });
+    }
+
+    const q = await Quote.findById(quoteId);
+    if (!q) return res.status(404).json({ message: "Quote not found" });
+
+    let { items } = req.body;
+    // items: Array<{
+    //   serviceType, materialId?, materialName?, withPaint?, areaSqft?,
+    //   unitPrice?, total?, customName?, customNote?
+    // }>
+
+    if (typeof items === "string") {
+      try {
+        items = JSON.parse(items);
+      } catch {
+        return res.status(400).json({ message: "items must be an array" });
+      }
+    }
+    if (!Array.isArray(items)) items = [];
+
+    // Normalize & coerce numbers
+    const cleaned = items.map((x) => ({
+      serviceType: String(x.serviceType || ""),
+      materialId: x.materialId != null ? String(x.materialId) : undefined,
+      materialName: String(x.materialName || ""),
+      surfaceType: String(x.surfaceType || ""),
+      withPaint: Boolean(x.withPaint),
+      areaSqft: Number(x.areaSqft || 0),
+      unitPrice: Number(x.unitPrice || 0),
+      total:
+        x.serviceType === "Textures"
+          ? Number(x.unitPrice || 0)
+          : Number(x.total || 0),
+      customName: String(x.customName || ""),
+      customNote: String(x.customNote || ""),
+    }));
+
+    // Locate the room line
+    const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+    const idx = (q.lines || []).findIndex(
+      (l) => norm(l.roomName) === norm(roomName)
+    );
+    if (idx < 0)
+      return res.status(404).json({ message: "Room not found on quote" });
+
+    // Persist in the line
+    const additionalTotal = cleaned.reduce(
+      (s, it) => s + Number(it.total || 0),
+      0
+    );
+    q.set(`lines.${idx}.additionalServices`, cleaned);
+    q.set(`lines.${idx}.additionalTotal`, Number(additionalTotal.toFixed(2)));
+
+    // --- recompute quote totals (reuses your logic) ---
+    const interior = q.lines
+      .filter((l) => l.sectionType === "Interior")
+      .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+    const exterior = q.lines
+      .filter((l) => l.sectionType === "Exterior")
+      .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+    const others = q.lines
+      .filter((l) => l.sectionType === "Others")
+      .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+
+    // NEW: sum all rooms' additionalTotal
+    const add = q.lines.reduce((s, l) => s + Number(l.additionalTotal || 0), 0);
+
+    const subtotalAll = Number((interior + exterior + others + add).toFixed(2));
+
+    let discountAmount = 0;
+    if (q.discount?.type === "PERCENT") {
+      discountAmount = Number(
+        (subtotalAll * (Number(q.discount.value || 0) / 100)).toFixed(2)
+      );
+    } else if (q.discount?.type === "FLAT") {
+      discountAmount = Number(q.discount?.amount || 0);
+      if (discountAmount > subtotalAll) discountAmount = subtotalAll;
+      discountAmount = Number(discountAmount.toFixed(2));
+    }
+
+    const finalPerDay = Number(
+      Math.max(0, subtotalAll - discountAmount).toFixed(2)
+    );
+    // days kept as-is; your grandTotal equals finalPerDay already
+    q.totals = {
+      interior,
+      exterior,
+      others,
+      additionalServices: add,
+      subtotal: subtotalAll,
+      discountAmount,
+      finalPerDay,
+      grandTotal: finalPerDay,
+    };
+
+    await q.save();
+
+    return res.json({
+      message: "OK",
+      data: {
+        roomName,
+        additionalServices: cleaned,
+        additionalTotal: q.lines[idx].additionalTotal,
+        totals: q.totals,
+      },
+    });
+  } catch (err) {
+    console.error("upsertQuoteRoomAdditionalServices error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.updateQuoteMeta = async (req, res) => {
   try {
     const { quoteId } = req.params;

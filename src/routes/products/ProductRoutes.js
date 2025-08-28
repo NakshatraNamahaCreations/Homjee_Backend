@@ -18,9 +18,7 @@
 // router.get("/get-all-Packages", getAllPackages);
 // router.get("/get-all-products", getAllProducts);
 
-
 // module.exports = router;
-
 
 const express = require("express");
 const router = express.Router();
@@ -34,6 +32,9 @@ const {
   updatePackage,
   deletePackage,
   getProductsByType,
+  addFinishingPaints,
+  listFinishingPaintsByProductType,
+  getAllFunishingPaints,
 } = require("../../controllers/products/ProductController");
 
 router.post("/add-paint", addPaint);
@@ -45,5 +46,8 @@ router.get("/get-all-packages", getAllPackages);
 router.put("/update-package/:id", updatePackage);
 router.delete("/delete-package/:id", deletePackage);
 router.get("/get-products-by-type", getProductsByType);
+router.post("/add-finishing-paints", addFinishingPaints);
+router.get("/list-finishing-paints", listFinishingPaintsByProductType);
+router.get("/get-all-finishing-paints", getAllFunishingPaints);
 
 module.exports = router;

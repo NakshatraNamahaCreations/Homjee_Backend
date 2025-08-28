@@ -158,9 +158,6 @@
 //   }
 // };
 
-
-
-
 const Product = require("../../models/products/Product");
 
 exports.addPaint = async (req, res) => {
@@ -186,7 +183,8 @@ exports.addPaint = async (req, res) => {
       price: Number(price),
       description: description || "",
       type,
-      includePuttyOnFresh: includePuttyOnFresh ?? (type === "Normal" && productType === "Paints"),
+      includePuttyOnFresh:
+        includePuttyOnFresh ?? (type === "Normal" && productType === "Paints"),
       includePuttyOnRepaint: includePuttyOnRepaint ?? false,
       productType,
     };
@@ -216,7 +214,9 @@ exports.getAllPaints = async (req, res) => {
       return res.status(404).json({ message: "No paints found" });
     }
 
-    const paints = productDoc.paint.filter(p => p.productType === "Paints" || !p.productType);
+    const paints = productDoc.paint.filter(
+      (p) => p.productType === "Paints" || !p.productType
+    );
     res.json({ paints });
   } catch (error) {
     console.error("Error fetching paints:", error);
@@ -253,7 +253,8 @@ exports.updatePaint = async (req, res) => {
     paint.price = price ? Number(price) : paint.price;
     paint.description = description || paint.description;
     paint.type = type || paint.type;
-    paint.includePuttyOnFresh = includePuttyOnFresh ?? (type === "Normal" && productType === "Paints");
+    paint.includePuttyOnFresh =
+      includePuttyOnFresh ?? (type === "Normal" && productType === "Paints");
     paint.includePuttyOnRepaint = includePuttyOnRepaint ?? false;
     paint.productType = productType || paint.productType;
 
@@ -299,7 +300,10 @@ exports.addPackage = async (req, res) => {
     }
 
     // Calculate packagePrice as the sum of paintPrice from details
-    const packagePrice = details.reduce((sum, detail) => sum + (Number(detail.paintPrice) || 0), 0);
+    const packagePrice = details.reduce(
+      (sum, detail) => sum + (Number(detail.paintPrice) || 0),
+      0
+    );
 
     const newPackage = {
       packageName,
@@ -360,7 +364,10 @@ exports.updatePackage = async (req, res) => {
     }
 
     // Calculate packagePrice as the sum of paintPrice from details
-    const packagePrice = details.reduce((sum, detail) => sum + (Number(detail.paintPrice) || 0), 0);
+    const packagePrice = details.reduce(
+      (sum, detail) => sum + (Number(detail.paintPrice) || 0),
+      0
+    );
 
     pkg.packageName = packageName;
     pkg.packagePrice = packagePrice;
@@ -414,13 +421,102 @@ exports.getProductsByType = async (req, res) => {
       data = productDoc.package;
     } else {
       data = productDoc.paint.filter(
-        (p) => p.productType === productType || (productType === "Paints" && !p.productType)
+        (p) =>
+          p.productType === productType ||
+          (productType === "Paints" && !p.productType)
       );
     }
 
     res.json({ data });
   } catch (error) {
     console.error("Error fetching products by type:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.addFinishingPaints = async (req, res) => {
+  try {
+    const { paintName, paintPrice, description, productType, paintType } =
+      req.body;
+
+    if (!paintName || !paintPrice || !description || !productType) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+
+    // Optionally validate productType against allowed enum (defensive)
+    const allowedTypes = [
+      "Texture",
+      "Chemical Waterproofing",
+      "Terrace Waterproofing",
+      "Tile Grouting",
+      "POP",
+      "Wood Polish",
+    ];
+    if (!allowedTypes.includes(productType)) {
+      return res.status(400).json({ message: "Invalid productType" });
+    }
+
+    const newPaint = {
+      paintName,
+      paintPrice: Number(paintPrice),
+      description: description || "",
+      productType,
+      paintType: paintType || "Normal",
+    };
+
+    let productDoc = await Product.findOne();
+    if (!productDoc) {
+      productDoc = new Product({ additionalPaints: [] });
+    }
+
+    productDoc.additionalPaints.push(newPaint);
+    await productDoc.save();
+
+    res.status(201).json({
+      message: `${productType} added successfully`,
+      data: productDoc.additionalPaints[productDoc.additionalPaints.length - 1],
+    });
+  } catch (error) {
+    console.error(`Error adding ${req.body.productType}:`, error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.listFinishingPaintsByProductType = async (req, res) => {
+  try {
+    const { productType } = req.query;
+
+    const productDoc = await Product.findOne();
+    if (!productDoc) {
+      return res.status(404).json({ message: "No products found" });
+    }
+
+    const data = productDoc.additionalPaints.filter(
+      (p) =>
+        p.productType === productType ||
+        (productType === "Paints" && !p.productType)
+    );
+
+    res.json({ data });
+  } catch (error) {
+    console.error("Error fetching products by type:", error);
+    res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.getAllFunishingPaints = async (req, res) => {
+  try {
+    const productDoc = await Product.findOne();
+    if (
+      !productDoc ||
+      !productDoc.additionalPaints ||
+      productDoc.additionalPaints.length === 0
+    ) {
+      return res.status(404).json({ message: "No paints found" });
+    }
+    res.json({ data: productDoc.additionalPaints });
+  } catch (error) {
+    console.error("Error fetching paints:", error);
     res.status(500).json({ message: "Internal Server Error" });
   }
 };

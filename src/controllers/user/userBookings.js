@@ -6,6 +6,13 @@ function generateOTP() {
   return crypto.randomInt(1000, 10000);
   // return Math.floor(1000 + Math.random() * 10000).toString();
 }
+const ymdLocal = (d) => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${dd}`;
+};
+
 exports.createBooking = async (req, res) => {
   try {
     const {
@@ -336,19 +343,11 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
     }
 
     const now = new Date();
-    const todayStart = now.toISOString().slice(0, 10);
-    // const todayStart = new Date(
-    //   now.getFullYear(),
-    //   now.getMonth(),
-    //   now.getDate()
-    // );
-    const dayAfterTomorrow = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() + 2
+    const todayStr = ymdLocal(now);
+    const tomorrowStr = ymdLocal(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
     );
-    const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().slice(0, 10);
-    // Fetch bookings for today and tomorrow
+
     const nearbyBookings = await UserBooking.find({
       "address.location": {
         $near: {
@@ -356,41 +355,34 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
             type: "Point",
             coordinates: [parseFloat(long), parseFloat(lat)],
           },
-          $maxDistance: 5000, // 5 km
+          $maxDistance: 5000, // meters
         },
       },
       isEnquiry: false,
-      "service.category": "House Painting",
+      "service.category": "House Painting", // matches any array element's category
       "bookingDetails.status": "Pending",
-      "selectedSlot.slotDate": {
-        $gte: todayStart,
-        $lt: dayAfterTomorrowStr,
-      },
+      "selectedSlot.slotDate": { $gte: todayStr, $lte: tomorrowStr }, // today & tomorrow inclusive
     }).sort({ createdAt: -1 });
 
+    // Keep future times for today, keep all for tomorrow
     const nowMoment = moment();
-
     const filteredBookings = nearbyBookings.filter((booking) => {
-      const slotDateObj = booking.selectedSlot?.slotDate;
-      const slotTimeStr = booking.selectedSlot?.slotTime;
-      if (!slotDateObj || !slotTimeStr) return false;
+      const slotDateStr = booking.selectedSlot?.slotDate; // "YYYY-MM-DD"
+      const slotTimeStr = booking.selectedSlot?.slotTime; // "hh:mm AM/PM"
+      if (!slotDateStr || !slotTimeStr) return false;
 
-      const slotDateMoment = moment(slotDateObj);
-      const slotDateStr = slotDateMoment.format("YYYY-MM-DD");
+      const slotDateMoment = moment(slotDateStr, "YYYY-MM-DD");
       const slotDateTime = moment(
         `${slotDateStr} ${slotTimeStr}`,
         "YYYY-MM-DD hh:mm A"
       );
 
-      // Today: keep only future-times
       if (slotDateMoment.isSame(nowMoment, "day")) {
-        return slotDateTime.isAfter(nowMoment);
+        return slotDateTime.isAfter(nowMoment); // only future times today
       }
-      // Tomorrow: keep all
       if (slotDateMoment.isSame(nowMoment.clone().add(1, "day"), "day")) {
-        return true;
+        return true; // keep all tomorrow
       }
-      // Should not reach here due to date range, but just in case
       return false;
     });
 
@@ -443,82 +435,63 @@ exports.getBookingExceptPending = async (req, res) => {
       return res.status(400).json({ message: "Professional ID is required" });
     }
 
-    const now = new Date();
-    // const todayStart = new Date(
-    //   now.getFullYear(),
-    //   now.getMonth(),
-    //   now.getDate()
-    // );
-    const todayStart = now.toISOString().slice(0, 10);
-    const todayEnd = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate() + 2
-    );
-
-    const bookings = await UserBooking.find({
+    const q = {
       "assignedProfessional.professionalId": professionalId,
       "bookingDetails.status": { $ne: "Pending" },
-      "selectedSlot.slotDate": {
-        $gte: todayStart,
-        $lt: todayEnd,
-      },
-    }).lean();
+    };
 
-    const filtered = bookings.filter((booking) => {
-      const { slotDate, slotTime } = booking.selectedSlot || {};
-      if (!slotDate || !slotTime) return false;
+    // Descending by date (reverse: 29, 28, 27...), then most recent created
+    const leadsList = await UserBooking.find(q)
+      .sort({ "selectedSlot.slotDate": -1, createdAt: -1 })
+      .lean();
 
-      // slotDate is Date, slotTime is string like '02:00 PM'
-      const dateStr = moment(slotDate).format("YYYY-MM-DD");
-      const slotDateTime = moment(
-        `${dateStr} ${slotTime}`,
-        "YYYY-MM-DD hh:mm A"
-      );
-
-      return slotDateTime.isSameOrAfter(moment());
-    });
-
-    return res.status(200).json({ leadsList: filtered });
+    return res.status(200).json({ leadsList });
   } catch (error) {
     console.error("Error finding confirmed bookings:", error);
     return res.status(500).json({ message: "Server error" });
   }
 };
 
+// old with unsorted slot date leads
 // exports.getBookingExceptPending = async (req, res) => {
 //   try {
 //     const { professionalId } = req.params;
-
 //     if (!professionalId) {
 //       return res.status(400).json({ message: "Professional ID is required" });
 //     }
-//     const now = new Date();
-//     const todayStart = new Date(
-//       now.getFullYear(),
-//       now.getMonth(),
-//       now.getDate()
-//     );
-//     const todayEnd = new Date(
-//       now.getFullYear(),
-//       now.getMonth(),
-//       now.getDate() + 1
-//     );
 
-//     const confirmedBookings = await UserBooking.find({
+//     // const now = new Date();
+//     // const todayStart = now.toISOString().slice(0, 10);
+//     // const todayEnd = new Date(
+//     //   now.getFullYear(),
+//     //   now.getMonth(),
+//     //   now.getDate() + 2
+//     // );
+
+//     const bookings = await UserBooking.find({
 //       "assignedProfessional.professionalId": professionalId,
 //       "bookingDetails.status": { $ne: "Pending" },
-//       "selectedSlot.slotDate": {
-//         $gte: todayStart,
-//         $lt: todayEnd,
-//       },
-//       // If you want to exclude multiple statuses (for example, "Pending" and "Cancelled"), use $nin (Not In)
-//       //  "bookingDetails.status": { $nin: ["Pending", "Cancelled"] },
-//     })
-//       // .sort({ createdAt: -1 })
-//       .lean();
+//       // "selectedSlot.slotDate": {
+//       //   $gte: todayStart,
+//       //   $lt: todayEnd,
+//       // },
+//     }).sort().lean();
 
-//     return res.status(200).json({ leadsList: confirmedBookings });
+//     // const filtered = bookings.filter((booking) => {
+//     //   const { slotDate, slotTime } = booking.selectedSlot || {};
+//     //   if (!slotDate || !slotTime) return false;
+
+//     //   // slotDate is Date, slotTime is string like '02:00 PM'
+//     //   const dateStr = moment(slotDate).format("YYYY-MM-DD");
+//     //   const slotDateTime = moment(
+//     //     `${dateStr} ${slotTime}`,
+//     //     "YYYY-MM-DD hh:mm A"
+//     //   );
+
+//     //   return slotDateTime.isSameOrAfter(moment());
+//     // });
+
+//     return res.status(200).json({ leadsList: bookings });
 //   } catch (error) {
 //     console.error("Error finding confirmed bookings:", error);
 //     return res.status(500).json({ message: "Server error" });

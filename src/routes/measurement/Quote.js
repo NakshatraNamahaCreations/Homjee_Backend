@@ -11,9 +11,14 @@ router.get(
 router.post("/create-duplicate/:id/duplicate", quoteController.cloneQuoteFrom);
 router.patch("/quote/:id/finalize", quoteController.finalizeQuote);
 router.post(
-  "/quotes/:quoteId/rooms/:roomName/pricing",
+  "/quotes-room-price/:quoteId/rooms/:roomName/pricing",
   quoteController.upsertQuoteRoomPricing
 );
+router.post(
+  "/add-finishing-paints/:quoteId/rooms/:roomName/additional-services",
+  quoteController.upsertQuoteRoomAdditionalServices
+);
+
 router.patch("/update-quote/:quoteId", quoteController.updateQuoteMeta);
 
 module.exports = router;

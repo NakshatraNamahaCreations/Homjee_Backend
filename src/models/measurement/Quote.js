@@ -18,6 +18,30 @@ const LineBreakdownItem = new mongoose.Schema(
   { _id: false }
 );
 
+const AdditionalServiceItem = new mongoose.Schema(
+  {
+    // e.g. "Textures", "Chemical Waterproofing", "Terrace Waterproofing", "Tile Grouting", "POP", "Wood Polish", "Others"
+    serviceType: { type: String, required: true },
+
+    // If selected from your finishing paints table
+    materialId: { type: String }, // keep as string, matches your FE
+    materialName: { type: String },
+    surfaceType: { type: String },
+    // UX options
+    withPaint: { type: Boolean, default: false },
+
+    // Measurement & pricing
+    areaSqft: { type: Number, default: 0 }, // for "Others", can be 0 if it's a flat item
+    unitPrice: { type: Number, default: 0 }, // ₹/sqft (or flat if areaSqft==0)
+    total: { type: Number, default: 0 }, // computed = areaSqft * unitPrice (or flat)
+
+    // For free-form "Others"
+    customName: { type: String, default: "" }, // user-entered name
+    customNote: { type: String, default: "" }, // optional memo
+  },
+  { _id: false }
+);
+
 const QuoteLine = new mongoose.Schema(
   {
     roomName: { type: String, required: true },
@@ -32,6 +56,8 @@ const QuoteLine = new mongoose.Schema(
     othersTotal: { type: Number, default: 0 },
     selectedPaints: mongoose.Schema.Types.Mixed,
     breakdown: [LineBreakdownItem],
+    additionalServices: { type: [AdditionalServiceItem], default: [] },
+    additionalTotal: { type: Number, default: 0 },
   },
   { _id: false }
 );
