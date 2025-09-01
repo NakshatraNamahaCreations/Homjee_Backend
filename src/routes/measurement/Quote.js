@@ -16,7 +16,15 @@ router.post(
 );
 router.post(
   "/add-finishing-paints/:quoteId/rooms/:roomName/additional-services",
-  quoteController.upsertQuoteRoomAdditionalServices
+  quoteController.upsertQuoteAdditionalServices
+);
+router.delete(
+  "/delete-quote/:quoteId/empty-draft",
+  quoteController.deleteIfEmptyDraft
+);
+router.delete(
+  "/delete-finishing-paints/:quoteId/rooms/:roomName/additional-services",
+  quoteController.removeAdditionalService
 );
 
 router.patch("/update-quote/:quoteId", quoteController.updateQuoteMeta);

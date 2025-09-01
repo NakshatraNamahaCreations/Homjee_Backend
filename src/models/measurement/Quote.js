@@ -1,6 +1,7 @@
 // models/Quote.js
 const mongoose = require("mongoose");
 
+// models/Quote.js
 const LineBreakdownItem = new mongoose.Schema(
   {
     type: {
@@ -8,12 +9,16 @@ const LineBreakdownItem = new mongoose.Schema(
       enum: ["Ceiling", "Wall", "Measurement"],
       required: true,
     },
-    mode: { type: String, enum: ["REPAINT", "FRESH"] },
+    mode: { type: String, enum: ["REPAINT", "FRESH"] }, // optional for paint lines
     sqft: { type: Number, default: 0 },
     unitPrice: { type: Number, default: 0 },
     price: { type: Number, default: 0 },
-    paintId: { type: String }, // keep as string; cast client-side
+    paintId: { type: String },
     paintName: { type: String },
+
+    // NEW (non-breaking): lets us inject additional-services into breakdown safely
+    source: { type: String, enum: ["BASE", "ADDN"], default: "BASE" }, // BASE = normal paint; ADDN = additional-service “shadow” row
+    serviceType: { type: String }, // e.g., "POP", "Tile Grouting" (for display/debug)
   },
   { _id: false }
 );

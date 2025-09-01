@@ -207,134 +207,6 @@ exports.createQuote = async (req, res) => {
   }
 };
 
-// exports.upsertQuoteRoomPricing = async (req, res) => {
-//   try {
-//     const { quoteId, roomName } = req.params;
-//     if (!Types.ObjectId.isValid(quoteId)) {
-//       return res.status(400).json({ message: "Invalid quote id" });
-//     }
-
-//     const q = await Quote.findById(quoteId);
-//     if (!q) return res.status(404).json({ message: "Quote not found" });
-
-//     let {
-//       sectionType,
-//       selectedPaints,
-//       breakdown,
-//       ceilingsTotal,
-//       wallsTotal,
-//       othersTotal,
-//       subtotal,
-//     } = req.body;
-
-//     if (typeof breakdown === "string") {
-//       try {
-//         breakdown = JSON.parse(breakdown);
-//       } catch {
-//         return res
-//           .status(400)
-//           .json({ message: "breakdown must be array/JSON array" });
-//       }
-//     }
-//     if (!Array.isArray(breakdown)) breakdown = [];
-
-//     // Coerce breakdown numbers & normalise names/ids
-//     breakdown = breakdown.map((b) => ({
-//       type: b.type,
-//       mode: b.mode,
-//       sqft: Number(b.sqft || 0),
-//       unitPrice: Number(b.unitPrice || 0),
-//       price: Number(b.price || 0),
-//       paintId: b.paintId != null ? String(b.paintId) : null,
-//       paintName: b.paintName ?? "",
-//       displayIndex:
-//         typeof b.displayIndex === "number" ? b.displayIndex : undefined,
-//     }));
-
-//     // Coerce totals
-//     ceilingsTotal = Number(ceilingsTotal || 0);
-//     wallsTotal = Number(wallsTotal || 0);
-//     othersTotal = Number(othersTotal || 0);
-//     subtotal = Number(subtotal || 0);
-
-//     const line = {
-//       roomName,
-//       sectionType,
-//       selectedPaints: {
-//         ceiling: selectedPaints?.ceiling || null,
-//         wall: selectedPaints?.wall || null,
-//         measurements: selectedPaints?.measurements || null,
-//       },
-//       breakdown,
-//       ceilingsTotal,
-//       wallsTotal,
-//       othersTotal,
-//       subtotal,
-//     };
-
-//     const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
-//     const idx = (q.lines || []).findIndex(
-//       (l) => norm(l.roomName) === norm(roomName)
-//     );
-
-//     if (idx >= 0) {
-//       q.set(`lines.${idx}`, line); // ensure change tracking
-//     } else {
-//       q.lines.push(line);
-//     }
-//     q.markModified("lines"); // belt-and-suspenders
-
-//     // --- recompute quote totals ---
-//     const interior = q.lines
-//       .filter((l) => l.sectionType === "Interior")
-//       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-//     const exterior = q.lines
-//       .filter((l) => l.sectionType === "Exterior")
-//       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-//     const others = q.lines
-//       .filter((l) => l.sectionType === "Others")
-//       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-//     const add = Number(q.totals?.additionalServices || 0);
-
-//     const subtotalAll = Number((interior + exterior + others + add).toFixed(2));
-
-//     let discountAmount = 0;
-//     if (q.discount?.type === "PERCENT") {
-//       discountAmount = Number(
-//         (subtotalAll * (Number(q.discount.value || 0) / 100)).toFixed(2)
-//       );
-//     } else if (q.discount?.type === "FLAT") {
-//       discountAmount = Number(q.discount.amount || 0); // ← use amount for FLAT
-//       if (discountAmount > subtotalAll) discountAmount = subtotalAll;
-//       discountAmount = Number(discountAmount.toFixed(2));
-//     }
-
-//     const finalPerDay = Number(
-//       Math.max(0, subtotalAll - discountAmount).toFixed(2)
-//     );
-//     const days = Math.max(1, Number(q.days || 1));
-//     // const grandTotal = Number((finalPerDay * days).toFixed(2));
-//     const grandTotal = finalPerDay;
-
-//     q.totals = {
-//       interior,
-//       exterior,
-//       others,
-//       additionalServices: add,
-//       subtotal: subtotalAll,
-//       discountAmount,
-//       finalPerDay,
-//       grandTotal,
-//     };
-
-//     await q.save();
-//     return res.json({ message: "OK", data: { line } });
-//   } catch (err) {
-//     console.error("upsertQuoteRoomPricing error:", err);
-//     return res.status(500).json({ message: "Server error" });
-//   }
-// };
-
 exports.upsertQuoteRoomPricing = async (req, res) => {
   try {
     const { quoteId, roomName } = req.params;
@@ -344,12 +216,6 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
 
     const q = await Quote.findById(quoteId);
     if (!q) return res.status(404).json({ message: "Quote not found" });
-
-    const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
-    const idx = (q.lines || []).findIndex(
-      (l) => norm(l.roomName) === norm(roomName)
-    );
-    const prevLine = idx >= 0 ? q.lines[idx] : null;
 
     let {
       sectionType,
@@ -361,7 +227,6 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
       subtotal,
     } = req.body;
 
-    // --- parse breakdown from body ---
     if (typeof breakdown === "string") {
       try {
         breakdown = JSON.parse(breakdown);
@@ -373,6 +238,7 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
     }
     if (!Array.isArray(breakdown)) breakdown = [];
 
+    // Coerce breakdown numbers & normalise names/ids
     breakdown = breakdown.map((b) => ({
       type: b.type,
       mode: b.mode,
@@ -385,97 +251,12 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
         typeof b.displayIndex === "number" ? b.displayIndex : undefined,
     }));
 
-    // coerce totals
+    // Coerce totals
     ceilingsTotal = Number(ceilingsTotal || 0);
     wallsTotal = Number(wallsTotal || 0);
     othersTotal = Number(othersTotal || 0);
     subtotal = Number(subtotal || 0);
 
-    // ---------- PRESERVE ADDITIONAL SERVICES ----------
-    const preservedAdditional = Array.isArray(prevLine?.additionalServices)
-      ? prevLine.additionalServices.map((s) => ({
-          serviceType: String(s.serviceType || ""),
-          materialId: s.materialId != null ? String(s.materialId) : undefined,
-          materialName: String(s.materialName || s.customName || ""),
-          surfaceType: String(s.surfaceType || ""),
-          withPaint: !!s.withPaint,
-          areaSqft: Number(s.areaSqft || 0),
-          unitPrice: Number(s.unitPrice || 0),
-          total: Number(
-            s.total || Number(s.areaSqft || 0) * Number(s.unitPrice || 0)
-          ).toFixed
-            ? Number(
-                Number(
-                  s.total || Number(s.areaSqft || 0) * Number(s.unitPrice || 0)
-                ).toFixed(2)
-              )
-            : Number(
-                (Number(s.areaSqft || 0) * Number(s.unitPrice || 0)).toFixed(2)
-              ),
-          customName: String(s.customName || ""),
-          customNote: String(s.customNote || ""),
-        }))
-      : [];
-
-    // recompute additionalTotal from preserved list
-    const preservedAdditionalTotal = preservedAdditional.reduce(
-      (sum, x) => sum + Number(x.total || 0),
-      0
-    );
-
-    // ---------- ENFORCE ZEROING (if any saved service is "without paint") ----------
-    // Build a set of surfaces that must be zeroed based on preserved additional services
-    const parseSurface = (label) => {
-      const raw = String(label || "")
-        .trim()
-        .toLowerCase();
-      let type = "Measurement";
-      if (raw.startsWith("ceil")) type = "Ceiling";
-      else if (raw.startsWith("wall")) type = "Wall";
-      const n = raw.match(/(\d+)/);
-      const ordinal = n ? Math.max(1, parseInt(n[1], 10)) : 1;
-      return { type, ordinal };
-    };
-
-    const zeroKeys = new Set(
-      preservedAdditional
-        .filter((s) => !s.withPaint)
-        .map((s) => {
-          const { type, ordinal } = parseSurface(s.surfaceType);
-          return `${type}:${ordinal}`;
-        })
-    );
-
-    if (zeroKeys.size > 0 && breakdown.length > 0) {
-      // zero matching breakdown rows (by type + displayIndex if present, else ordinal order)
-      const counters = { Ceiling: 0, Wall: 0, Measurement: 0 };
-      for (let i = 0; i < breakdown.length; i++) {
-        const b = breakdown[i];
-        if (!b?.type) continue;
-        let ord = b.displayIndex;
-        if (typeof ord !== "number") {
-          counters[b.type] = (counters[b.type] || 0) + 1;
-          ord = counters[b.type];
-        }
-        const key = `${b.type}:${ord}`;
-        if (zeroKeys.has(key)) {
-          breakdown[i].sqft = 0;
-          breakdown[i].price = 0;
-        }
-      }
-
-      // recompute paint subtotals after zeroing
-      const sumBreakdown = (arr, typ) =>
-        arr
-          .filter((x) => x.type === typ)
-          .reduce((s, x) => s + Number(x.price || 0), 0);
-      ceilingsTotal = Number(sumBreakdown(breakdown, "Ceiling").toFixed(2));
-      wallsTotal = Number(sumBreakdown(breakdown, "Wall").toFixed(2));
-      othersTotal = Number(sumBreakdown(breakdown, "Measurement").toFixed(2));
-      subtotal = Number((ceilingsTotal + wallsTotal + othersTotal).toFixed(2));
-    }
-
-    // ---------- BUILD/MERGE LINE ----------
     const line = {
       roomName,
       sectionType,
@@ -489,20 +270,21 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
       wallsTotal,
       othersTotal,
       subtotal,
-
-      // preserve these
-      additionalServices: preservedAdditional,
-      additionalTotal: preservedAdditionalTotal,
     };
 
+    const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+    const idx = (q.lines || []).findIndex(
+      (l) => norm(l.roomName) === norm(roomName)
+    );
+
     if (idx >= 0) {
-      q.set(`lines.${idx}`, line);
+      q.set(`lines.${idx}`, line); // ensure change tracking
     } else {
       q.lines.push(line);
     }
-    q.markModified("lines");
+    q.markModified("lines"); // belt-and-suspenders
 
-    // ---------- RECOMPUTE QUOTE TOTALS ----------
+    // --- recompute quote totals ---
     const interior = q.lines
       .filter((l) => l.sectionType === "Interior")
       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
@@ -512,20 +294,9 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
     const others = q.lines
       .filter((l) => l.sectionType === "Others")
       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+    const add = Number(q.totals?.additionalServices || 0);
 
-    // sum additional across all rooms (robust even if some rooms missed additionalTotal)
-    const addAll = q.lines.reduce((s, l) => {
-      const fromTotal = Number(l.additionalTotal || 0);
-      if (fromTotal > 0) return s + fromTotal;
-      const fromList = Array.isArray(l.additionalServices)
-        ? l.additionalServices.reduce((a, x) => a + Number(x.total || 0), 0)
-        : 0;
-      return s + fromList;
-    }, 0);
-
-    const subtotalAll = Number(
-      (interior + exterior + others + addAll).toFixed(2)
-    );
+    const subtotalAll = Number((interior + exterior + others + add).toFixed(2));
 
     let discountAmount = 0;
     if (q.discount?.type === "PERCENT") {
@@ -533,7 +304,7 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
         (subtotalAll * (Number(q.discount.value || 0) / 100)).toFixed(2)
       );
     } else if (q.discount?.type === "FLAT") {
-      discountAmount = Number(q.discount.amount || 0);
+      discountAmount = Number(q.discount.amount || 0); // ← use amount for FLAT
       if (discountAmount > subtotalAll) discountAmount = subtotalAll;
       discountAmount = Number(discountAmount.toFixed(2));
     }
@@ -541,13 +312,15 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
     const finalPerDay = Number(
       Math.max(0, subtotalAll - discountAmount).toFixed(2)
     );
+    const days = Math.max(1, Number(q.days || 1));
+    // const grandTotal = Number((finalPerDay * days).toFixed(2));
     const grandTotal = finalPerDay;
 
     q.totals = {
       interior,
       exterior,
       others,
-      additionalServices: addAll,
+      additionalServices: add,
       subtotal: subtotalAll,
       discountAmount,
       finalPerDay,
@@ -555,18 +328,128 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
     };
 
     await q.save();
-
-    return res.json({
-      message: "OK",
-      data: { line }, // includes preserved additionalServices/additionalTotal
-    });
+    return res.json({ message: "OK", data: { line } });
   } catch (err) {
     console.error("upsertQuoteRoomPricing error:", err);
     return res.status(500).json({ message: "Server error" });
   }
 };
 
-exports.upsertQuoteAdditionalServices = async (req, res) => {
+// exports.upsertQuoteRoomAdditionalServices = async (req, res) => {
+//   try {
+//     const { quoteId, roomName } = req.params;
+//     if (!Types.ObjectId.isValid(quoteId)) {
+//       return res.status(400).json({ message: "Invalid quote id" });
+//     }
+
+//     const q = await Quote.findById(quoteId);
+//     if (!q) return res.status(404).json({ message: "Quote not found" });
+
+//     let { items } = req.body;
+
+//     if (typeof items === "string") {
+//       try {
+//         items = JSON.parse(items);
+//       } catch {
+//         return res.status(400).json({ message: "items must be an array" });
+//       }
+//     }
+//     if (!Array.isArray(items)) items = [];
+
+//     // Normalize & coerce numbers
+//     const cleaned = items.map((x) => ({
+//       serviceType: String(x.serviceType || ""),
+//       materialId: x.materialId != null ? String(x.materialId) : undefined,
+//       materialName: String(x.materialName || ""),
+//       surfaceType: String(x.surfaceType || ""),
+//       withPaint: Boolean(x.withPaint),
+//       areaSqft: Number(x.areaSqft || 0),
+//       unitPrice: Number(x.unitPrice || 0),
+//       total:
+//         x.serviceType === "Textures"
+//           ? Number(x.unitPrice || 0)
+//           : Number(x.total || 0),
+//       customName: String(x.customName || ""),
+//       customNote: String(x.customNote || ""),
+//     }));
+
+//     // Locate the room line
+//     const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+//     const idx = (q.lines || []).findIndex(
+//       (l) => norm(l.roomName) === norm(roomName)
+//     );
+//     if (idx < 0)
+//       return res.status(404).json({ message: "Room not found on quote" });
+
+//     // Persist in the line
+//     const additionalTotal = cleaned.reduce(
+//       (s, it) => s + Number(it.total || 0),
+//       0
+//     );
+//     q.set(`lines.${idx}.additionalServices`, cleaned);
+//     q.set(`lines.${idx}.additionalTotal`, Number(additionalTotal.toFixed(2)));
+
+//     // --- recompute quote totals (reuses your logic) ---
+//     const interior = q.lines
+//       .filter((l) => l.sectionType === "Interior")
+//       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+//     const exterior = q.lines
+//       .filter((l) => l.sectionType === "Exterior")
+//       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+//     const others = q.lines
+//       .filter((l) => l.sectionType === "Others")
+//       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+
+//     // NEW: sum all rooms' additionalTotal
+//     const add = q.lines.reduce((s, l) => s + Number(l.additionalTotal || 0), 0);
+
+//     const subtotalAll = Number((interior + exterior + others + add).toFixed(2));
+
+//     let discountAmount = 0;
+//     if (q.discount?.type === "PERCENT") {
+//       discountAmount = Number(
+//         (subtotalAll * (Number(q.discount.value || 0) / 100)).toFixed(2)
+//       );
+//     } else if (q.discount?.type === "FLAT") {
+//       discountAmount = Number(q.discount?.amount || 0);
+//       if (discountAmount > subtotalAll) discountAmount = subtotalAll;
+//       discountAmount = Number(discountAmount.toFixed(2));
+//     }
+
+//     const finalPerDay = Number(
+//       Math.max(0, subtotalAll - discountAmount).toFixed(2)
+//     );
+//     // days kept as-is; your grandTotal equals finalPerDay already
+//     q.totals = {
+//       interior,
+//       exterior,
+//       others,
+//       additionalServices: add,
+//       subtotal: subtotalAll,
+//       discountAmount,
+//       finalPerDay,
+//       grandTotal: finalPerDay,
+//     };
+
+//     await q.save();
+
+//     return res.json({
+//       message: "OK",
+//       data: {
+//         roomName,
+//         additionalServices: cleaned,
+//         additionalTotal: q.lines[idx].additionalTotal,
+//         totals: q.totals,
+//       },
+//     });
+//   } catch (err) {
+//     console.error("upsertQuoteRoomAdditionalServices error:", err);
+//     return res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+// Backend: Update quote room pricing with additional service price handling
+exports.upsertQuoteRoomAdditionalServices = async (req, res) => {
   try {
     const { quoteId, roomName } = req.params;
     if (!Types.ObjectId.isValid(quoteId)) {
@@ -576,146 +459,74 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
     const q = await Quote.findById(quoteId);
     if (!q) return res.status(404).json({ message: "Quote not found" });
 
-    const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
-    const lineIdx = (q.lines || []).findIndex(
-      (l) => norm(l.roomName) === norm(roomName)
-    );
-    if (lineIdx < 0)
-      return res.status(404).json({ message: "Room not found on quote" });
+    let { items } = req.body;
 
-    const line = q.lines[lineIdx] || {};
-
-    // --- parse payload items ---
-    let items = Array.isArray(req.body?.items) ? req.body.items : [];
-    items = items.map((it) => {
-      const area = Number(it.areaSqft || 0);
-      const unit = Number(it.unitPrice || 0);
-      const total = Number(
-        (it.total != null ? it.total : area * unit).toFixed(2)
-      );
-      return {
-        serviceType: String(it.serviceType || ""),
-        materialId: it.materialId != null ? String(it.materialId) : undefined,
-        materialName: String(it.materialName || it.customName || ""),
-        surfaceType: String(it.surfaceType || ""),
-        withPaint: !!it.withPaint,
-        areaSqft: area,
-        unitPrice: unit,
-        total,
-        customName: String(it.customName || ""),
-        customNote: String(it.customNote || ""),
-      };
-    });
-
-    // must know which surface we are updating
-    const surfaceRef = req.body?.surfaceRef || null; // { type, index, mode? } optional but preferred
-    const surfaceLabelNorm = items.length ? norm(items[0].surfaceType) : ""; // e.g., "wall 1"
-
-    // --- MERGE-BY-SURFACE: keep others, replace only this surface's items ---
-    const prev = Array.isArray(line.additionalServices)
-      ? line.additionalServices
-      : [];
-    const keep = prev.filter(
-      (s) =>
-        surfaceLabelNorm ? norm(s.surfaceType) !== surfaceLabelNorm : true // if no label given, we won't remove by label
-    );
-    const merged = [...keep, ...items];
-
-    line.additionalServices = merged;
-    // line additional total = sum of all additional services on this room (merged)
-    line.additionalTotal = merged.reduce((s, x) => s + Number(x.total || 0), 0);
-
-    // --- zero the base breakdown row ONLY for the current surface if any "without paint" ---
-    const bd = Array.isArray(line.breakdown)
-      ? line.breakdown.map((b) => ({ ...b }))
-      : [];
-    if (bd.length) {
-      // determine whether, for this surface specifically, any WITHOUT paint exists in merged list
-      const mergedForThisSurface = merged.filter((s) =>
-        surfaceLabelNorm ? norm(s.surfaceType) === surfaceLabelNorm : false
-      );
-      const shouldZero = mergedForThisSurface.some((s) => !s.withPaint);
-
-      if (shouldZero) {
-        // Prefer exact surfaceRef (type + index + optional mode) to pick right base row
-        if (surfaceRef && surfaceRef.type && surfaceRef.index != null) {
-          const counters = { Ceiling: 0, Wall: 0, Measurement: 0 };
-          const t = surfaceRef.type;
-          let targeted = false;
-
-          for (let i = 0; i < bd.length; i++) {
-            const b = bd[i];
-            if (b?.type !== t) continue;
-            counters[t] = (counters[t] || 0) + 1;
-            const ordinal = counters[t];
-            const modeMatches = surfaceRef.mode
-              ? String(b?.mode || "") === String(surfaceRef.mode)
-              : true;
-            if (ordinal === surfaceRef.index && modeMatches) {
-              bd[i].sqft = 0;
-              bd[i].price = 0;
-              targeted = true;
-              break;
-            }
-          }
-          // fallback (ignore mode) if we didn't hit
-          if (!targeted) {
-            counters[t] = 0;
-            for (let i = 0; i < bd.length; i++) {
-              const b = bd[i];
-              if (b?.type !== t) continue;
-              counters[t] += 1;
-              if (counters[t] === surfaceRef.index) {
-                bd[i].sqft = 0;
-                bd[i].price = 0;
-                break;
-              }
-            }
-          }
-        } else if (surfaceLabelNorm) {
-          // fallback: parse "Wall 1", "Ceiling 2"
-          const raw = surfaceLabelNorm;
-          let t = "Measurement";
-          if (raw.startsWith("ceil")) t = "Ceiling";
-          else if (raw.startsWith("wall")) t = "Wall";
-          const numMatch = raw.match(/(\d+)/);
-          const ordinalWanted = numMatch
-            ? Math.max(1, parseInt(numMatch[1], 10))
-            : 1;
-
-          const counters = { Ceiling: 0, Wall: 0, Measurement: 0 };
-          for (let i = 0; i < bd.length; i++) {
-            const b = bd[i];
-            if (b?.type !== t) continue;
-            counters[t] = (counters[t] || 0) + 1;
-            if (counters[t] === ordinalWanted) {
-              bd[i].sqft = 0;
-              bd[i].price = 0;
-              break;
-            }
-          }
-        }
+    if (typeof items === "string") {
+      try {
+        items = JSON.parse(items);
+      } catch {
+        return res.status(400).json({ message: "items must be an array" });
       }
     }
+    if (!Array.isArray(items)) items = [];
 
-    // --- recompute line totals from updated breakdown (paint subtotals) ---
-    const sumBreakdown = (arr, typ) =>
-      arr
-        .filter((x) => x.type === typ)
-        .reduce((s, x) => s + Number(x.price || 0), 0);
+    // Normalize & coerce numbers
+    const cleaned = items.map((x) => ({
+      serviceType: String(x.serviceType || ""),
+      materialId: x.materialId != null ? String(x.materialId) : undefined,
+      materialName: String(x.materialName || ""),
+      surfaceType: String(x.surfaceType || ""),
+      withPaint: Boolean(x.withPaint),
+      areaSqft: Number(x.areaSqft || 0),
+      unitPrice: Number(x.unitPrice || 0),
+      total:
+        x.serviceType === "Textures"
+          ? Number(x.unitPrice || 0)
+          : Number(x.total || 0),
+      customName: String(x.customName || ""),
+      customNote: String(x.customNote || ""),
+    }));
 
-    line.breakdown = bd;
-    line.ceilingsTotal = Number(sumBreakdown(bd, "Ceiling").toFixed(2));
-    line.wallsTotal = Number(sumBreakdown(bd, "Wall").toFixed(2));
-    line.othersTotal = Number(sumBreakdown(bd, "Measurement").toFixed(2));
-    line.subtotal = Number(
-      (line.ceilingsTotal + line.wallsTotal + line.othersTotal).toFixed(2)
+    // Handle the "without paint" scenario
+    cleaned.forEach((item) => {
+      if (!item.withPaint) {
+        item.total = 0; // Set price to 0 if no paint
+      }
+    });
+
+    // Locate the room line and update it
+    const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+    const idx = (q.lines || []).findIndex(
+      (l) => norm(l.roomName) === norm(roomName)
+    );
+    if (idx < 0)
+      return res.status(404).json({ message: "Room not found on quote" });
+
+    const prev = Array.isArray(q.lines[idx].additionalServices)
+      ? q.lines[idx].additionalServices
+      : [];
+
+    // merge by (serviceType + surfaceType + materialId/materialName)
+    const keyOf = (x) =>
+      `${(x.serviceType || "").trim()}|${(x.surfaceType || "").trim()}|${
+        x.materialId || x.materialName || ""
+      }|${x.withPaint ? "W" : "NW"}`;
+
+    const mergedMap = new Map(prev.map((p) => [keyOf(p), p]));
+    for (const n of cleaned) mergedMap.set(keyOf(n), n);
+    const merged = Array.from(mergedMap.values());
+
+    // Persist in the line
+
+    const additionalTotal = merged.reduce(
+      (s, it) => s + Number(it.total || 0),
+      0
     );
 
-    q.set(`lines.${lineIdx}`, line);
-    q.markModified("lines");
+    q.set(`lines.${idx}.additionalServices`, merged);
+    q.set(`lines.${idx}.additionalTotal`, Number(additionalTotal.toFixed(2)));
 
-    // --- recompute quote totals (base + additional) ---
+    // Recalculate totals for the quote
     const interior = q.lines
       .filter((l) => l.sectionType === "Interior")
       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
@@ -725,14 +536,10 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
     const others = q.lines
       .filter((l) => l.sectionType === "Others")
       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-    const addAll = q.lines.reduce(
-      (s, l) => s + Number(l.additionalTotal || 0),
-      0
-    );
 
-    const subtotalAll = Number(
-      (interior + exterior + others + addAll).toFixed(2)
-    );
+    const add = q.lines.reduce((s, l) => s + Number(l.additionalTotal || 0), 0);
+
+    const subtotalAll = Number((interior + exterior + others + add).toFixed(2));
 
     let discountAmount = 0;
     if (q.discount?.type === "PERCENT") {
@@ -740,7 +547,7 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
         (subtotalAll * (Number(q.discount.value || 0) / 100)).toFixed(2)
       );
     } else if (q.discount?.type === "FLAT") {
-      discountAmount = Number(q.discount.amount || 0);
+      discountAmount = Number(q.discount?.amount || 0);
       if (discountAmount > subtotalAll) discountAmount = subtotalAll;
       discountAmount = Number(discountAmount.toFixed(2));
     }
@@ -748,17 +555,16 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
     const finalPerDay = Number(
       Math.max(0, subtotalAll - discountAmount).toFixed(2)
     );
-    const grandTotal = finalPerDay;
 
     q.totals = {
       interior,
       exterior,
       others,
-      additionalServices: addAll,
+      additionalServices: add,
       subtotal: subtotalAll,
       discountAmount,
       finalPerDay,
-      grandTotal,
+      grandTotal: finalPerDay,
     };
 
     await q.save();
@@ -767,116 +573,13 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
       message: "OK",
       data: {
         roomName,
-        additionalServices: line.additionalServices,
-        additionalTotal: line.additionalTotal,
-        ceilingsTotal: line.ceilingsTotal,
-        wallsTotal: line.wallsTotal,
-        othersTotal: line.othersTotal,
-        subtotal: line.subtotal,
+        additionalServices: q.lines[idx].additionalServices || [],
+        additionalTotal: q.lines[idx].additionalTotal,
         totals: q.totals,
       },
     });
   } catch (err) {
-    console.error("upsertQuoteAdditionalServices error:", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-};
-
-exports.removeAdditionalService = async (req, res) => {
-  try {
-    const { quoteId, roomName } = req.params;
-    const where = req.body?.where || {};
-    const norm = (s) => (s || "").trim().toLowerCase();
-
-    if (!Types.ObjectId.isValid(quoteId)) {
-      return res.status(400).json({ message: "Invalid quote id" });
-    }
-    const q = await Quote.findById(quoteId);
-    if (!q) return res.status(404).json({ message: "Quote not found" });
-
-    const li = (q.lines || []).findIndex(
-      (l) => norm(l.roomName) === norm(roomName)
-    );
-    if (li < 0) return res.status(404).json({ message: "Room line not found" });
-
-    const line = q.lines[li];
-    const list = Array.isArray(line.additionalServices)
-      ? line.additionalServices
-      : [];
-
-    const eqNum = (a, b) => Number(a || 0) === Number(b || 0);
-    const same = (s) =>
-      norm(s.surfaceType) === norm(where.surfaceType) &&
-      norm(s.serviceType) === norm(where.serviceType) &&
-      String(s.materialId || "") === String(where.materialId || "") &&
-      eqNum(s.unitPrice, where.unitPrice) &&
-      eqNum(s.areaSqft, where.areaSqft) &&
-      !!s.withPaint === !!where.withPaint &&
-      norm(s.materialName || s.customName || "") ===
-        norm(where.materialName || where.customName || "");
-
-    const i = list.findIndex(same);
-    if (i < 0) {
-      return res.status(404).json({ message: "Additional service not found" });
-    }
-
-    const removed = list.splice(i, 1)[0];
-    // recompute room additional total
-    const additionalTotal = list.reduce(
-      (s, it) => s + Number(it.total || 0),
-      0
-    );
-    line.additionalServices = list;
-    line.additionalTotal = Number(additionalTotal.toFixed(2));
-
-    // recompute quote totals (don’t try to “restore” paint sqft here — SelectPaint save will do)
-    const sumRoom = (sect) =>
-      (q.lines || [])
-        .filter((l) => l.sectionType === sect)
-        .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-
-    const interior = sumRoom("Interior");
-    const exterior = sumRoom("Exterior");
-    const others = sumRoom("Others");
-    const addAll = (q.lines || []).reduce(
-      (s, l) =>
-        s +
-        (Array.isArray(l.additionalServices)
-          ? l.additionalServices.reduce((a, x) => a + Number(x.total || 0), 0)
-          : Number(l.additionalTotal || 0)),
-      0
-    );
-
-    const subtotalAll = Number(
-      (interior + exterior + others + addAll).toFixed(2)
-    );
-    let discountAmount = 0;
-    if (q.discount?.type === "PERCENT") {
-      discountAmount = Number(
-        (subtotalAll * (Number(q.discount.value || 0) / 100)).toFixed(2)
-      );
-    } else if (q.discount?.type === "FLAT") {
-      discountAmount = Math.min(subtotalAll, Number(q.discount.amount || 0));
-      discountAmount = Number(discountAmount.toFixed(2));
-    }
-    const finalPerDay = Number(
-      Math.max(0, subtotalAll - discountAmount).toFixed(2)
-    );
-    q.totals = {
-      interior,
-      exterior,
-      others,
-      additionalServices: addAll,
-      subtotal: subtotalAll,
-      discountAmount,
-      finalPerDay,
-      grandTotal: finalPerDay,
-    };
-
-    await q.save();
-    return res.json({ message: "Deleted", data: { line, removed } });
-  } catch (err) {
-    console.error("removeAdditionalService error", err);
+    console.error("upsertQuoteRoomAdditionalServices error:", err);
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -1024,35 +727,48 @@ exports.cloneQuoteFrom = async (req, res) => {
   }
 };
 
-// controllers/quote.controller.js
-exports.deleteIfEmptyDraft = async (req, res) => {
-  try {
-    const { quoteId } = req.params;
-    if (!Types.ObjectId.isValid(quoteId)) {
-      return res.status(400).json({ message: "Invalid quote id" });
-    }
-    const q = await Quote.findById(quoteId);
-    if (!q) return res.status(404).json({ message: "Quote not found" });
-    if ((q.status || "draft") !== "draft") {
-      return res
-        .status(400)
-        .json({ message: "Only draft quotes can be removed" });
-    }
-    const hasContent = (q.lines || []).some(
-      (l) =>
-        Number(l.subtotal || 0) > 0 ||
-        (Array.isArray(l.additionalServices) && l.additionalServices.length > 0)
-    );
-    if (hasContent) {
-      return res.status(400).json({ message: "Quote is not empty" });
-    }
-    await q.deleteOne();
-    return res.json({ ok: true });
-  } catch (err) {
-    console.error("deleteIfEmptyDraft error:", err);
-    return res.status(500).json({ message: "Server error" });
-  }
-};
+// exports.duplicateQuote = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { vendorId, leadId } = req.body || {};
+
+//     // Optional scoping: vendor & lead ownership checks
+//     const query = { _id: new mongoose.Types.ObjectId(id) };
+//     if (vendorId) query.vendorId = vendorId;
+//     if (leadId) query.leadId = leadId;
+
+//     const base = await Quote.findOne(query);
+//     if (!base) {
+//       return res.status(404).json({ message: "Quote not found" });
+//     }
+
+//     // Deep clone the doc
+//     const obj = base.toObject({ depopulate: true });
+//     delete obj._id;
+//     delete obj.createdAt;
+//     delete obj.updatedAt;
+
+//     // Mutate fields for the duplicate
+//     obj.quoteNo = generateQuoteNo();
+//     obj.status = "draft"; // duplicated as draft
+//     obj.title = obj.title || "Quote"; // keep or default
+//     // keep days, totals, lines, discount, comments, etc. exactly as original
+
+//     const dup = await Quote.create(obj);
+
+//     // Return the full doc & a list-item projection (for convenience)
+//     return res.status(201).json({
+//       message: "Quote duplicated",
+//       data: {
+//         quote: dup,
+//         listItem: toListItem(dup),
+//       },
+//     });
+//   } catch (err) {
+//     console.error("Duplicate quote error:", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
 
 exports.finalizeQuote = async (req, res) => {
   try {
