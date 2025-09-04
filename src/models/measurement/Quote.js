@@ -100,7 +100,11 @@ const QuoteSchema = new mongoose.Schema(
     },
 
     comments: String,
-    status: { type: String, enum: ["draft", "finalized"], default: "draft" },
+    status: {
+      type: String,
+      enum: ["draft", "created", "finalized"],
+      default: "draft",
+    },
     finalizedAt: Date,
   },
   { timestamps: true }

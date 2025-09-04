@@ -14,6 +14,11 @@ router.post(
   "/quotes-room-price/:quoteId/rooms/:roomName/pricing",
   quoteController.upsertQuoteRoomPricing
 );
+router.delete(
+  "/clear-room-services/:quoteId/clear",
+  quoteController.clearQuoteServices
+);
+
 router.post(
   "/add-finishing-paints/:quoteId/rooms/:roomName/additional-services",
   quoteController.upsertQuoteAdditionalServices

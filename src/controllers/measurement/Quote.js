@@ -335,6 +335,11 @@ exports.createQuote = async (req, res) => {
 //   }
 // };
 
+const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
+const sum = (arr, pick = (x) => x) =>
+  arr.reduce((t, x) => t + Number(pick(x) || 0), 0);
+
+// old- need to be handle carefully*** REEVERT BACK If needed
 exports.upsertQuoteRoomPricing = async (req, res) => {
   try {
     const { quoteId, roomName } = req.params;
@@ -342,15 +347,20 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
       return res.status(400).json({ message: "Invalid quote id" });
     }
 
-    const q = await Quote.findById(quoteId);
-    if (!q) return res.status(404).json({ message: "Quote not found" });
+    // Read once (lean) to get prev line for preservation logic
+    const qLean = await Quote.findById(quoteId, {
+      lines: 1,
+      discount: 1,
+      days: 1,
+    }).lean();
+    if (!qLean) return res.status(404).json({ message: "Quote not found" });
 
-    const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
-    const idx = (q.lines || []).findIndex(
+    const idx = (qLean.lines || []).findIndex(
       (l) => norm(l.roomName) === norm(roomName)
     );
-    const prevLine = idx >= 0 ? q.lines[idx] : null;
+    const prevLine = idx >= 0 ? qLean.lines[idx] : null;
 
+    // ---- parse/normalize body ----
     let {
       sectionType,
       selectedPaints,
@@ -361,7 +371,6 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
       subtotal,
     } = req.body;
 
-    // --- parse breakdown from body ---
     if (typeof breakdown === "string") {
       try {
         breakdown = JSON.parse(breakdown);
@@ -385,13 +394,12 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
         typeof b.displayIndex === "number" ? b.displayIndex : undefined,
     }));
 
-    // coerce totals
     ceilingsTotal = Number(ceilingsTotal || 0);
     wallsTotal = Number(wallsTotal || 0);
     othersTotal = Number(othersTotal || 0);
     subtotal = Number(subtotal || 0);
 
-    // ---------- PRESERVE ADDITIONAL SERVICES ----------
+    // ---- preserve additional services from prev line ----
     const preservedAdditional = Array.isArray(prevLine?.additionalServices)
       ? prevLine.additionalServices.map((s) => ({
           serviceType: String(s.serviceType || ""),
@@ -402,29 +410,21 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
           areaSqft: Number(s.areaSqft || 0),
           unitPrice: Number(s.unitPrice || 0),
           total: Number(
-            s.total || Number(s.areaSqft || 0) * Number(s.unitPrice || 0)
-          ).toFixed
-            ? Number(
-                Number(
-                  s.total || Number(s.areaSqft || 0) * Number(s.unitPrice || 0)
-                ).toFixed(2)
-              )
-            : Number(
-                (Number(s.areaSqft || 0) * Number(s.unitPrice || 0)).toFixed(2)
-              ),
+            Number(
+              s.total || Number(s.areaSqft || 0) * Number(s.unitPrice || 0)
+            ).toFixed(2)
+          ),
           customName: String(s.customName || ""),
           customNote: String(s.customNote || ""),
         }))
       : [];
 
-    // recompute additionalTotal from preserved list
     const preservedAdditionalTotal = preservedAdditional.reduce(
-      (sum, x) => sum + Number(x.total || 0),
+      (S, x) => S + Number(x.total || 0),
       0
     );
 
-    // ---------- ENFORCE ZEROING (if any saved service is "without paint") ----------
-    // Build a set of surfaces that must be zeroed based on preserved additional services
+    // ---- zero paint rows where preserved additional says "without paint" ----
     const parseSurface = (label) => {
       const raw = String(label || "")
         .trim()
@@ -447,7 +447,6 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
     );
 
     if (zeroKeys.size > 0 && breakdown.length > 0) {
-      // zero matching breakdown rows (by type + displayIndex if present, else ordinal order)
       const counters = { Ceiling: 0, Wall: 0, Measurement: 0 };
       for (let i = 0; i < breakdown.length; i++) {
         const b = breakdown[i];
@@ -463,22 +462,20 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
           breakdown[i].price = 0;
         }
       }
-
-      // recompute paint subtotals after zeroing
-      const sumBreakdown = (arr, typ) =>
+      const sumType = (arr, t) =>
         arr
-          .filter((x) => x.type === typ)
+          .filter((x) => x.type === t)
           .reduce((s, x) => s + Number(x.price || 0), 0);
-      ceilingsTotal = Number(sumBreakdown(breakdown, "Ceiling").toFixed(2));
-      wallsTotal = Number(sumBreakdown(breakdown, "Wall").toFixed(2));
-      othersTotal = Number(sumBreakdown(breakdown, "Measurement").toFixed(2));
+      ceilingsTotal = Number(sumType(breakdown, "Ceiling").toFixed(2));
+      wallsTotal = Number(sumType(breakdown, "Wall").toFixed(2));
+      othersTotal = Number(sumType(breakdown, "Measurement").toFixed(2));
       subtotal = Number((ceilingsTotal + wallsTotal + othersTotal).toFixed(2));
     }
 
-    // ---------- BUILD/MERGE LINE ----------
+    // ---- build final line ----
     const line = {
       roomName,
-      sectionType,
+      sectionType: sectionType || prevLine?.sectionType || "Interior",
       selectedPaints: {
         ceiling: selectedPaints?.ceiling || null,
         wall: selectedPaints?.wall || null,
@@ -489,52 +486,66 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
       wallsTotal,
       othersTotal,
       subtotal,
-
-      // preserve these
       additionalServices: preservedAdditional,
       additionalTotal: preservedAdditionalTotal,
     };
 
-    if (idx >= 0) {
-      q.set(`lines.${idx}`, line);
-    } else {
-      q.lines.push(line);
+    // ---- ATOMIC UPSERT of the room line (no doc.save) ----
+    const upd = await Quote.updateOne(
+      { _id: quoteId, "lines.roomName": roomName },
+      { $set: { "lines.$": line, updatedAt: new Date() } }
+    );
+
+    if (upd.matchedCount === 0) {
+      await Quote.updateOne(
+        { _id: quoteId },
+        { $push: { lines: line }, $set: { updatedAt: new Date() } }
+      );
     }
-    q.markModified("lines");
 
-    // ---------- RECOMPUTE QUOTE TOTALS ----------
-    const interior = q.lines
-      .filter((l) => l.sectionType === "Interior")
-      .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-    const exterior = q.lines
-      .filter((l) => l.sectionType === "Exterior")
-      .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-    const others = q.lines
-      .filter((l) => l.sectionType === "Others")
-      .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+    // ---- recompute totals from a fresh read ----
+    const fresh = await Quote.findById(quoteId, {
+      lines: 1,
+      discount: 1,
+      days: 1,
+    }).lean();
+    const lines = fresh?.lines || [];
 
-    // sum additional across all rooms (robust even if some rooms missed additionalTotal)
-    const addAll = q.lines.reduce((s, l) => {
+    const interior = sum(
+      lines.filter((l) => l.sectionType === "Interior"),
+      (l) => l.subtotal
+    );
+    const exterior = sum(
+      lines.filter((l) => l.sectionType === "Exterior"),
+      (l) => l.subtotal
+    );
+    const others = sum(
+      lines.filter((l) => l.sectionType === "Others"),
+      (l) => l.subtotal
+    );
+
+    const addAll = lines.reduce((S, l) => {
       const fromTotal = Number(l.additionalTotal || 0);
-      if (fromTotal > 0) return s + fromTotal;
+      if (fromTotal > 0) return S + fromTotal;
       const fromList = Array.isArray(l.additionalServices)
         ? l.additionalServices.reduce((a, x) => a + Number(x.total || 0), 0)
         : 0;
-      return s + fromList;
+      return S + fromList;
     }, 0);
 
     const subtotalAll = Number(
       (interior + exterior + others + addAll).toFixed(2)
     );
-
     let discountAmount = 0;
-    if (q.discount?.type === "PERCENT") {
+    if (fresh?.discount?.type === "PERCENT") {
       discountAmount = Number(
-        (subtotalAll * (Number(q.discount.value || 0) / 100)).toFixed(2)
+        (subtotalAll * (Number(fresh.discount.value || 0) / 100)).toFixed(2)
       );
-    } else if (q.discount?.type === "FLAT") {
-      discountAmount = Number(q.discount.amount || 0);
-      if (discountAmount > subtotalAll) discountAmount = subtotalAll;
+    } else if (fresh?.discount?.type === "FLAT") {
+      discountAmount = Math.min(
+        Number(fresh.discount.amount || 0),
+        subtotalAll
+      );
       discountAmount = Number(discountAmount.toFixed(2));
     }
 
@@ -543,28 +554,313 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
     );
     const grandTotal = finalPerDay;
 
-    q.totals = {
-      interior,
-      exterior,
-      others,
-      additionalServices: addAll,
-      subtotal: subtotalAll,
-      discountAmount,
-      finalPerDay,
-      grandTotal,
-    };
+    await Quote.updateOne(
+      { _id: quoteId },
+      {
+        $set: {
+          totals: {
+            interior,
+            exterior,
+            others,
+            additionalServices: addAll,
+            subtotal: subtotalAll,
+            discountAmount,
+            finalPerDay,
+            grandTotal,
+          },
+          updatedAt: new Date(),
+        },
+      }
+    );
 
-    await q.save();
-
-    return res.json({
-      message: "OK",
-      data: { line }, // includes preserved additionalServices/additionalTotal
-    });
+    return res.json({ message: "OK", data: { line } });
   } catch (err) {
     console.error("upsertQuoteRoomPricing error:", err);
+    // If anything still trips a version check elsewhere, you can special-case:
+    // if (err?.name === 'VersionError') return res.status(409).json({ message: 'Write conflict, retry' });
     return res.status(500).json({ message: "Server error" });
   }
 };
+
+exports.clearQuoteServices = async (req, res) => {
+  try {
+    const { quoteId } = req.params;
+
+    // Validate the quoteId
+    if (!Types.ObjectId.isValid(quoteId)) {
+      return res.status(400).json({ message: "Invalid quote id" });
+    }
+
+    // Find the quote
+    const quote = await Quote.findById(quoteId);
+    if (!quote) {
+      return res.status(404).json({ message: "Quote not found" });
+    }
+
+    // Clear all additional services and reset values for all rooms
+    const updatedLines = quote.lines.map((line) => {
+      return {
+        ...line,
+        additionalServices: [], // Clear additional services
+        additionalTotal: 0, // Set additional total to 0
+        subtotal: 0, // Set subtotal to 0
+        breakdown: [], // Clear breakdown if needed
+        selectedPaints: { ceiling: null, wall: null, measurements: null }, // Reset paints
+        ceilingsTotal: 0,
+        wallsTotal: 0,
+        othersTotal: 0,
+      };
+    });
+
+    // Update the quote with cleared lines
+    quote.lines = updatedLines;
+    quote.totals.additionalServices = 0;
+    quote.totals.subtotal = 0;
+    quote.totals.grandTotal = 0;
+    quote.status = "draft"; // Reset the status to draft
+    quote.discount = { type: "PERCENT", value: 0, amount: 0 }; // Reset discount if needed
+
+    // Save the updated quote
+    await quote.save();
+
+    // Return a success response
+    return res.json({
+      message: "Quote services cleared successfully",
+      data: quote,
+    });
+  } catch (err) {
+    console.error("clearQuoteServices error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
+// new one
+// exports.upsertQuoteRoomPricing = async (req, res) => {
+//   try {
+//     const { quoteId, roomName } = req.params;
+//     if (!Types.ObjectId.isValid(quoteId)) {
+//       return res.status(400).json({ message: "Invalid quote id" });
+//     }
+
+//     // Read once (lean) to get prev line for preservation logic
+//     const qLean = await Quote.findById(quoteId, {
+//       lines: 1,
+//       discount: 1,
+//       days: 1,
+//     }).lean();
+//     if (!qLean) return res.status(404).json({ message: "Quote not found" });
+
+//     const idx = (qLean.lines || []).findIndex(
+//       (l) => norm(l.roomName) === norm(roomName)
+//     );
+//     const prevLine = idx >= 0 ? qLean.lines[idx] : null;
+
+//     // ---- parse/normalize body ----
+//     let {
+//       sectionType,
+//       selectedPaints,
+//       breakdown,
+//       ceilingsTotal,
+//       wallsTotal,
+//       othersTotal,
+//       subtotal,
+//     } = req.body;
+
+//     if (typeof breakdown === "string") {
+//       try {
+//         breakdown = JSON.parse(breakdown);
+//       } catch {
+//         return res
+//           .status(400)
+//           .json({ message: "breakdown must be array/JSON array" });
+//       }
+//     }
+//     if (!Array.isArray(breakdown)) breakdown = [];
+
+//     breakdown = breakdown.map((b) => ({
+//       type: b.type,
+//       mode: b.mode,
+//       sqft: Number(b.sqft || 0),
+//       unitPrice: Number(b.unitPrice || 0),
+//       price: Number(b.price || 0),
+//       paintId: b.paintId != null ? String(b.paintId) : null,
+//       paintName: b.paintName ?? "",
+//       displayIndex:
+//         typeof b.displayIndex === "number" ? b.displayIndex : undefined,
+//     }));
+
+//     ceilingsTotal = Number(ceilingsTotal || 0);
+//     wallsTotal = Number(wallsTotal || 0);
+//     othersTotal = Number(othersTotal || 0);
+//     subtotal = Number(subtotal || 0);
+
+//     // ---- preserve additional services from prev line ----
+//     // If we need to clear the additional services, set it to an empty array
+//     const preservedAdditional = Array.isArray(prevLine?.additionalServices)
+//       ? [] // Set this to empty array when clearing
+//       : [];
+
+//     // Calculate the new additionalTotal as 0
+//     const preservedAdditionalTotal = preservedAdditional.reduce(
+//       (S, x) => S + Number(x.total || 0),
+//       0
+//     );
+
+//     // ---- zero paint rows where preserved additional says "without paint" ----
+//     const parseSurface = (label) => {
+//       const raw = String(label || "")
+//         .trim()
+//         .toLowerCase();
+//       let type = "Measurement";
+//       if (raw.startsWith("ceil")) type = "Ceiling";
+//       else if (raw.startsWith("wall")) type = "Wall";
+//       const n = raw.match(/(\d+)/);
+//       const ordinal = n ? Math.max(1, parseInt(n[1], 10)) : 1;
+//       return { type, ordinal };
+//     };
+
+//     const zeroKeys = new Set(
+//       preservedAdditional
+//         .filter((s) => !s.withPaint)
+//         .map((s) => {
+//           const { type, ordinal } = parseSurface(s.surfaceType);
+//           return `${type}:${ordinal}`;
+//         })
+//     );
+
+//     if (zeroKeys.size > 0 && breakdown.length > 0) {
+//       const counters = { Ceiling: 0, Wall: 0, Measurement: 0 };
+//       for (let i = 0; i < breakdown.length; i++) {
+//         const b = breakdown[i];
+//         if (!b?.type) continue;
+//         let ord = b.displayIndex;
+//         if (typeof ord !== "number") {
+//           counters[b.type] = (counters[b.type] || 0) + 1;
+//           ord = counters[b.type];
+//         }
+//         const key = `${b.type}:${ord}`;
+//         if (zeroKeys.has(key)) {
+//           breakdown[i].sqft = 0;
+//           breakdown[i].price = 0;
+//         }
+//       }
+//       const sumType = (arr, t) =>
+//         arr
+//           .filter((x) => x.type === t)
+//           .reduce((s, x) => s + Number(x.price || 0), 0);
+//       ceilingsTotal = Number(sumType(breakdown, "Ceiling").toFixed(2));
+//       wallsTotal = Number(sumType(breakdown, "Wall").toFixed(2));
+//       othersTotal = Number(sumType(breakdown, "Measurement").toFixed(2));
+//       subtotal = Number((ceilingsTotal + wallsTotal + othersTotal).toFixed(2));
+//     }
+
+//     // ---- build final line ----
+//     const line = {
+//       roomName,
+//       sectionType: sectionType || prevLine?.sectionType || "Interior",
+//       selectedPaints: {
+//         ceiling: selectedPaints?.ceiling || null,
+//         wall: selectedPaints?.wall || null,
+//         measurements: selectedPaints?.measurements || null,
+//       },
+//       breakdown,
+//       ceilingsTotal,
+//       wallsTotal,
+//       othersTotal,
+//       subtotal,
+//       additionalServices: [], // Clear additional services here
+//       additionalTotal: 0, // Clear additional total
+//     };
+
+//     // ---- ATOMIC UPSERT of the room line (no doc.save) ----
+//     const upd = await Quote.updateOne(
+//       { _id: quoteId, "lines.roomName": roomName },
+//       { $set: { "lines.$": line, updatedAt: new Date() } }
+//     );
+
+//     if (upd.matchedCount === 0) {
+//       await Quote.updateOne(
+//         { _id: quoteId },
+//         { $push: { lines: line }, $set: { updatedAt: new Date() } }
+//       );
+//     }
+
+//     // ---- recompute totals from a fresh read ----
+//     const fresh = await Quote.findById(quoteId, {
+//       lines: 1,
+//       discount: 1,
+//       days: 1,
+//     }).lean();
+//     const lines = fresh?.lines || [];
+
+//     const interior = sum(
+//       lines.filter((l) => l.sectionType === "Interior"),
+//       (l) => l.subtotal
+//     );
+//     const exterior = sum(
+//       lines.filter((l) => l.sectionType === "Exterior"),
+//       (l) => l.subtotal
+//     );
+//     const others = sum(
+//       lines.filter((l) => l.sectionType === "Others"),
+//       (l) => l.subtotal
+//     );
+
+//     const addAll = lines.reduce((S, l) => {
+//       const fromTotal = Number(l.additionalTotal || 0);
+//       if (fromTotal > 0) return S + fromTotal;
+//       const fromList = Array.isArray(l.additionalServices)
+//         ? l.additionalServices.reduce((a, x) => a + Number(x.total || 0), 0)
+//         : 0;
+//       return S + fromList;
+//     }, 0);
+
+//     const subtotalAll = Number(
+//       (interior + exterior + others + addAll).toFixed(2)
+//     );
+//     let discountAmount = 0;
+//     if (fresh?.discount?.type === "PERCENT") {
+//       discountAmount = Number(
+//         (subtotalAll * (Number(fresh.discount.value || 0) / 100)).toFixed(2)
+//       );
+//     } else if (fresh?.discount?.type === "FLAT") {
+//       discountAmount = Math.min(
+//         Number(fresh.discount.amount || 0),
+//         subtotalAll
+//       );
+//       discountAmount = Number(discountAmount.toFixed(2));
+//     }
+
+//     const finalPerDay = Number(
+//       Math.max(0, subtotalAll - discountAmount).toFixed(2)
+//     );
+//     const grandTotal = finalPerDay;
+
+//     await Quote.updateOne(
+//       { _id: quoteId },
+//       {
+//         $set: {
+//           totals: {
+//             interior,
+//             exterior,
+//             others,
+//             additionalServices: addAll,
+//             subtotal: subtotalAll,
+//             discountAmount,
+//             finalPerDay,
+//             grandTotal,
+//           },
+//           updatedAt: new Date(),
+//         },
+//       }
+//     );
+
+//     return res.json({ message: "OK", data: { line } });
+//   } catch (err) {
+//     console.error("upsertQuoteRoomPricing error:", err);
+//     return res.status(500).json({ message: "Server error" });
+//   }
+// };
 
 exports.upsertQuoteAdditionalServices = async (req, res) => {
   try {
@@ -899,6 +1195,8 @@ exports.updateQuoteMeta = async (req, res) => {
       q.discount.value = Number(discount.value || 0);
     }
 
+    q.status = "created";
+
     // recompute totals from lines
     const toNum = (v) => (Number.isFinite(+v) ? +v : 0);
     const round2 = (n) => +Number(n || 0).toFixed(2);
@@ -955,11 +1253,81 @@ exports.updateQuoteMeta = async (req, res) => {
   }
 };
 
+// exports.cloneQuoteFrom = async (req, res) => {
+//   try {
+//     const sourceId = req.params.id; // ← URL param
+//     const { destId } = req.body || {}; // ← BODY param
+
+//     if (!Types.ObjectId.isValid(sourceId) || !Types.ObjectId.isValid(destId)) {
+//       return res.status(400).json({ message: "Invalid quote id(s)" });
+//     }
+
+//     const src = await Quote.findById(sourceId).lean();
+//     if (!src)
+//       return res.status(404).json({ message: "Source quote not found" });
+
+//     // Deep copy + sanitize including additional services
+//     const lines = (src.lines || []).map((line) => ({
+//       roomName: line.roomName,
+//       sectionType: line.sectionType,
+//       subtotal: Number(line.subtotal || 0),
+//       ceilingsTotal: Number(line.ceilingsTotal || 0),
+//       wallsTotal: Number(line.wallsTotal || 0),
+//       othersTotal: Number(line.othersTotal || 0),
+//       selectedPaints: {
+//         ceiling: sanitizePaint(line.selectedPaints?.ceiling),
+//         wall: sanitizePaint(line.selectedPaints?.wall),
+//         measurements: sanitizePaint(line.selectedPaints?.measurements),
+//       },
+//       breakdown: (line.breakdown || []).map((b) => ({
+//         type: b.type,
+//         mode: b.mode,
+//         sqft: Number(b.sqft || 0),
+//         unitPrice: Number(b.unitPrice || 0),
+//         price: Number(b.price || 0),
+//         paintId: b.paintId ?? null,
+//         paintName: b.paintName ?? "",
+//         displayIndex:
+//           typeof b.displayIndex === "number" ? b.displayIndex : undefined,
+//       })),
+//       additionalServices: line.additionalServices || [], // Ensure additional services are copied
+//     }));
+
+//     const days = src.days ?? 1;
+//     const discount = src.discount ?? { type: "PERCENT", value: 0, amount: 0 };
+//     const totals = computeTotals(lines, discount, days);
+
+//     const updated = await Quote.findByIdAndUpdate(
+//       destId,
+//       {
+//         $set: {
+//           currency: src.currency || "INR",
+//           days,
+//           discount,
+//           lines,
+//           totals,
+//           comments: "",
+//           status: "draft", // Reset the status to draft
+//         },
+//       },
+//       { new: true }
+//     ).lean();
+
+//     if (!updated)
+//       return res.status(404).json({ message: "Destination quote not found" });
+
+//     return res.status(200).json({ message: "OK", data: updated });
+//   } catch (err) {
+//     console.error("cloneQuoteFrom error:", err);
+//     return res.status(500).json({ message: "Server error" });
+//   }
+// };
+
 exports.cloneQuoteFrom = async (req, res) => {
   try {
     const sourceId = req.params.id; // ← URL param
     const { destId } = req.body || {}; // ← BODY param
-    // console.log("[clone] sourceId=", sourceId, "destId=", destId);
+
     if (!Types.ObjectId.isValid(sourceId) || !Types.ObjectId.isValid(destId)) {
       return res.status(400).json({ message: "Invalid quote id(s)" });
     }
@@ -968,7 +1336,14 @@ exports.cloneQuoteFrom = async (req, res) => {
     if (!src)
       return res.status(404).json({ message: "Source quote not found" });
 
-    // Deep copy + sanitize
+    // Function to calculate additional services total
+    const calculateAdditionalServicesTotal = (additionalServices = []) => {
+      return additionalServices.reduce((total, service) => {
+        return total + (service.total || 0); // Ensure we add the total of each service
+      }, 0);
+    };
+
+    // Deep copy + sanitize including additional services
     const lines = (src.lines || []).map((line) => ({
       roomName: line.roomName,
       sectionType: line.sectionType,
@@ -992,11 +1367,22 @@ exports.cloneQuoteFrom = async (req, res) => {
         displayIndex:
           typeof b.displayIndex === "number" ? b.displayIndex : undefined,
       })),
+      additionalServices: line.additionalServices || [], // Ensure additional services are copied
+      additionalTotal: Number(line.additionalTotal || 0),
     }));
+
+    // Calculate additional services total and add it to totals
+    const additionalServicesTotal = lines.reduce((sum, line) => {
+      return sum + calculateAdditionalServicesTotal(line.additionalServices);
+    }, 0);
 
     const days = src.days ?? 1;
     const discount = src.discount ?? { type: "PERCENT", value: 0, amount: 0 };
     const totals = computeTotals(lines, discount, days);
+
+    // Include the additional services total in the grand total calculation
+    totals.additionalServices = additionalServicesTotal;
+    totals.grandTotal += additionalServicesTotal;
 
     const updated = await Quote.findByIdAndUpdate(
       destId,
@@ -1008,7 +1394,7 @@ exports.cloneQuoteFrom = async (req, res) => {
           lines,
           totals,
           comments: "",
-          status: "draft",
+          status: "draft", // Reset the status to draft
         },
       },
       { new: true }
@@ -1179,60 +1565,6 @@ exports.getQuoteById = async (req, res) => {
   }
 };
 
-// exports.listQuotesByLeadAndMeasurement = async (req, res) => {
-//   try {
-//     const { leadId, measurementId, vendorId } = req.query;
-
-//     if (!leadId || !measurementId) {
-//       return res.status(400).json({
-//         message: "leadId and measurementId are required",
-//       });
-//     }
-
-//     const filter = { leadId, measurementId };
-//     if (vendorId) filter.vendorId = vendorId;
-
-//     // Keep payload small but useful. Adjust fields as per your schema.
-//     const quotes = await Quote.find(filter)
-//       .sort({ createdAt: -1 })
-//       .select(
-//         "_id title status days applyTaxes totals createdAt updatedAt " +
-//           "totals.interior totals.exterior totals.others totals.additionalServices totals.grandTotal"
-//       )
-//       .lean();
-
-//     // Optional: provide a compact view that your app expects (you still get the raw list too)
-//     const listView = quotes.map((q) => ({
-//       id: String(q._id),
-//       title: q.title || "Quote",
-//       amount: q?.totals?.grandTotal ?? 0,
-//       taxes: !!q.applyTaxes,
-//       days: q.days ?? 1,
-//       finalized: q.status === "final",
-//       breakdown: [
-//         { label: "Interior", amount: q?.totals?.interior ?? 0 },
-//         { label: "Exterior", amount: q?.totals?.exterior ?? 0 },
-//         { label: "Others", amount: q?.totals?.others ?? 0 },
-//         {
-//           label: "Additional Services",
-//           amount: q?.totals?.additionalServices ?? 0,
-//         },
-//       ],
-//     }));
-
-//     return res.status(200).json({
-//       message: "OK",
-//       data: {
-//         list: listView, // ready for your screen
-//         raw: quotes, // full data if you need it elsewhere
-//       },
-//     });
-//   } catch (err) {
-//     console.error("listQuotesByLeadAndMeasurement error:", err);
-//     return res.status(500).json({ message: "Server error" });
-//   }
-// };
-
 exports.listQuotesByLeadAndMeasurement = async (req, res) => {
   try {
     const { leadId, vendorId } = req.query;
@@ -1243,7 +1575,8 @@ exports.listQuotesByLeadAndMeasurement = async (req, res) => {
       });
     }
 
-    const filter = { leadId };
+    // const filter = { leadId }; returin all based on status
+    const filter = { leadId, status: { $ne: "draft" } }; // Exclude drafts
     if (vendorId) filter.vendorId = vendorId;
 
     // Keep payload small but useful. Adjust fields as per your schema.
