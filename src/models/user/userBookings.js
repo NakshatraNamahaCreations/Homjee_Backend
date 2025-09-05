@@ -83,8 +83,10 @@ const userBookingSchema = new mongoose.Schema({
   },
   selectedSlot: selectedSlot,
   isEnquiry: Boolean,
-    formName: { type: String, required: true }, // Add formName
-  createdDate: { type: Date, default: Date.now }, 
+  formName: { type: String, required: true }, // Add formName
+  createdDate: { type: Date, default: Date.now },
 });
+
+userBookingSchema.index({ "address.location": "2dsphere" });
 
 module.exports = mongoose.model("UserBookings", userBookingSchema);
