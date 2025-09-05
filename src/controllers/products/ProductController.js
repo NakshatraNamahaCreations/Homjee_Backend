@@ -228,14 +228,14 @@ exports.updatePaint = async (req, res) => {
   try {
     const { id } = req.params;
     const {
-      isSpecial,
       name,
       price,
       description,
       type,
+      productType,
       includePuttyOnFresh,
       includePuttyOnRepaint,
-      productType,
+      isSpecial,
     } = req.body;
 
     const productDoc = await Product.findOne();
@@ -248,22 +248,29 @@ exports.updatePaint = async (req, res) => {
       return res.status(404).json({ message: "Paint not found" });
     }
 
-    paint.isSpecial = isSpecial || type === "Special";
-    paint.name = name || paint.name;
-    paint.price = price ? Number(price) : paint.price;
-    paint.description = description || paint.description;
-    paint.type = type || paint.type;
-    paint.includePuttyOnFresh =
-      includePuttyOnFresh ?? (type === "Normal" && productType === "Paints");
-    paint.includePuttyOnRepaint = includePuttyOnRepaint ?? false;
-    paint.productType = productType || paint.productType;
+    // partial updates OK
+    if (name !== undefined) paint.name = name;
+    if (price !== undefined) paint.price = Number(price);
+    if (description !== undefined) paint.description = description;
+    if (type !== undefined) paint.type = type; // "Normal" | "Special"
+    if (productType !== undefined) paint.productType = productType;
+    if (includePuttyOnFresh !== undefined)
+      paint.includePuttyOnFresh = !!includePuttyOnFresh;
+    if (includePuttyOnRepaint !== undefined)
+      paint.includePuttyOnRepaint = !!includePuttyOnRepaint;
+    if (isSpecial !== undefined) paint.isSpecial = !!isSpecial;
+    // keep isSpecial consistent with type if client didn't pass it explicitly
+    if (isSpecial === undefined && type !== undefined) {
+      paint.isSpecial = type === "Special";
+    }
 
     await productDoc.save();
-
     res.json({ message: "Paint updated successfully", data: paint });
   } catch (error) {
     console.error("Error updating paint:", error);
-    res.status(500).json({ message: "Internal Server Error" });
+    res
+      .status(500)
+      .json({ message: "Internal Server Error", error: error.message });
   }
 };
 

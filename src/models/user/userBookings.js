@@ -5,7 +5,6 @@ const customerSchema = new mongoose.Schema({
   name: String,
   phone: String,
 });
-
 const serviceSchema = new mongoose.Schema({
   // serviceId: String,
   category: String,
@@ -14,7 +13,6 @@ const serviceSchema = new mongoose.Schema({
   price: Number,
   quantity: Number,
 });
-
 const bookingDetailsSchema = new mongoose.Schema({
   bookingDate: Date,
   bookingTime: String,
@@ -47,7 +45,6 @@ const bookingDetailsSchema = new mongoose.Schema({
   scope: String,
   hasPriceUpdated: { type: Boolean, default: false },
 });
-
 const assignedProfessionalSchema = new mongoose.Schema({
   professionalId: String,
   name: String,
@@ -86,6 +83,8 @@ const userBookingSchema = new mongoose.Schema({
   },
   selectedSlot: selectedSlot,
   isEnquiry: Boolean,
+    formName: { type: String, required: true }, // Add formName
+  createdDate: { type: Date, default: Date.now }, 
 });
 
 module.exports = mongoose.model("UserBookings", userBookingSchema);

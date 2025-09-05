@@ -23,6 +23,7 @@ exports.createBooking = async (req, res) => {
       address,
       selectedSlot,
       isEnquiry,
+      formName,
     } = req.body;
 
     if (!service || !Array.isArray(service) || service.length === 0) {
@@ -90,6 +91,7 @@ exports.createBooking = async (req, res) => {
         slotDate: selectedSlot.slotDate,
         slotTime: selectedSlot.slotTime,
       },
+      formName,
     });
 
     await booking.save();
