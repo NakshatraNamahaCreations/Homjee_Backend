@@ -75,7 +75,8 @@ const vendorInfo = new mongoose.Schema({
 const documentInfo = new mongoose.Schema({
   aadhaarNumber: String,
   panNumber: String,
-  aadhaarImage: String,
+  aadhaarfrontImage: String,
+    aadhaarbackImage: String,
   panImage: String,
   otherPolicy: String,
 });

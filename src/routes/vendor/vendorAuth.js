@@ -60,7 +60,8 @@ router.post(
   },
   parser.fields([
     { name: "profileImage", maxCount: 1 },
-    { name: "aadhaarImage", maxCount: 1 },
+    { name: "aadhaarfrontImage", maxCount: 1 },
+    { name: "aadhaarbackImage", maxCount: 1 },
     { name: "panImage", maxCount: 1 },
     { name: "otherPolicy", maxCount: 1 },
   ]),
@@ -75,7 +76,8 @@ router.post(
   },
   parser.fields([
     { name: "profileImage", maxCount: 1 },
-    { name: "aadhaarImage", maxCount: 1 },
+    { name: "aadhaarfrontImage", maxCount: 1 },
+    { name: "aadhaarbackImage", maxCount: 1 },
     { name: "panImage", maxCount: 1 },
     { name: "otherPolicy", maxCount: 1 },
   ]),

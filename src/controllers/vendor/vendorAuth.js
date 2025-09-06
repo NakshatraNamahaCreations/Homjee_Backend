@@ -324,7 +324,9 @@ exports.createVendor = async (req, res) => {
     const addressDetails = JSON.parse(req.body.address || "{}");
 
     const profileImageUrl = req.files["profileImage"]?.[0]?.path;
-    const aadhaarImageUrl = req.files["aadhaarImage"]?.[0]?.path;
+    const aadhaarfrontImageUrl = req.files["aadhaarfrontImage"]?.[0]?.path;
+    const aadhaarbackImageUrl = req.files["aadhaarbackImage"]?.[0]?.path;
+
     const panImageUrl = req.files["panImage"]?.[0]?.path;
     const otherPolicyUrl = req.files["otherPolicy"]?.[0]?.path;
 
@@ -343,7 +345,9 @@ exports.createVendor = async (req, res) => {
       documents: {
         aadhaarNumber: documents.aadhaarNumber || "",
         panNumber: documents.panNumber || "",
-        aadhaarImage: aadhaarImageUrl,
+        aadhaarfrontImage: aadhaarfrontImageUrl,
+        aadhaarbackImage:aadhaarbackImageUrl ,
+
         panImage: panImageUrl,
         otherPolicy: otherPolicyUrl,
       },
@@ -388,7 +392,8 @@ exports.addTeamMember = async (req, res) => {
     const addressDetails = JSON.parse(req.body.address || "{}");
 
     const profileImageUrl = req.files["profileImage"]?.[0]?.path;
-    const aadhaarImageUrl = req.files["aadhaarImage"]?.[0]?.path;
+   const aadhaarfrontImageUrl = req.files["aadhaarfrontImage"]?.[0]?.path;
+    const aadhaarbackImageUrl = req.files["aadhaarbackImage"]?.[0]?.path;
     const panImageUrl = req.files["panImage"]?.[0]?.path;
     const otherPolicyUrl = req.files["otherPolicy"]?.[0]?.path;
 
@@ -407,7 +412,8 @@ exports.addTeamMember = async (req, res) => {
       documents: {
         aadhaarNumber: documents.aadhaarNumber || "",
         panNumber: documents.panNumber || "",
-        aadhaarImage: aadhaarImageUrl,
+       aadhaarfrontImage: aadhaarfrontImageUrl,
+        aadhaarbackImage:aadhaarbackImageUrl ,
         panImage: panImageUrl,
         otherPolicy: otherPolicyUrl,
       },
