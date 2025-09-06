@@ -60,49 +60,157 @@ function normalizeLegacy(payload) {
 }
 
 function recomputeTotals(doc) {
+  // global rollups you already expose
   let wallsArea = 0,
     ceilingsArea = 0,
-    other = 0;
+    measurementsArea = 0;
 
+  // new sectionwise rollup for the Measurement Summary card
+  const bySection = { Interior: 0, Exterior: 0, Others: 0 };
+
+  const netRect = (r, sectionType) => {
+    // For Interior sections, always recompute net — don’t trust frontend
+    if (sectionType === "Interior") {
+      const gross = area(r?.width, r?.height);
+      const openings = [
+        ...(r?.windows || []),
+        ...(r?.doors || []),
+        ...(r?.cupboards || []),
+      ].reduce((s, o) => s + toNum(o.area ?? area(o.width, o.height)), 0);
+      return Math.max(gross - openings, 0);
+    }
+
+    // For Exterior/Others, trust totalSqt if present
+    if (r?.totalSqt != null) return toNum(r.totalSqt);
+
+    // fallback
+    const gross = area(r?.width, r?.height);
+    const openings = [
+      ...(r?.windows || []),
+      ...(r?.doors || []),
+      ...(r?.cupboards || []),
+    ].reduce((s, o) => s + toNum(o.area ?? area(o.width, o.height)), 0);
+    return Math.max(gross - openings, 0);
+  };
+  // const netRect = (r) => {
+  //   // prefer totalSqt when present (already net)
+  //   if (r?.totalSqt != null) return toNum(r.totalSqt);
+
+  //   // else compute gross - openings
+  //   const gross = area(r?.width, r?.height);
+  //   const openings = [
+  //     ...(r?.windows || []),
+  //     ...(r?.doors || []),
+  //     ...(r?.cupboards || []),
+  //   ].reduce((s, o) => s + toNum(o.area ?? area(o.width, o.height)), 0);
+
+  //   return Math.max(gross - openings, 0);
+  // };
+
+  const asMeas = (m) =>
+    m?.totalSqt != null
+      ? toNum(m.totalSqt)
+      : toNum(m.area ?? area(m.width, m.height));
+
+  // NOTE: doc.rooms is a Mongoose Map
   for (const [, room] of doc.rooms) {
-    ceilingsArea += (room.ceilings || []).reduce((s, w) => {
-      if (w.totalSqt != null) return s + toNum(w.totalSqt);
-      const gross = area(w.width, w.height);
-      const openings = [
-        ...(w.windows || []),
-        ...(w.doors || []),
-        ...(w.cupboards || []),
-      ].reduce((ss, o) => ss + toNum(o.area ?? area(o.width, o.height)), 0);
-      return s + Math.max(gross - openings, 0);
-    }, 0);
+    // const roomWalls = (room.walls || []).reduce((s, w) => s + netRect(w), 0);
+    // const roomCeilings = (room.ceilings || []).reduce(
+    //   (s, c) => s + netRect(c),
+    //   0
+    // );
+    const roomWalls = (room.walls || []).reduce(
+      (s, w) => s + netRect(w, room.sectionType),
+      0
+    );
+    const roomCeilings = (room.ceilings || []).reduce(
+      (s, c) => s + netRect(c, room.sectionType),
+      0
+    );
+    const roomMeas = (room.measurements || []).reduce(
+      (s, m) => s + asMeas(m),
+      0
+    );
 
-    wallsArea += (room.walls || []).reduce((s, w) => {
-      if (w.totalSqt != null) return s + toNum(w.totalSqt);
-      const gross = area(w.width, w.height);
-      const openings = [
-        ...(w.windows || []),
-        ...(w.doors || []),
-        ...(w.cupboards || []),
-      ].reduce((ss, o) => ss + toNum(o.area ?? area(o.width, o.height)), 0);
-      return s + Math.max(gross - openings, 0);
-    }, 0);
+    wallsArea += roomWalls;
+    ceilingsArea += roomCeilings;
+    measurementsArea += roomMeas;
 
-    other += (room.measurements || []).reduce((s, c) => {
-      // measurements have no openings: use totalSqt if present, else area
-      const val =
-        c.totalSqt != null
-          ? toNum(c.totalSqt)
-          : toNum(c.area ?? area(c.width, c.height));
-      return s + val;
-    }, 0);
+    // Bucket by sectionType (default to Others if missing/unknown)
+    const key = (room.sectionType || "").trim().toLowerCase();
+    const bucket =
+      key === "interior"
+        ? "Interior"
+        : key === "exterior"
+        ? "Exterior"
+        : "Others";
+    bySection[bucket] += roomWalls + roomCeilings + roomMeas;
   }
 
   doc.totals = {
+    // existing fields (unchanged contract)
     wallsArea: +wallsArea.toFixed(2),
     ceilingsArea: +ceilingsArea.toFixed(2),
-    measurementsArea: +other.toFixed(2),
+    measurementsArea: +measurementsArea.toFixed(2),
+
+    // new, convenient breakdown for your “Measurement Summary” UI
+    bySection: {
+      interior: +bySection.Interior.toFixed(2),
+      exterior: +bySection.Exterior.toFixed(2),
+      others: +bySection.Others.toFixed(2),
+    },
+    grandTotal: +(
+      bySection.Interior +
+      bySection.Exterior +
+      bySection.Others
+    ).toFixed(2),
   };
 }
+
+// function recomputeTotals(doc) {
+//   let wallsArea = 0,
+//     ceilingsArea = 0,
+//     other = 0;
+
+//   for (const [, room] of doc.rooms) {
+//     ceilingsArea += (room.ceilings || []).reduce((s, w) => {
+//       if (w.totalSqt != null) return s + toNum(w.totalSqt);
+//       const gross = area(w.width, w.height);
+//       const openings = [
+//         ...(w.windows || []),
+//         ...(w.doors || []),
+//         ...(w.cupboards || []),
+//       ].reduce((ss, o) => ss + toNum(o.area ?? area(o.width, o.height)), 0);
+//       return s + Math.max(gross - openings, 0);
+//     }, 0);
+
+//     wallsArea += (room.walls || []).reduce((s, w) => {
+//       if (w.totalSqt != null) return s + toNum(w.totalSqt);
+//       const gross = area(w.width, w.height);
+//       const openings = [
+//         ...(w.windows || []),
+//         ...(w.doors || []),
+//         ...(w.cupboards || []),
+//       ].reduce((ss, o) => ss + toNum(o.area ?? area(o.width, o.height)), 0);
+//       return s + Math.max(gross - openings, 0);
+//     }, 0);
+
+//     other += (room.measurements || []).reduce((s, c) => {
+//       // measurements have no openings: use totalSqt if present, else area
+//       const val =
+//         c.totalSqt != null
+//           ? toNum(c.totalSqt)
+//           : toNum(c.area ?? area(c.width, c.height));
+//       return s + val;
+//     }, 0);
+//   }
+
+//   doc.totals = {
+//     wallsArea: +wallsArea.toFixed(2),
+//     ceilingsArea: +ceilingsArea.toFixed(2),
+//     measurementsArea: +other.toFixed(2),
+//   };
+// }
 
 function paintUnitRate(paint, mode, sectionType) {
   // One base price + optional putty
