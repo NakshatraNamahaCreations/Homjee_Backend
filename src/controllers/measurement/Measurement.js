@@ -92,20 +92,6 @@ function recomputeTotals(doc) {
     ].reduce((s, o) => s + toNum(o.area ?? area(o.width, o.height)), 0);
     return Math.max(gross - openings, 0);
   };
-  // const netRect = (r) => {
-  //   // prefer totalSqt when present (already net)
-  //   if (r?.totalSqt != null) return toNum(r.totalSqt);
-
-  //   // else compute gross - openings
-  //   const gross = area(r?.width, r?.height);
-  //   const openings = [
-  //     ...(r?.windows || []),
-  //     ...(r?.doors || []),
-  //     ...(r?.cupboards || []),
-  //   ].reduce((s, o) => s + toNum(o.area ?? area(o.width, o.height)), 0);
-
-  //   return Math.max(gross - openings, 0);
-  // };
 
   const asMeas = (m) =>
     m?.totalSqt != null
@@ -114,11 +100,6 @@ function recomputeTotals(doc) {
 
   // NOTE: doc.rooms is a Mongoose Map
   for (const [, room] of doc.rooms) {
-    // const roomWalls = (room.walls || []).reduce((s, w) => s + netRect(w), 0);
-    // const roomCeilings = (room.ceilings || []).reduce(
-    //   (s, c) => s + netRect(c),
-    //   0
-    // );
     const roomWalls = (room.walls || []).reduce(
       (s, w) => s + netRect(w, room.sectionType),
       0
@@ -167,51 +148,6 @@ function recomputeTotals(doc) {
   };
 }
 
-// function recomputeTotals(doc) {
-//   let wallsArea = 0,
-//     ceilingsArea = 0,
-//     other = 0;
-
-//   for (const [, room] of doc.rooms) {
-//     ceilingsArea += (room.ceilings || []).reduce((s, w) => {
-//       if (w.totalSqt != null) return s + toNum(w.totalSqt);
-//       const gross = area(w.width, w.height);
-//       const openings = [
-//         ...(w.windows || []),
-//         ...(w.doors || []),
-//         ...(w.cupboards || []),
-//       ].reduce((ss, o) => ss + toNum(o.area ?? area(o.width, o.height)), 0);
-//       return s + Math.max(gross - openings, 0);
-//     }, 0);
-
-//     wallsArea += (room.walls || []).reduce((s, w) => {
-//       if (w.totalSqt != null) return s + toNum(w.totalSqt);
-//       const gross = area(w.width, w.height);
-//       const openings = [
-//         ...(w.windows || []),
-//         ...(w.doors || []),
-//         ...(w.cupboards || []),
-//       ].reduce((ss, o) => ss + toNum(o.area ?? area(o.width, o.height)), 0);
-//       return s + Math.max(gross - openings, 0);
-//     }, 0);
-
-//     other += (room.measurements || []).reduce((s, c) => {
-//       // measurements have no openings: use totalSqt if present, else area
-//       const val =
-//         c.totalSqt != null
-//           ? toNum(c.totalSqt)
-//           : toNum(c.area ?? area(c.width, c.height));
-//       return s + val;
-//     }, 0);
-//   }
-
-//   doc.totals = {
-//     wallsArea: +wallsArea.toFixed(2),
-//     ceilingsArea: +ceilingsArea.toFixed(2),
-//     measurementsArea: +other.toFixed(2),
-//   };
-// }
-
 function paintUnitRate(paint, mode, sectionType) {
   // One base price + optional putty
   const base = toNum(paint?.price);
@@ -245,7 +181,7 @@ function displayPaintName(paint, mode, sectionType) {
 }
 
 exports.saveMeasurement = async (req, res) => {
-  const { vendorId, leadId } = req.body;
+  const { vendorId, leadId, previousRoomName, newRoomName } = req.body;
   let { rooms } = req.body;
 
   if (!vendorId || !leadId) {
@@ -258,13 +194,44 @@ exports.saveMeasurement = async (req, res) => {
     return res.status(400).json({ message: "No rooms provided" });
   }
 
+  const norm = (s) =>
+    String(s || "")
+      .trim()
+      .replace(/\s+/g, " ")
+      .toLowerCase();
+
   try {
     let doc = await Measurement.findOne({ vendorId, leadId });
     if (!doc) doc = new Measurement({ vendorId, leadId, rooms: {} });
 
+    // 1) Upsert incoming rooms (usually just one)
     Object.entries(rooms).forEach(([name, room]) => {
       doc.rooms.set(name, room);
     });
+
+    // 2) If a rename was requested, remove the old key (case-insensitive)
+    const prev = previousRoomName;
+    const next = newRoomName;
+
+    if (prev && next && norm(prev) !== norm(next)) {
+      // find the exact stored key for prev (case/whitespace safe)
+      let storedPrevKey = null;
+      for (const key of doc.rooms.keys()) {
+        if (norm(key) === norm(prev)) {
+          storedPrevKey = key;
+          break;
+        }
+      }
+
+      // confirm that the new key exists after upsert, then delete the old one
+      const newExists = Array.from(doc.rooms.keys()).some(
+        (k) => norm(k) === norm(next)
+      );
+
+      if (storedPrevKey && newExists && storedPrevKey !== next) {
+        doc.rooms.delete(storedPrevKey);
+      }
+    }
 
     recomputeTotals(doc);
     await doc.save();

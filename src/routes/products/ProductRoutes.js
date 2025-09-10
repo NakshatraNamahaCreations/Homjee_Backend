@@ -34,7 +34,9 @@ const {
   getProductsByType,
   addFinishingPaints,
   listFinishingPaintsByProductType,
-  getAllFunishingPaints,
+  getAllFinishingPaints,
+  updateFinishingPaint,
+  deleteFinishingPaint,
 } = require("../../controllers/products/ProductController");
 
 router.post("/add-paint", addPaint);
@@ -48,6 +50,8 @@ router.delete("/delete-package/:id", deletePackage);
 router.get("/get-products-by-type", getProductsByType);
 router.post("/add-finishing-paints", addFinishingPaints);
 router.get("/list-finishing-paints", listFinishingPaintsByProductType);
-router.get("/get-all-finishing-paints", getAllFunishingPaints);
+router.get("/get-all-finishing-paints", getAllFinishingPaints);
+router.put("/update-finishing-paint/:id", updateFinishingPaint);
+router.delete("/delete-finishing-paint/:id", deleteFinishingPaint);
 
 module.exports = router;

@@ -19,14 +19,24 @@ router.get(
   "/get-nearest-booking-by-location-deep-cleaning/:lat/:long",
   bookingController.getBookingForNearByVendorsDeepCleaning
 );
+// router.get(
+//   "/deep-cleaning-vendor-performance",
+//   bookingController.getDeepCleaningPerformance
+// );
+
+router.get(
+  "/deep-cleaning-vendor-performance-metrics/:vendorId/:lat/:long/:timeframe",
+  bookingController.getVendorPerformanceMetricsDeepCleaning
+);
+
 router.get(
   "/get-nearest-booking-by-location-house-painting/:lat/:long",
   bookingController.getBookingForNearByVendorsHousePainting
 );
 
 router.post(
-  "/update-confirm-job-status",
-  bookingController.updateConfirmedStatus
+  "/response-confirm-job",
+  bookingController.respondConfirmJobVendorLine
 );
 
 router.get(

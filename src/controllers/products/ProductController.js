@@ -511,7 +511,7 @@ exports.listFinishingPaintsByProductType = async (req, res) => {
   }
 };
 
-exports.getAllFunishingPaints = async (req, res) => {
+exports.getAllFinishingPaints = async (req, res) => {
   try {
     const productDoc = await Product.findOne();
     if (
@@ -525,5 +525,49 @@ exports.getAllFunishingPaints = async (req, res) => {
   } catch (error) {
     console.error("Error fetching paints:", error);
     res.status(500).json({ message: "Internal Server Error" });
+  }
+};
+
+exports.updateFinishingPaint = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { paintName, paintPrice, description, paintType } = req.body;
+
+    const productDoc = await Product.findOne();
+    if (!productDoc)
+      return res.status(404).json({ message: "No products found" });
+
+    const paint = productDoc.additionalPaints.id(id);
+    if (!paint) return res.status(404).json({ message: "Paint not found" });
+
+    paint.paintName = paintName ?? paint.paintName;
+    paint.paintPrice = paintPrice ?? paint.paintPrice;
+    paint.description = description ?? paint.description;
+    paint.paintType = paintType ?? paint.paintType;
+
+    await productDoc.save();
+    res.json({ message: "Updated successfully", data: paint });
+  } catch (e) {
+    console.error("Update error:", e);
+    res.status(500).json({ message: "Internal server error" });
+  }
+};
+
+exports.deleteFinishingPaint = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const productDoc = await Product.findOne();
+    if (!productDoc)
+      return res.status(404).json({ message: "No products found" });
+
+    productDoc.additionalPaints = productDoc.additionalPaints.filter(
+      (p) => p._id.toString() !== id
+    );
+
+    await productDoc.save();
+    res.json({ message: "Deleted successfully" });
+  } catch (e) {
+    console.error("Delete error:", e);
+    res.status(500).json({ message: "Internal server error" });
   }
 };

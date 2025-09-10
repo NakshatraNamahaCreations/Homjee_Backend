@@ -45,6 +45,32 @@ const bookingDetailsSchema = new mongoose.Schema({
   scope: String,
   hasPriceUpdated: { type: Boolean, default: false },
 });
+const invitedVendorSchema = new mongoose.Schema({
+  professionalId: String,
+  invitedAt: Date,
+  respondedAt: Date,
+  cancelledAt: Date,
+  cancelledBy: {
+    type: String,
+    enum: ["internal", "external"], // internal = vendor (app), external = customer/admin (website)
+    // default: "external", // safer default
+  },
+  responseStatus: {
+    type: String,
+    enum: [
+      "pending",
+      "accepted",
+      "declined",
+      "started",
+      "completed",
+      "customer_cancelled",
+      // "vendor_cancelled",
+      "unreachable",
+    ],
+    default: "pending",
+  },
+});
+
 const assignedProfessionalSchema = new mongoose.Schema({
   professionalId: String,
   name: String,
@@ -83,6 +109,7 @@ const userBookingSchema = new mongoose.Schema({
   },
   selectedSlot: selectedSlot,
   isEnquiry: Boolean,
+  invitedVendors: [invitedVendorSchema],
   formName: { type: String, required: true }, // Add formName
   createdDate: { type: Date, default: Date.now },
 });

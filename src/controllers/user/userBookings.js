@@ -1,6 +1,8 @@
 const UserBooking = require("../../models/user/userBookings");
 const moment = require("moment");
 const crypto = require("crypto");
+const dayjs = require("dayjs");
+const mongoose = require("mongoose");
 
 function generateOTP() {
   return crypto.randomInt(1000, 10000);
@@ -12,6 +14,61 @@ const ymdLocal = (d) => {
   const dd = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${dd}`;
 };
+
+// const mapStatusToInvite = (status) => {
+//   switch (status) {
+//     case "Confirmed":
+//       return "accepted";
+//     case "Ongoing":
+//       return "started";
+//     case "Completed":
+//       return "completed";
+//     case "Customer Unreachable":
+//       return "unreachable";
+//     case "Customer Cancelled":
+//       return "customer_cancelled";
+//     // return "vendor_cancelled";
+//     // if vendor explicitly declines (no booking status change), you’ll pass status='Declined' from UI
+//     case "Declined":
+//       return "declined";
+//     default:
+//       return "pending";
+//   }
+// };
+function mapStatusToInvite(status, cancelledByFromClient) {
+  switch (status) {
+    case "Confirmed":
+      return { responseStatus: "accepted" };
+
+    case "Ongoing":
+      return { responseStatus: "started" };
+
+    case "Completed":
+      return { responseStatus: "completed" };
+
+    case "Customer Unreachable":
+      return { responseStatus: "unreachable" };
+
+    case "Customer Cancelled": {
+      // keep your current enum; or use "vendor_cancelled" if you add it later
+      const allowed = ["internal", "external"];
+      const cancelledBy = allowed.includes(cancelledByFromClient)
+        ? cancelledByFromClient
+        : "internal"; // safer default when called from vendor app
+      return {
+        responseStatus: "customer_cancelled",
+        cancelledBy,
+        cancelledAt: new Date(),
+      };
+    }
+
+    case "Declined":
+      return { responseStatus: "declined" };
+
+    default:
+      return { responseStatus: "pending" };
+  }
+}
 
 exports.createBooking = async (req, res) => {
   try {
@@ -172,6 +229,7 @@ exports.getBookingsByCustomerId = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
 // only for today
 // exports.getBookingForNearByVendors = async (req, res) => {
 //   try {
@@ -265,8 +323,8 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     // );
     const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().slice(0, 10);
 
-    console.log("todayStart:", todayStart);
-    console.log("dayAfterTomorrowStr:", dayAfterTomorrowStr);
+    // console.log("todayStart:", todayStart);
+    // console.log("dayAfterTomorrowStr:", dayAfterTomorrowStr);
 
     // Fetch bookings for today and tomorrow
     const nearbyBookings = await UserBooking.find({
@@ -288,16 +346,16 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       },
     }).sort({ createdAt: -1 });
 
-    console.log("Bookings found for date range:", nearbyBookings.length);
+    // console.log("Bookings found for date range:", nearbyBookings.length);
 
-    nearbyBookings.forEach((b) => {
-      console.log(
-        "Booking slotDate:",
-        b.selectedSlot.slotDate,
-        "slotTime:",
-        b.selectedSlot.slotTime
-      );
-    });
+    // nearbyBookings.forEach((b) => {
+    //   console.log(
+    //     "Booking slotDate:",
+    //     b.selectedSlot.slotDate,
+    //     "slotTime:",
+    //     b.selectedSlot.slotTime
+    //   );
+    // });
 
     const nowMoment = moment();
     const filteredBookings = nearbyBookings.filter((booking) => {
@@ -334,6 +392,565 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
   } catch (error) {
     console.error("Error finding nearby bookings:", error);
     res.status(500).json({ message: "Server error" });
+  }
+};
+
+// exports.getDeepCleaningPerformance = async (req, res) => {
+//   try {
+//     const {
+//       vendorId,
+//       category = "Deep Cleaning",
+//       scope = "month", // month | last | all | (range via start/end)
+//       lastDays = 30,
+//       start,
+//       end,
+//       debug,
+//     } = req.query;
+
+//     if (!vendorId)
+//       return res.status(400).json({ message: "vendorId required" });
+
+//     // ---- base match (by category and enquiry flag) ----
+//     const baseMatch = {
+//       isEnquiry: false,
+//       "service.category": category,
+//       // Important: denominator should include leads OFFERED to this vendor OR ASSIGNED to them
+//       $or: [
+//         { "assignedProfessional.professionalId": vendorId },
+//         { "invitedVendors.professionalId": vendorId }, // will work if you add the schema field
+//       ],
+//     };
+
+//     // ---- time window on metricDate (createdDate -> bookingDetails.bookingDate) ----
+//     const window = (() => {
+//       if (start && end) {
+//         return {
+//           $gte: dayjs(start).startOf("day").toDate(),
+//           $lt: dayjs(end).endOf("day").toDate(),
+//         };
+//       }
+//       if (scope === "all") return null;
+//       if (scope === "last") {
+//         const n = Number(lastDays) || 30;
+//         return {
+//           $gte: dayjs().subtract(n, "day").startOf("day").toDate(),
+//           $lt: dayjs().endOf("day").toDate(),
+//         };
+//       }
+//       // default month
+//       return {
+//         $gte: dayjs().startOf("month").toDate(),
+//         $lt: dayjs().endOf("month").toDate(),
+//       };
+//     })();
+
+//     const head = [
+//       { $match: baseMatch },
+//       {
+//         $addFields: {
+//           metricDate: {
+//             $ifNull: ["$createdDate", "$bookingDetails.bookingDate"],
+//           },
+
+//           // pick this vendor's invite (if any)
+//           vendorInvite: {
+//             $first: {
+//               $filter: {
+//                 input: { $ifNull: ["$invitedVendors", []] },
+//                 as: "iv",
+//                 cond: { $eq: ["$$iv.professionalId", vendorId] },
+//               },
+//             },
+//           },
+//         },
+//       },
+//     ];
+
+//     // ---- optional diagnostics to see counts/statuses ----
+//     if (String(debug) === "1") {
+//       const diagPipeline = [
+//         ...head,
+//         {
+//           $facet: {
+//             allForVendor: [{ $count: "n" }],
+//             inWindow: [
+//               ...(window ? [{ $match: { metricDate: window } }] : []),
+//               { $count: "n" },
+//             ],
+//             byStatus: [
+//               ...(window ? [{ $match: { metricDate: window } }] : []),
+//               { $group: { _id: "$bookingDetails.status", count: { $sum: 1 } } },
+//               { $sort: { count: -1 } },
+//             ],
+//             byInviteResp: [
+//               ...(window ? [{ $match: { metricDate: window } }] : []),
+//               {
+//                 $group: {
+//                   _id: "$vendorInvite.responseStatus",
+//                   count: { $sum: 1 },
+//                 },
+//               },
+//               { $sort: { count: -1 } },
+//             ],
+//             sample: [
+//               ...(window ? [{ $match: { metricDate: window } }] : []),
+//               {
+//                 $project: {
+//                   _id: 1,
+//                   metricDate: 1,
+//                   "bookingDetails.status": 1,
+//                   "assignedProfessional.professionalId": 1,
+//                   "vendorInvite.responseStatus": 1,
+//                 },
+//               },
+//               { $limit: 10 },
+//             ],
+//           },
+//         },
+//       ];
+//       const [diag] = await UserBooking.aggregate(diagPipeline);
+//       return res.json({ scope, window, category, diag });
+//     }
+
+//     // ---- KPI pipeline ----
+//     const pipeline = [
+//       ...head,
+//       ...(window ? [{ $match: { metricDate: window } }] : []),
+
+//       // Compute KPIs per vendor perspective:
+//       {
+//         $addFields: {
+//           // Responded if:
+//           // - invite exists and responseStatus is not 'pending'
+//           // - OR no invite recorded but booking status != Pending (fallback to your current behavior)
+//           isResponded: {
+//             $cond: [
+//               {
+//                 $gt: [
+//                   { $ifNull: ["$vendorInvite.professionalId", null] },
+//                   null,
+//                 ],
+//               },
+//               {
+//                 $ne: [
+//                   { $ifNull: ["$vendorInvite.responseStatus", "pending"] },
+//                   "pending",
+//                 ],
+//               },
+//               { $ne: ["$bookingDetails.status", "Pending"] },
+//             ],
+//           },
+
+//           // Treat these as cancellations for KPI (no vendor cancel timestamp in schema)
+//           isCancelled: {
+//             $in: [
+//               {
+//                 $ifNull: [
+//                   "$vendorInvite.responseStatus",
+//                   "$bookingDetails.status",
+//                 ],
+//               },
+//               [
+//                 "customer_cancelled",
+//                 "unreachable",
+//                 "Customer Cancelled",
+//                 "Customer Unreachable",
+//               ],
+//             ],
+//           },
+
+//           // GSV fallback: paidAmount → Σ(service.price * quantity)
+//           projectValue: {
+//             $ifNull: [
+//               "$bookingDetails.paidAmount",
+//               {
+//                 $sum: {
+//                   $map: {
+//                     input: { $ifNull: ["$service", []] },
+//                     as: "s",
+//                     in: {
+//                       $multiply: [
+//                         { $ifNull: ["$$s.price", 0] },
+//                         { $ifNull: ["$$s.quantity", 1] },
+//                       ],
+//                     },
+//                   },
+//                 },
+//               },
+//             ],
+//           },
+//         },
+//       },
+
+//       // Collapse to KPIs
+//       {
+//         $group: {
+//           _id: null,
+//           totalLeads: { $sum: 1 }, // denominator = offered OR assigned in window
+//           responded: { $sum: { $cond: ["$isResponded", 1, 0] } },
+//           cancelled: { $sum: { $cond: ["$isCancelled", 1, 0] } },
+//           totalGsv: { $sum: "$projectValue" },
+//         },
+//       },
+//       {
+//         $project: {
+//           _id: 0,
+//           totalLeads: 1,
+//           response: {
+//             count: "$responded",
+//             percent: {
+//               $cond: [
+//                 { $gt: ["$totalLeads", 0] },
+//                 {
+//                   $round: [
+//                     {
+//                       $multiply: [
+//                         { $divide: ["$responded", "$totalLeads"] },
+//                         100,
+//                       ],
+//                     },
+//                     2,
+//                   ],
+//                 },
+//                 0,
+//               ],
+//             },
+//           },
+//           cancellation: {
+//             count: "$cancelled",
+//             percent: {
+//               $cond: [
+//                 { $gt: ["$responded", 0] },
+//                 {
+//                   $round: [
+//                     {
+//                       $multiply: [
+//                         { $divide: ["$cancelled", "$responded"] },
+//                         100,
+//                       ],
+//                     },
+//                     2,
+//                   ],
+//                 },
+//                 0,
+//               ],
+//             },
+//           },
+//           averageGsv: {
+//             $cond: [
+//               { $gt: ["$totalLeads", 0] },
+//               { $round: [{ $divide: ["$totalGsv", "$totalLeads"] }, 0] },
+//               0,
+//             ],
+//           },
+//         },
+//       },
+//     ];
+
+//     const out = await UserBooking.aggregate(pipeline);
+//     const result = out[0] || {
+//       totalLeads: 0,
+//       response: { count: 0, percent: 0 },
+//       cancellation: { count: 0, percent: 0 },
+//       averageGsv: 0,
+//     };
+
+//     return res.json({
+//       scope: start && end ? "range" : scope,
+//       window: start && end ? { start, end } : undefined,
+//       category,
+//       ...result,
+//     });
+//   } catch (err) {
+//     console.error("getDeepCleaningPerformance", err);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+// exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
+//   try {
+//     const { vendorId, lat, long, timeframe } = req.params;
+
+//     if (!vendorId || !lat || !long || !timeframe) {
+//       return res.status(400).json({
+//         message: "Vendor ID, Latitude, Longitude, and Timeframe are required",
+//       });
+//     }
+
+//     const baseQuery = {
+//       "address.location": {
+//         $near: {
+//           $geometry: {
+//             type: "Point",
+//             coordinates: [parseFloat(long), parseFloat(lat)],
+//           },
+//           $maxDistance: 5000,
+//         },
+//       },
+//       "service.category": "Deep Cleaning",
+//       isEnquiry: false,
+//     };
+
+//     let query = { ...baseQuery };
+
+//     if (timeframe === "month") {
+//       const startOfMonth = moment().startOf("month").toDate();
+//       query.createdDate = { $gte: startOfMonth };
+//     }
+
+//     let bookingsQuery = UserBooking.find(query);
+
+//     if (timeframe === "last") {
+//       bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
+//     }
+
+//     const bookings = await bookingsQuery.exec();
+
+//     if (!bookings.length) {
+//       return res.status(200).json({
+//         responseRate: 0,
+//         cancellationRate: 0,
+//         averageGsv: 0,
+//         totalLeads: 0,
+//         respondedLeads: 0,
+//         cancelledLeads: 0,
+//         timeframe: timeframe,
+//       });
+//     }
+
+//     let totalLeads = 0;
+//     let respondedLeads = 0;
+//     let cancelledLeads = 0;
+//     let totalGsv = 0;
+
+//     bookings.forEach((booking) => {
+//       totalLeads += 1;
+
+//       // Calculate GSV for this booking
+//       const bookingGsv = booking.service.reduce(
+//         (sum, serviceItem) =>
+//           sum + (serviceItem.price * serviceItem.quantity || 0),
+//         0
+//       );
+//       totalGsv += bookingGsv;
+
+//       const vendorInvitation = booking.invitedVendors.find(
+//         (v) => v.professionalId === vendorId
+//       );
+
+//       if (vendorInvitation) {
+//         if (vendorInvitation.responseStatus === "accepted") {
+//           respondedLeads += 1;
+//         }
+//         if (
+//           vendorInvitation.responseStatus === "customer_cancelled" || // change the status based on cancellation / vendor or customer
+//           (vendorInvitation.responseStatus === "vendor_cancelled" &&
+//             vendorInvitation.cancelledAt &&
+//             vendorInvitation.respondedAt) // They must have accepted first
+//         ) {
+//           // Parse the booked slot time
+//           const bookedSlot = moment(
+//             `${booking.selectedSlot.slotDate} ${booking.selectedSlot.slotTime}`,
+//             "YYYY-MM-DD hh:mm A"
+//           );
+
+//           const cancelledAt = moment(vendorInvitation.cancelledAt);
+//           const respondedAt = moment(vendorInvitation.respondedAt);
+
+//           // Calculate if cancellation happened within 3 hours of the booked slot
+//           const hoursDiff = Math.abs(bookedSlot.diff(cancelledAt, "hours"));
+
+//           if (hoursDiff <= 3) {
+//             cancelledLeads += 1;
+//           }
+//         }
+//       }
+//     });
+
+//     const responseRate =
+//       totalLeads > 0 ? (respondedLeads / totalLeads) * 100 : 0;
+
+//     const cancellationRate =
+//       respondedLeads > 0 ? (cancelledLeads / respondedLeads) * 100 : 0;
+
+//     // ✅ Calculate Average GSV
+//     const averageGsv = totalLeads > 0 ? totalGsv / totalLeads : 0;
+
+//     res.status(200).json({
+//       responseRate: parseFloat(responseRate.toFixed(2)),
+//       cancellationRate: parseFloat(cancellationRate.toFixed(2)),
+//       averageGsv: parseFloat(averageGsv.toFixed(2)),
+//       totalLeads,
+//       respondedLeads,
+//       cancelledLeads,
+//       timeframe: timeframe,
+//     });
+//   } catch (error) {
+//     console.error("Error calculating vendor performance metrics:", error);
+//     res.status(500).json({ message: "Server error calculating performance" });
+//   }
+// };
+
+exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
+  try {
+    const { vendorId, lat, long, timeframe } = req.params;
+
+    if (!vendorId || !lat || !long || !timeframe) {
+      return res.status(400).json({
+        message: "Vendor ID, Latitude, Longitude, and Timeframe are required",
+      });
+    }
+
+    const baseQuery = {
+      "address.location": {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [parseFloat(long), parseFloat(lat)],
+          },
+          $maxDistance: 5000,
+        },
+      },
+      "service.category": "Deep Cleaning",
+      isEnquiry: false,
+    };
+
+    let query = { ...baseQuery };
+
+    if (timeframe === "month") {
+      const startOfMonth = moment().startOf("month").toDate();
+      query.createdDate = { $gte: startOfMonth };
+    }
+
+    let bookingsQuery = UserBooking.find(query);
+
+    if (timeframe === "last") {
+      bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
+    }
+
+    const bookings = await bookingsQuery.exec();
+    let totalLeads = bookings.length; // count ALL geo-filtered leads shown to vendor
+    let respondedLeads = 0;
+    let cancelledLeads = 0;
+    let totalGsv = 0;
+
+    if (!bookings.length) {
+      return res.status(200).json({
+        responseRate: 0,
+        cancellationRate: 0,
+        averageGsv: 0,
+        totalLeads: 0,
+        respondedLeads: 0,
+        cancelledLeads: 0,
+        timeframe: timeframe,
+      });
+    }
+
+    // bookings.forEach((booking) => {
+    //   const vendorInvitation = booking.invitedVendors.find(
+    //     (v) => v.professionalId === vendorId
+    //   );
+
+    //   // If no invitation for this vendor, skip
+    //   if (!vendorInvitation) {
+    //     return;
+    //   }
+
+    //   // ✅ Count every lead sent to this vendor
+    //   totalLeads += 1;
+
+    //   // Calculate GSV for this booking
+    //   const bookingGsv = booking.service.reduce(
+    //     (sum, serviceItem) =>
+    //       sum + (serviceItem.price * serviceItem.quantity || 0),
+    //     0
+    //   );
+    //   totalGsv += bookingGsv;
+
+    //   // Count if vendor responded (accepted or cancelled)
+    //   if (
+    //     vendorInvitation.responseStatus === "accepted" ||
+    //     vendorInvitation.responseStatus === "customer_cancelled"
+    //   ) {
+    //     respondedLeads += 1;
+
+    //     // Check if cancelled by vendor within 3 hours
+    //     if (
+    //       vendorInvitation.responseStatus === "customer_cancelled" &&
+    //       vendorInvitation.cancelledAt &&
+    //       vendorInvitation.cancelledBy === "internal"
+    //     ) {
+    //       const bookedSlot = moment(
+    //         `${booking.selectedSlot.slotDate} ${booking.selectedSlot.slotTime}`,
+    //         "YYYY-MM-DD hh:mm A"
+    //       );
+    //       const cancelledAt = moment(vendorInvitation.cancelledAt);
+    //       const hoursDiff = Math.abs(bookedSlot.diff(cancelledAt, "hours"));
+
+    //       if (hoursDiff <= 3) {
+    //         cancelledLeads += 1;
+    //       }
+    //     }
+    //   }
+    // });
+    for (const booking of bookings) {
+      // GSV of every lead (not just responded)
+      const bookingGsv = (booking.service || []).reduce(
+        (sum, s) => sum + (s.price || 0) * (s.quantity || 0),
+        0
+      );
+      totalGsv += bookingGsv;
+
+      const vendorInvitation = (booking.invitedVendors || []).find(
+        (v) => String(v.professionalId) === String(vendorId)
+      );
+      if (!vendorInvitation) continue;
+
+      // considered "responded" = accepted (or your special “customer_cancelled” flag)
+      if (
+        vendorInvitation.responseStatus === "accepted" ||
+        vendorInvitation.responseStatus === "customer_cancelled"
+      ) {
+        respondedLeads += 1;
+      }
+
+      // “cancelled within 3 hours” logic
+      if (
+        vendorInvitation.responseStatus === "customer_cancelled" &&
+        vendorInvitation.cancelledAt &&
+        vendorInvitation.cancelledBy === "internal"
+      ) {
+        const bookedSlot = moment(
+          `${booking.selectedSlot.slotDate} ${booking.selectedSlot.slotTime}`,
+          "YYYY-MM-DD hh:mm A"
+        );
+        const hoursDiff = Math.abs(
+          bookedSlot.diff(moment(vendorInvitation.cancelledAt), "hours", true)
+        );
+        if (hoursDiff <= 3) cancelledLeads += 1;
+      }
+    }
+
+    const responseRate =
+      totalLeads > 0 ? (respondedLeads / totalLeads) * 100 : 0;
+
+    const cancellationRate =
+      respondedLeads > 0 ? (cancelledLeads / respondedLeads) * 100 : 0;
+
+    const averageGsv = totalLeads > 0 ? totalGsv / totalLeads : 0;
+
+    res.status(200).json({
+      responseRate: parseFloat(responseRate.toFixed(2)),
+      cancellationRate: parseFloat(cancellationRate.toFixed(2)),
+      averageGsv: parseFloat(averageGsv.toFixed(2)),
+      totalLeads,
+      respondedLeads,
+      cancelledLeads,
+      timeframe: timeframe,
+    });
+  } catch (error) {
+    console.error("Error calculating vendor performance metrics:", error);
+    res.status(500).json({ message: "Server error calculating performance" });
   }
 };
 
@@ -401,29 +1018,123 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
   }
 };
 
-exports.updateConfirmedStatus = async (req, res) => {
+// exports.respondConfirmJobVendorLine = async (req, res) => {
+//   try {
+//     const { bookingId, status, assignedProfessional, vendorId } = req.body;
+//     // vendorId is the professional who is acting
+//     if (!bookingId)
+//       return res.status(400).json({ message: "bookingId is required" });
+//     if (!vendorId)
+//       return res
+//         .status(400)
+//         .json({ message: "vendorId (professionalId) is required" });
+
+//     const updateFields = {};
+//     if (status) updateFields["bookingDetails.status"] = status;
+//     if (assignedProfessional)
+//       updateFields.assignedProfessional = assignedProfessional;
+
+//     // 1) Ensure invite exists (backfill if needed)
+//     await UserBooking.updateOne(
+//       { _id: bookingId, "invitedVendors.professionalId": { $ne: vendorId } },
+//       {
+//         $addToSet: {
+//           invitedVendors: {
+//             professionalId: vendorId,
+//             invitedAt: new Date(),
+//             responseStatus: "pending",
+//           },
+//         },
+//       }
+//     );
+
+//     // 2) Update booking + invitedVendors entry atomically
+//     const inviteStatus = mapStatusToInvite(status);
+//     const result = await UserBooking.findOneAndUpdate(
+//       { _id: bookingId },
+//       {
+//         $set: {
+//           ...updateFields,
+//           "invitedVendors.$[iv].responseStatus": inviteStatus,
+//           "invitedVendors.$[iv].respondedAt": new Date(),
+//         },
+//       },
+//       {
+//         new: true,
+//         arrayFilters: [{ "iv.professionalId": vendorId }],
+//       }
+//     );
+
+//     if (!result) return res.status(404).json({ message: "Booking not found" });
+//     return res
+//       .status(200)
+//       .json({ message: "Booking updated", booking: result });
+//   } catch (error) {
+//     console.error("Error updating booking:", error);
+//     return res
+//       .status(500)
+//       .json({ message: "Server error", error: error.message });
+//   }
+// };
+
+exports.respondConfirmJobVendorLine = async (req, res) => {
   try {
-    const { bookingId, status, assignedProfessional } = req.body;
-    console.log("bookingId", bookingId);
-    if (!bookingId) {
+    const { bookingId, status, assignedProfessional, vendorId, cancelledBy } =
+      req.body;
+    if (!bookingId)
       return res.status(400).json({ message: "bookingId is required" });
-    }
+    if (!vendorId)
+      return res
+        .status(400)
+        .json({ message: "vendorId (professionalId) is required" });
+
     const updateFields = {};
     if (status) updateFields["bookingDetails.status"] = status;
     if (assignedProfessional)
       updateFields.assignedProfessional = assignedProfessional;
 
-    const booking = await UserBooking.findByIdAndUpdate(
-      bookingId,
-      { $set: updateFields },
-      { new: true }
+    // 1) ensure invite exists
+    await UserBooking.updateOne(
+      {
+        _id: bookingId,
+        "invitedVendors.professionalId": { $ne: String(vendorId) },
+      },
+      {
+        $addToSet: {
+          invitedVendors: {
+            professionalId: String(vendorId),
+            invitedAt: new Date(),
+            responseStatus: "pending",
+          },
+        },
+      }
     );
 
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
+    // 2) build $set from the patch object (DO NOT assign the object to the string path)
+    const patch = mapStatusToInvite(status, cancelledBy);
+    const setOps = {
+      ...updateFields,
+      "invitedVendors.$[iv].respondedAt": new Date(),
+    };
+    if (patch.responseStatus)
+      setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
+    if (patch.cancelledAt)
+      setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
+    if (patch.cancelledBy)
+      setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
 
-    res.status(200).json({ message: "Booking updated", booking });
+    const result = await UserBooking.findOneAndUpdate(
+      { _id: bookingId },
+      { $set: setOps },
+      {
+        new: true,
+        runValidators: true,
+        arrayFilters: [{ "iv.professionalId": String(vendorId) }],
+      }
+    );
+
+    if (!result) return res.status(404).json({ message: "Booking not found" });
+    res.status(200).json({ message: "Booking updated", booking: result });
   } catch (error) {
     console.error("Error updating booking:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -626,37 +1337,73 @@ exports.updatePricing = async (req, res) => {
 
 exports.updateStatus = async (req, res) => {
   try {
-    const {
-      bookingId,
-      status, //reasonForCancelled
-    } = req.body;
-
-    if (!bookingId) {
+    const { bookingId, status, vendorId, reasonForCancelled, cancelledBy } =
+      req.body;
+    if (!bookingId)
       return res.status(400).json({ message: "bookingId is required" });
-    }
 
-    // Step 1: Find the booking
     const booking = await UserBooking.findById(bookingId);
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-    // Step 2: Prepare update fields
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
+
+    const actingVendorId =
+      vendorId || booking?.assignedProfessional?.professionalId;
+    if (!actingVendorId)
+      return res.status(400).json({
+        message: "vendorId is required (or assign a professional first)",
+      });
+
+    // booking-level fields
     const updateFields = {};
     if (status) updateFields["bookingDetails.status"] = status;
-    // if (reasonForCancelled)
-    //   updateFields["bookingDetails.reasonForCancelled"] = reasonForCancelled;
+    if (reasonForCancelled)
+      updateFields["bookingDetails.reasonForCancelled"] = reasonForCancelled;
 
-    // Step 3: Update the booking
-    const updatedBooking = await UserBooking.findByIdAndUpdate(
-      bookingId,
-      { $set: updateFields },
-      { new: true }
+    // ensure invite exists
+    await UserBooking.updateOne(
+      {
+        _id: bookingId,
+        "invitedVendors.professionalId": { $ne: String(actingVendorId) },
+      },
+      {
+        $addToSet: {
+          invitedVendors: {
+            professionalId: String(actingVendorId),
+            invitedAt: new Date(),
+            responseStatus: "pending",
+          },
+        },
+      }
     );
 
-    res.status(200).json({
-      message: "Status Updated",
-      booking: updatedBooking,
-    });
+    // build invite patch
+    const patch = mapStatusToInvite(status, cancelledBy);
+
+    const setOps = {
+      ...updateFields,
+      "invitedVendors.$[iv].respondedAt": new Date(),
+    };
+    if (patch.responseStatus)
+      setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
+    if (patch.cancelledAt)
+      setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
+    if (patch.cancelledBy)
+      setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
+
+    const updated = await UserBooking.findOneAndUpdate(
+      { _id: bookingId },
+      { $set: setOps },
+      {
+        new: true,
+        runValidators: true,
+        arrayFilters: [{ "iv.professionalId": String(actingVendorId) }],
+      }
+    );
+
+    if (!updated)
+      return res
+        .status(404)
+        .json({ message: "Booking not found after update" });
+    res.status(200).json({ message: "Status Updated", booking: updated });
   } catch (error) {
     console.error("Error updating booking:", error);
     res.status(500).json({ message: "Server error", error: error.message });
@@ -697,7 +1444,7 @@ exports.cancelJob = async (req, res) => {
 // // Delete booking
 // exports.deleteBooking = async (req, res) => {
 //   try {
-//     const booking = await userBookingSchema.findByIdAndDelete(req.params.id);
+//     const booking = await UserBookingSchema.findByIdAndDelete(req.params.id);
 //     if (!booking) {
 //       return res.status(404).json({ message: "Booking not found" });
 //     }
