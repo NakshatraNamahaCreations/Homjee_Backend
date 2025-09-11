@@ -25,6 +25,7 @@ const bookingDetailsSchema = new mongoose.Schema({
       "Completed", //ended
       "Customer Cancelled",
       "Customer Unreachable",
+      "Admin Cancelled",
     ],
     default: "Pending",
   },
