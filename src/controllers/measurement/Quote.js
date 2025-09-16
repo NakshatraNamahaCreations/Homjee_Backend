@@ -207,134 +207,6 @@ exports.createQuote = async (req, res) => {
   }
 };
 
-// exports.upsertQuoteRoomPricing = async (req, res) => {
-//   try {
-//     const { quoteId, roomName } = req.params;
-//     if (!Types.ObjectId.isValid(quoteId)) {
-//       return res.status(400).json({ message: "Invalid quote id" });
-//     }
-
-//     const q = await Quote.findById(quoteId);
-//     if (!q) return res.status(404).json({ message: "Quote not found" });
-
-//     let {
-//       sectionType,
-//       selectedPaints,
-//       breakdown,
-//       ceilingsTotal,
-//       wallsTotal,
-//       othersTotal,
-//       subtotal,
-//     } = req.body;
-
-//     if (typeof breakdown === "string") {
-//       try {
-//         breakdown = JSON.parse(breakdown);
-//       } catch {
-//         return res
-//           .status(400)
-//           .json({ message: "breakdown must be array/JSON array" });
-//       }
-//     }
-//     if (!Array.isArray(breakdown)) breakdown = [];
-
-//     // Coerce breakdown numbers & normalise names/ids
-//     breakdown = breakdown.map((b) => ({
-//       type: b.type,
-//       mode: b.mode,
-//       sqft: Number(b.sqft || 0),
-//       unitPrice: Number(b.unitPrice || 0),
-//       price: Number(b.price || 0),
-//       paintId: b.paintId != null ? String(b.paintId) : null,
-//       paintName: b.paintName ?? "",
-//       displayIndex:
-//         typeof b.displayIndex === "number" ? b.displayIndex : undefined,
-//     }));
-
-//     // Coerce totals
-//     ceilingsTotal = Number(ceilingsTotal || 0);
-//     wallsTotal = Number(wallsTotal || 0);
-//     othersTotal = Number(othersTotal || 0);
-//     subtotal = Number(subtotal || 0);
-
-//     const line = {
-//       roomName,
-//       sectionType,
-//       selectedPaints: {
-//         ceiling: selectedPaints?.ceiling || null,
-//         wall: selectedPaints?.wall || null,
-//         measurements: selectedPaints?.measurements || null,
-//       },
-//       breakdown,
-//       ceilingsTotal,
-//       wallsTotal,
-//       othersTotal,
-//       subtotal,
-//     };
-
-//     const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
-//     const idx = (q.lines || []).findIndex(
-//       (l) => norm(l.roomName) === norm(roomName)
-//     );
-
-//     if (idx >= 0) {
-//       q.set(`lines.${idx}`, line); // ensure change tracking
-//     } else {
-//       q.lines.push(line);
-//     }
-//     q.markModified("lines"); // belt-and-suspenders
-
-//     // --- recompute quote totals ---
-//     const interior = q.lines
-//       .filter((l) => l.sectionType === "Interior")
-//       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-//     const exterior = q.lines
-//       .filter((l) => l.sectionType === "Exterior")
-//       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-//     const others = q.lines
-//       .filter((l) => l.sectionType === "Others")
-//       .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-//     const add = Number(q.totals?.additionalServices || 0);
-
-//     const subtotalAll = Number((interior + exterior + others + add).toFixed(2));
-
-//     let discountAmount = 0;
-//     if (q.discount?.type === "PERCENT") {
-//       discountAmount = Number(
-//         (subtotalAll * (Number(q.discount.value || 0) / 100)).toFixed(2)
-//       );
-//     } else if (q.discount?.type === "FLAT") {
-//       discountAmount = Number(q.discount.amount || 0); // ← use amount for FLAT
-//       if (discountAmount > subtotalAll) discountAmount = subtotalAll;
-//       discountAmount = Number(discountAmount.toFixed(2));
-//     }
-
-//     const finalPerDay = Number(
-//       Math.max(0, subtotalAll - discountAmount).toFixed(2)
-//     );
-//     const days = Math.max(1, Number(q.days || 1));
-//     // const grandTotal = Number((finalPerDay * days).toFixed(2));
-//     const grandTotal = finalPerDay;
-
-//     q.totals = {
-//       interior,
-//       exterior,
-//       others,
-//       additionalServices: add,
-//       subtotal: subtotalAll,
-//       discountAmount,
-//       finalPerDay,
-//       grandTotal,
-//     };
-
-//     await q.save();
-//     return res.json({ message: "OK", data: { line } });
-//   } catch (err) {
-//     console.error("upsertQuoteRoomPricing error:", err);
-//     return res.status(500).json({ message: "Server error" });
-//   }
-// };
-
 const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 const sum = (arr, pick = (x) => x) =>
   arr.reduce((t, x) => t + Number(pick(x) || 0), 0);
@@ -576,8 +448,6 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
     return res.json({ message: "OK", data: { line } });
   } catch (err) {
     console.error("upsertQuoteRoomPricing error:", err);
-    // If anything still trips a version check elsewhere, you can special-case:
-    // if (err?.name === 'VersionError') return res.status(409).json({ message: 'Write conflict, retry' });
     return res.status(500).json({ message: "Server error" });
   }
 };
@@ -585,8 +455,6 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
 exports.clearQuoteServices = async (req, res) => {
   try {
     const { quoteId } = req.params;
-
-    // Validate the quoteId
     if (!Types.ObjectId.isValid(quoteId)) {
       return res.status(400).json({ message: "Invalid quote id" });
     }
@@ -633,234 +501,6 @@ exports.clearQuoteServices = async (req, res) => {
     return res.status(500).json({ message: "Server error" });
   }
 };
-
-// new one
-// exports.upsertQuoteRoomPricing = async (req, res) => {
-//   try {
-//     const { quoteId, roomName } = req.params;
-//     if (!Types.ObjectId.isValid(quoteId)) {
-//       return res.status(400).json({ message: "Invalid quote id" });
-//     }
-
-//     // Read once (lean) to get prev line for preservation logic
-//     const qLean = await Quote.findById(quoteId, {
-//       lines: 1,
-//       discount: 1,
-//       days: 1,
-//     }).lean();
-//     if (!qLean) return res.status(404).json({ message: "Quote not found" });
-
-//     const idx = (qLean.lines || []).findIndex(
-//       (l) => norm(l.roomName) === norm(roomName)
-//     );
-//     const prevLine = idx >= 0 ? qLean.lines[idx] : null;
-
-//     // ---- parse/normalize body ----
-//     let {
-//       sectionType,
-//       selectedPaints,
-//       breakdown,
-//       ceilingsTotal,
-//       wallsTotal,
-//       othersTotal,
-//       subtotal,
-//     } = req.body;
-
-//     if (typeof breakdown === "string") {
-//       try {
-//         breakdown = JSON.parse(breakdown);
-//       } catch {
-//         return res
-//           .status(400)
-//           .json({ message: "breakdown must be array/JSON array" });
-//       }
-//     }
-//     if (!Array.isArray(breakdown)) breakdown = [];
-
-//     breakdown = breakdown.map((b) => ({
-//       type: b.type,
-//       mode: b.mode,
-//       sqft: Number(b.sqft || 0),
-//       unitPrice: Number(b.unitPrice || 0),
-//       price: Number(b.price || 0),
-//       paintId: b.paintId != null ? String(b.paintId) : null,
-//       paintName: b.paintName ?? "",
-//       displayIndex:
-//         typeof b.displayIndex === "number" ? b.displayIndex : undefined,
-//     }));
-
-//     ceilingsTotal = Number(ceilingsTotal || 0);
-//     wallsTotal = Number(wallsTotal || 0);
-//     othersTotal = Number(othersTotal || 0);
-//     subtotal = Number(subtotal || 0);
-
-//     // ---- preserve additional services from prev line ----
-//     // If we need to clear the additional services, set it to an empty array
-//     const preservedAdditional = Array.isArray(prevLine?.additionalServices)
-//       ? [] // Set this to empty array when clearing
-//       : [];
-
-//     // Calculate the new additionalTotal as 0
-//     const preservedAdditionalTotal = preservedAdditional.reduce(
-//       (S, x) => S + Number(x.total || 0),
-//       0
-//     );
-
-//     // ---- zero paint rows where preserved additional says "without paint" ----
-//     const parseSurface = (label) => {
-//       const raw = String(label || "")
-//         .trim()
-//         .toLowerCase();
-//       let type = "Measurement";
-//       if (raw.startsWith("ceil")) type = "Ceiling";
-//       else if (raw.startsWith("wall")) type = "Wall";
-//       const n = raw.match(/(\d+)/);
-//       const ordinal = n ? Math.max(1, parseInt(n[1], 10)) : 1;
-//       return { type, ordinal };
-//     };
-
-//     const zeroKeys = new Set(
-//       preservedAdditional
-//         .filter((s) => !s.withPaint)
-//         .map((s) => {
-//           const { type, ordinal } = parseSurface(s.surfaceType);
-//           return `${type}:${ordinal}`;
-//         })
-//     );
-
-//     if (zeroKeys.size > 0 && breakdown.length > 0) {
-//       const counters = { Ceiling: 0, Wall: 0, Measurement: 0 };
-//       for (let i = 0; i < breakdown.length; i++) {
-//         const b = breakdown[i];
-//         if (!b?.type) continue;
-//         let ord = b.displayIndex;
-//         if (typeof ord !== "number") {
-//           counters[b.type] = (counters[b.type] || 0) + 1;
-//           ord = counters[b.type];
-//         }
-//         const key = `${b.type}:${ord}`;
-//         if (zeroKeys.has(key)) {
-//           breakdown[i].sqft = 0;
-//           breakdown[i].price = 0;
-//         }
-//       }
-//       const sumType = (arr, t) =>
-//         arr
-//           .filter((x) => x.type === t)
-//           .reduce((s, x) => s + Number(x.price || 0), 0);
-//       ceilingsTotal = Number(sumType(breakdown, "Ceiling").toFixed(2));
-//       wallsTotal = Number(sumType(breakdown, "Wall").toFixed(2));
-//       othersTotal = Number(sumType(breakdown, "Measurement").toFixed(2));
-//       subtotal = Number((ceilingsTotal + wallsTotal + othersTotal).toFixed(2));
-//     }
-
-//     // ---- build final line ----
-//     const line = {
-//       roomName,
-//       sectionType: sectionType || prevLine?.sectionType || "Interior",
-//       selectedPaints: {
-//         ceiling: selectedPaints?.ceiling || null,
-//         wall: selectedPaints?.wall || null,
-//         measurements: selectedPaints?.measurements || null,
-//       },
-//       breakdown,
-//       ceilingsTotal,
-//       wallsTotal,
-//       othersTotal,
-//       subtotal,
-//       additionalServices: [], // Clear additional services here
-//       additionalTotal: 0, // Clear additional total
-//     };
-
-//     // ---- ATOMIC UPSERT of the room line (no doc.save) ----
-//     const upd = await Quote.updateOne(
-//       { _id: quoteId, "lines.roomName": roomName },
-//       { $set: { "lines.$": line, updatedAt: new Date() } }
-//     );
-
-//     if (upd.matchedCount === 0) {
-//       await Quote.updateOne(
-//         { _id: quoteId },
-//         { $push: { lines: line }, $set: { updatedAt: new Date() } }
-//       );
-//     }
-
-//     // ---- recompute totals from a fresh read ----
-//     const fresh = await Quote.findById(quoteId, {
-//       lines: 1,
-//       discount: 1,
-//       days: 1,
-//     }).lean();
-//     const lines = fresh?.lines || [];
-
-//     const interior = sum(
-//       lines.filter((l) => l.sectionType === "Interior"),
-//       (l) => l.subtotal
-//     );
-//     const exterior = sum(
-//       lines.filter((l) => l.sectionType === "Exterior"),
-//       (l) => l.subtotal
-//     );
-//     const others = sum(
-//       lines.filter((l) => l.sectionType === "Others"),
-//       (l) => l.subtotal
-//     );
-
-//     const addAll = lines.reduce((S, l) => {
-//       const fromTotal = Number(l.additionalTotal || 0);
-//       if (fromTotal > 0) return S + fromTotal;
-//       const fromList = Array.isArray(l.additionalServices)
-//         ? l.additionalServices.reduce((a, x) => a + Number(x.total || 0), 0)
-//         : 0;
-//       return S + fromList;
-//     }, 0);
-
-//     const subtotalAll = Number(
-//       (interior + exterior + others + addAll).toFixed(2)
-//     );
-//     let discountAmount = 0;
-//     if (fresh?.discount?.type === "PERCENT") {
-//       discountAmount = Number(
-//         (subtotalAll * (Number(fresh.discount.value || 0) / 100)).toFixed(2)
-//       );
-//     } else if (fresh?.discount?.type === "FLAT") {
-//       discountAmount = Math.min(
-//         Number(fresh.discount.amount || 0),
-//         subtotalAll
-//       );
-//       discountAmount = Number(discountAmount.toFixed(2));
-//     }
-
-//     const finalPerDay = Number(
-//       Math.max(0, subtotalAll - discountAmount).toFixed(2)
-//     );
-//     const grandTotal = finalPerDay;
-
-//     await Quote.updateOne(
-//       { _id: quoteId },
-//       {
-//         $set: {
-//           totals: {
-//             interior,
-//             exterior,
-//             others,
-//             additionalServices: addAll,
-//             subtotal: subtotalAll,
-//             discountAmount,
-//             finalPerDay,
-//             grandTotal,
-//           },
-//           updatedAt: new Date(),
-//         },
-//       }
-//     );
-
-//     return res.json({ message: "OK", data: { line } });
-//   } catch (err) {
-//     console.error("upsertQuoteRoomPricing error:", err);
-//     return res.status(500).json({ message: "Server error" });
-//   }
-// };
 
 exports.upsertQuoteAdditionalServices = async (req, res) => {
   try {
@@ -1253,76 +893,6 @@ exports.updateQuoteMeta = async (req, res) => {
   }
 };
 
-// exports.cloneQuoteFrom = async (req, res) => {
-//   try {
-//     const sourceId = req.params.id; // ← URL param
-//     const { destId } = req.body || {}; // ← BODY param
-
-//     if (!Types.ObjectId.isValid(sourceId) || !Types.ObjectId.isValid(destId)) {
-//       return res.status(400).json({ message: "Invalid quote id(s)" });
-//     }
-
-//     const src = await Quote.findById(sourceId).lean();
-//     if (!src)
-//       return res.status(404).json({ message: "Source quote not found" });
-
-//     // Deep copy + sanitize including additional services
-//     const lines = (src.lines || []).map((line) => ({
-//       roomName: line.roomName,
-//       sectionType: line.sectionType,
-//       subtotal: Number(line.subtotal || 0),
-//       ceilingsTotal: Number(line.ceilingsTotal || 0),
-//       wallsTotal: Number(line.wallsTotal || 0),
-//       othersTotal: Number(line.othersTotal || 0),
-//       selectedPaints: {
-//         ceiling: sanitizePaint(line.selectedPaints?.ceiling),
-//         wall: sanitizePaint(line.selectedPaints?.wall),
-//         measurements: sanitizePaint(line.selectedPaints?.measurements),
-//       },
-//       breakdown: (line.breakdown || []).map((b) => ({
-//         type: b.type,
-//         mode: b.mode,
-//         sqft: Number(b.sqft || 0),
-//         unitPrice: Number(b.unitPrice || 0),
-//         price: Number(b.price || 0),
-//         paintId: b.paintId ?? null,
-//         paintName: b.paintName ?? "",
-//         displayIndex:
-//           typeof b.displayIndex === "number" ? b.displayIndex : undefined,
-//       })),
-//       additionalServices: line.additionalServices || [], // Ensure additional services are copied
-//     }));
-
-//     const days = src.days ?? 1;
-//     const discount = src.discount ?? { type: "PERCENT", value: 0, amount: 0 };
-//     const totals = computeTotals(lines, discount, days);
-
-//     const updated = await Quote.findByIdAndUpdate(
-//       destId,
-//       {
-//         $set: {
-//           currency: src.currency || "INR",
-//           days,
-//           discount,
-//           lines,
-//           totals,
-//           comments: "",
-//           status: "draft", // Reset the status to draft
-//         },
-//       },
-//       { new: true }
-//     ).lean();
-
-//     if (!updated)
-//       return res.status(404).json({ message: "Destination quote not found" });
-
-//     return res.status(200).json({ message: "OK", data: updated });
-//   } catch (err) {
-//     console.error("cloneQuoteFrom error:", err);
-//     return res.status(500).json({ message: "Server error" });
-//   }
-// };
-
 exports.cloneQuoteFrom = async (req, res) => {
   try {
     const sourceId = req.params.id; // ← URL param
@@ -1410,7 +980,6 @@ exports.cloneQuoteFrom = async (req, res) => {
   }
 };
 
-// controllers/quote.controller.js
 exports.deleteIfEmptyDraft = async (req, res) => {
   try {
     const { quoteId } = req.params;
@@ -1445,7 +1014,6 @@ exports.finalizeQuote = async (req, res) => {
     const { id } = req.params;
     const { vendorId, leadId, exclusive = false } = req.body || {};
 
-    // Ownership scoping (optional but recommended)
     const query = { _id: new mongoose.Types.ObjectId(id) };
     if (vendorId) query.vendorId = vendorId;
     if (leadId) query.leadId = leadId;
@@ -1453,7 +1021,6 @@ exports.finalizeQuote = async (req, res) => {
     const q = await Quote.findOne(query);
     if (!q) return res.status(404).json({ message: "Quote not found" });
 
-    // Idempotency: already finalized
     if (q.status === "finalized") {
       return res.status(200).json({
         message: "Quote already finalized",
@@ -1461,7 +1028,6 @@ exports.finalizeQuote = async (req, res) => {
       });
     }
 
-    // If we want *only one* final quote per measurement, demote others
     if (exclusive) {
       await Quote.updateMany(
         {
@@ -1469,8 +1035,9 @@ exports.finalizeQuote = async (req, res) => {
           leadId: q.leadId,
           vendorId: q.vendorId,
           measurementId: q.measurementId,
+          status: "finalized",
         },
-        { $set: { status: "draft" }, $unset: { finalizedAt: 1 } }
+        { $set: { status: "created" }, $unset: { finalizedAt: 1 } }
       );
     }
 
@@ -1488,43 +1055,6 @@ exports.finalizeQuote = async (req, res) => {
   }
 };
 
-// exports.getQuoteById = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     const { leadId, vendorId, expand } = req.query;
-
-//     if (!Types.ObjectId.isValid(id)) {
-//       return res.status(400).json({ message: "Invalid quote id" });
-//     }
-
-//     // Build a scoped query (helps prevent cross-tenant access)
-//     const query = { _id: id };
-//     if (leadId) query.leadId = leadId;
-//     if (vendorId) query.vendorId = vendorId;
-
-//     // Base finder
-//     let q = Quote.findOne(query);
-
-//     // Optional light populate of the measurement
-//     if ((expand || "").toLowerCase() === "measurement") {
-//       // keep the projection small to avoid heavy payloads
-//       q = q.populate(
-//         "measurementId",
-//         "leadId vendorId totals createdAt updatedAt"
-//       );
-//     }
-
-//     const quote = await q.lean();
-//     if (!quote) {
-//       return res.status(404).json({ message: "Quote not found" });
-//     }
-
-//     return res.status(200).json({ message: "OK", data: quote });
-//   } catch (err) {
-//     console.error("getQuoteById error:", err);
-//     return res.status(500).json({ message: "Server error" });
-//   }
-// };
 exports.getQuoteById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1591,7 +1121,7 @@ exports.listQuotesByLeadAndMeasurement = async (req, res) => {
       amount: q?.totals?.grandTotal ?? 0,
       taxes: !!q.applyTaxes,
       days: q.days ?? 1,
-      finalized: q.status === "final",
+      finalized: q.status === "finalized",
       breakdown: [
         { label: "Interior", amount: q?.totals?.interior ?? 0 },
         { label: "Exterior", amount: q?.totals?.exterior ?? 0 },

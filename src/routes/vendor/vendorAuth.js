@@ -95,5 +95,31 @@ router.post("/add-coin", vendorAuthController.addCoin);
 router.post("/reduce-coin", vendorAuthController.reduceCoin);
 router.post("/team/remove", vendorAuthController.removeTeamMember);
 router.get("/get-all-vendor", vendorAuthController.getAllVendors);
+router.put(
+  "/team/leaves/:vendorId/:teamMemberId",
+  vendorAuthController.updateTeamMemberLeaves
+);
+router.get(
+  "/get-team-id/:vendorId/:teamMemberId",
+  vendorAuthController.teamMemberById
+);
+router.get(
+  "/check-vendor-availability/:vendorId/availability",
+  vendorAuthController.checkVendorAvailability
+);
 
+router.get(
+  "/check/:vendorId/availability-range",
+  vendorAuthController.checkVendorAvailabilityRange
+);
+
+// kiruth...................
+router.post(
+  "/add-team-member/vendor/:vendorId",
+  vendorAuthController.addSmallTeamMember
+);
+router.get(
+  "/get-teams-by-vendor/:vendorId",
+  vendorAuthController.getTeamByVendorID
+);
 module.exports = router;

@@ -76,7 +76,7 @@ const documentInfo = new mongoose.Schema({
   aadhaarNumber: String,
   panNumber: String,
   aadhaarfrontImage: String,
-    aadhaarbackImage: String,
+  aadhaarbackImage: String,
   panImage: String,
   otherPolicy: String,
 });
@@ -109,6 +109,9 @@ const teamMemberInfo = new mongoose.Schema({
   documents: documentInfo,
   bankDetails: accountInfo,
   address: addressDetails,
+  markedLeaves: [
+    { type: String }, // e.g. "2025-09-16"
+  ],
 });
 
 const vendorAuthSchema = new mongoose.Schema({
