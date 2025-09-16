@@ -26,6 +26,7 @@ const bookingDetailsSchema = new mongoose.Schema({
       "Customer Cancelled",
       "Customer Unreachable",
       "Admin Cancelled",
+      "Pending Hiring", // mark hiring
     ],
     default: "Pending",
   },
@@ -67,10 +68,20 @@ const invitedVendorSchema = new mongoose.Schema({
       "customer_cancelled",
       // "vendor_cancelled",
       "unreachable",
+      "pending_hiring",
+      "mark_hiring",
     ],
     default: "pending",
   },
 });
+
+const selectedTeam = new mongoose.Schema(
+  {
+    memberId: String,
+    memberName: String,
+  },
+  { _id: false }
+);
 
 const assignedProfessionalSchema = new mongoose.Schema({
   professionalId: String,
@@ -82,6 +93,16 @@ const assignedProfessionalSchema = new mongoose.Schema({
   startedTime: String,
   endedDate: Date,
   endedTime: String,
+  hiring: {
+    markedDate: Date,
+    markedTime: String,
+    hiredDate: Date,
+    hiredTime: String,
+    teamMember: [selectedTeam],
+    projectDate: Array,
+    noOfDay: Number,
+    quotationId: String,
+  },
 });
 const selectedSlot = new mongoose.Schema({
   slotTime: String,

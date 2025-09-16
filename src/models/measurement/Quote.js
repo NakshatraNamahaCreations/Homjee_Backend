@@ -106,6 +106,7 @@ const QuoteSchema = new mongoose.Schema(
       default: "draft",
     },
     finalizedAt: Date,
+    locked: { type: Boolean, default: false },
   },
   { timestamps: true }
 );

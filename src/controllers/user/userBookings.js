@@ -821,6 +821,72 @@ exports.updateStatus = async (req, res) => {
   }
 };
 
+exports.markPendingHiring = async (req, res) => {
+  try {
+    const { bookingId, startDate, teamMembers, noOfDays, quotationId } =
+      req.body;
+    console.log("quotationId", quotationId);
+
+    // Find booking
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      // console.log("Booking not found");
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
+    }
+
+    // Update bookingDetails status
+    booking.bookingDetails.status = "Pending Hiring";
+
+    await Quote.updateOne(
+      { _id: quotationId, status: "finalized" },
+      { $set: { locked: true } }
+    );
+
+    // Store hiring details under assignedProfessional
+    booking.assignedProfessional.hiring = {
+      markedDate: new Date(),
+      markedTime: moment().format("LT"),
+      projectDate: Array.from({ length: noOfDays }, (_, i) =>
+        moment(startDate).add(i, "days").format("YYYY-MM-DD")
+      ),
+      noOfDay: noOfDays,
+      teamMember: teamMembers.map((m) => ({
+        memberId: m._id,
+        memberName: m.name,
+      })),
+      quotationId: quotationId, // optional
+    };
+
+    // Generate dummy payment link (replace with your PG)
+    const paymentLink = `https://pay.example.com/${bookingId}-${Date.now()}`;
+    booking.bookingDetails.paymentStatus = "Unpaid";
+    booking.bookingDetails.paidAmount = 0;
+    booking.bookingDetails.amountYetToPay = booking.service.reduce(
+      (sum, s) => sum + s.price * s.quantity,
+      0
+    );
+
+    await booking.save();
+
+    // TODO: Send SMS/Email/WhatsApp to customer with paymentLink
+
+    res.json({
+      success: true,
+      message:
+        "Booking updated to Pending Hiring. Payment link sent to customer.",
+      bookingId,
+      paymentLink,
+    });
+  } catch (err) {
+    console.error("Error marking pending hiring:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
 exports.cancelJob = async (req, res) => {
   try {
     const { bookingId, status, assignedProfessional } = req.body;

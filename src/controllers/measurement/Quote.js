@@ -1122,6 +1122,7 @@ exports.listQuotesByLeadAndMeasurement = async (req, res) => {
       taxes: !!q.applyTaxes,
       days: q.days ?? 1,
       finalized: q.status === "finalized",
+      locked: q.locked,
       breakdown: [
         { label: "Interior", amount: q?.totals?.interior ?? 0 },
         { label: "Exterior", amount: q?.totals?.exterior ?? 0 },
