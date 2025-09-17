@@ -1,5 +1,6 @@
 const vendorAuthSchema = require("../../models/vendor/vendorAuth");
 const otpSchema = require("../../models/user/otp");
+const userBooking = require("../../models/user/userBookings");
 const crypto = require("crypto");
 const moment = require("moment");
 
@@ -293,6 +294,97 @@ exports.teamMemberById = async (req, res) => {
   } catch (err) {
     console.error("Error fetching team:", err);
     res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+exports.getTeamMemberBusyDates = async (req, res) => {
+  try {
+    const { vendorId, teamMemberId } = req.params;
+
+    // find all bookings for this vendor where this team member is in hiring
+    const bookings = await userBooking
+      .find({
+        "assignedProfessional.professionalId": vendorId,
+        "assignedProfessional.hiring.teamMember.memberId": teamMemberId,
+      })
+      .lean();
+
+    // collect busy dates
+    const busyDates = [];
+    bookings.forEach((b) => {
+      const projectDates = b.assignedProfessional?.hiring?.projectDate || [];
+      busyDates.push(...projectDates);
+    });
+
+    res.json({
+      success: true,
+      busyDates: [...new Set(busyDates)], // remove duplicates
+    });
+  } catch (err) {
+    console.error("Error fetching busy dates:", err);
+    res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
+exports.getVendorTeamStatuses = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const today = moment().format("YYYY-MM-DD");
+
+    const vendor = await vendorAuthSchema
+      .findById(vendorId)
+      .select("team._id team.markedLeaves team.name")
+      .lean();
+
+    if (!vendor) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vendor not found" });
+    }
+
+    const team = vendor.team || [];
+    const teamIdStrs = team.map((m) => String(m._id));
+
+    // find all bookings where this vendor has a project running TODAY
+    const bookingsToday = await userBooking
+      .find({
+        "assignedProfessional.professionalId": vendorId,
+        "assignedProfessional.hiring.projectDate": today,
+      })
+      .select("assignedProfessional.hiring.teamMember.memberId")
+      .lean();
+
+    // build a set of memberIds that are working today
+    const workingSet = new Set();
+    for (const b of bookingsToday) {
+      const members = b?.assignedProfessional?.hiring?.teamMember || [];
+      for (const tm of members) workingSet.add(String(tm.memberId));
+    }
+
+    const statuses = {};
+    for (const member of team) {
+      const id = String(member._id);
+      const isLeave =
+        Array.isArray(member.markedLeaves) &&
+        member.markedLeaves.includes(today);
+      const isWorking = workingSet.has(id);
+
+      // Business rule: if a conflict exists (shouldn’t happen), treat as Working.
+      let status = "Available";
+      if (isWorking) status = "Working";
+      else if (isLeave) status = "On Leave";
+
+      statuses[id] = { status };
+    }
+
+    return res.json({ success: true, date: today, statuses });
+  } catch (err) {
+    console.error("getVendorTeamStatuses error:", err);
+    return res
       .status(500)
       .json({ success: false, message: "Server error", error: err.message });
   }

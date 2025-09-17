@@ -27,6 +27,8 @@ const bookingDetailsSchema = new mongoose.Schema({
       "Customer Unreachable",
       "Admin Cancelled",
       "Pending Hiring", // mark hiring
+      "Negotiation",
+      "Set Remainder",
     ],
     default: "Pending",
   },
@@ -46,6 +48,7 @@ const bookingDetailsSchema = new mongoose.Schema({
   // reasonForCancelled: String,
   scope: String,
   hasPriceUpdated: { type: Boolean, default: false },
+  startProject: { type: Boolean, default: false },
 });
 const invitedVendorSchema = new mongoose.Schema({
   professionalId: String,

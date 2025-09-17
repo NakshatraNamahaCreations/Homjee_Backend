@@ -104,6 +104,14 @@ router.get(
   vendorAuthController.teamMemberById
 );
 router.get(
+  "/get-team-member-busy-dates/:vendorId/:teamMemberId",
+  vendorAuthController.getTeamMemberBusyDates
+);
+router.get(
+  "/team-members-status/:vendorId/status",
+  vendorAuthController.getVendorTeamStatuses
+);
+router.get(
   "/check-vendor-availability/:vendorId/availability",
   vendorAuthController.checkVendorAvailability
 );

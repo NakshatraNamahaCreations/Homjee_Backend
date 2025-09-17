@@ -838,6 +838,7 @@ exports.markPendingHiring = async (req, res) => {
 
     // Update bookingDetails status
     booking.bookingDetails.status = "Pending Hiring";
+    booking.bookingDetails.startProject = true;
 
     await Quote.updateOne(
       { _id: quotationId, status: "finalized" },
