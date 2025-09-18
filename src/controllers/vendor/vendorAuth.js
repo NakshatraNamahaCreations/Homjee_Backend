@@ -334,6 +334,8 @@ exports.getVendorTeamStatuses = async (req, res) => {
   try {
     const { vendorId } = req.params;
     const today = moment().format("YYYY-MM-DD");
+    const getVendor = await vendorAuthSchema.findById(vendorId);
+    // console.log("getVendor", getVendor);
 
     const vendor = await vendorAuthSchema
       .findById(vendorId)
@@ -381,7 +383,7 @@ exports.getVendorTeamStatuses = async (req, res) => {
       statuses[id] = { status };
     }
 
-    return res.json({ success: true, date: today, statuses });
+    return res.json({ success: true, date: today, statuses, getVendor });
   } catch (err) {
     console.error("getVendorTeamStatuses error:", err);
     return res

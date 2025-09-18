@@ -98,21 +98,26 @@ const addressDetails = new mongoose.Schema({
 });
 
 // Define team member schema to match vendor structure
-const teamMemberInfo = new mongoose.Schema({
-  name: String,
-  mobileNumber: Number,
-  profileImage: String,
-  dateOfBirth: String,
-  city: String,
-  serviceType: String,
-  serviceArea: String,
-  documents: documentInfo,
-  bankDetails: accountInfo,
-  address: addressDetails,
-  markedLeaves: [
-    { type: String }, // e.g. "2025-09-16"
-  ],
-});
+const teamMemberInfo = new mongoose.Schema(
+  {
+    name: String,
+    mobileNumber: Number,
+    profileImage: String,
+    dateOfBirth: String,
+    city: String,
+    serviceType: String,
+    serviceArea: String,
+    documents: documentInfo,
+    bankDetails: accountInfo,
+    address: addressDetails,
+    markedLeaves: [
+      { type: String }, // e.g. "2025-09-16"
+    ],
+  },
+  {
+    timestamps: Date,
+  }
+);
 
 const vendorAuthSchema = new mongoose.Schema({
   vendor: vendorInfo,
