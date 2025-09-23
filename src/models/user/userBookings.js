@@ -27,6 +27,9 @@ const bookingDetailsSchema = new mongoose.Schema({
       "Customer Unreachable",
       "Admin Cancelled",
       "Pending Hiring", // mark hiring
+      "Hired", // payment done
+      "Job Ongoing", // project started
+      "Job Ended", // project completed
       "Negotiation",
       "Set Remainder",
     ],
@@ -38,10 +41,32 @@ const bookingDetailsSchema = new mongoose.Schema({
   },
   paymentStatus: {
     type: String,
-    enum: ["Paid", "Unpaid", "Refunded", "Waiting for final payment"],
+    enum: [
+      "Paid",
+      "Unpaid",
+      "Refunded",
+      "Partial Payment", // second installment sending
+      "Partially Completed", // seond installment done, job ongoing
+      "Waiting for final payment", // job end, waiting for final payment
+    ],
+    default: "Unpaid",
   },
-  paidAmount: Number,
-  amountYetToPay: Number,
+  siteVisitCharges: Number,
+  paidAmount: Number, // three installment with 40% of quote amount
+  amountYetToPay: Number, // update finalized quote amount - total amount
+  bookingAmount: Number, // from website initial payment(included)
+  originalTotalAmount: Number,
+  currentTotalAmount: {
+    type: Number,
+    default: function () {
+      return this.originalTotalAmount || 0;
+    },
+  },
+  paymentLink: {
+    url: String,
+    isActive: { type: Boolean, default: true },
+    providerRef: String,
+  },
   otp: Number,
   editedPrice: Number,
   reasonForChanging: String,
@@ -49,6 +74,14 @@ const bookingDetailsSchema = new mongoose.Schema({
   scope: String,
   hasPriceUpdated: { type: Boolean, default: false },
   startProject: { type: Boolean, default: false },
+  startProjectOtp: {
+    type: String, // store hashed OTP for security!
+  },
+  startProjectOtpExpiry: {
+    type: Date,
+  },
+  startProjectRequestedAt: Date, // when vendor requested to start
+  startProjectApprovedAt: Date, // when customer approved via OTP
 });
 const invitedVendorSchema = new mongoose.Schema({
   professionalId: String,
@@ -96,6 +129,8 @@ const assignedProfessionalSchema = new mongoose.Schema({
   startedTime: String,
   endedDate: Date,
   endedTime: String,
+  completedDate: Date,
+  completedTime: String,
   hiring: {
     markedDate: Date,
     markedTime: String,
@@ -104,7 +139,11 @@ const assignedProfessionalSchema = new mongoose.Schema({
     teamMember: [selectedTeam],
     projectDate: Array,
     noOfDay: Number,
-    quotationId: String,
+    quotationId: { type: mongoose.Schema.Types.ObjectId, ref: "Quote" },
+    status: { type: String, enum: ["active", "cancelled"], default: "active" },
+    cancelledAt: Date,
+    cancelReason: String, // NEW ("auto-unpaid" | "admin-cancel" | "vendor-cancel")
+    autoCancelAt: Date,
   },
 });
 const selectedSlot = new mongoose.Schema({

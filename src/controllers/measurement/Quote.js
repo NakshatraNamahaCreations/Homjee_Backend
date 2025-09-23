@@ -2,6 +2,7 @@
 const Measurement = require("../../models/measurement/Measurement");
 const Quote = require("../../models/measurement/Quote");
 const mongoose = require("mongoose");
+const userBookings = require("../../models/user/userBookings");
 const { Types } = mongoose;
 
 const toNum = (v) => (Number.isFinite(+v) ? +v : 0);
@@ -1015,8 +1016,14 @@ exports.finalizeQuote = async (req, res) => {
     const { vendorId, leadId, exclusive = false } = req.body || {};
 
     const query = { _id: new mongoose.Types.ObjectId(id) };
+
     if (vendorId) query.vendorId = vendorId;
     if (leadId) query.leadId = leadId;
+
+    const findLead = await userBookings.findById(leadId);
+    if (!findLead) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
 
     const q = await Quote.findOne(query);
     if (!q) return res.status(404).json({ message: "Quote not found" });
@@ -1027,6 +1034,16 @@ exports.finalizeQuote = async (req, res) => {
         data: { quote: q, listItem: toListItem(q) },
       });
     }
+    const updatePrice = {};
+    if (q.totals?.grandTotal) {
+      updatePrice["bookingDetails.amountYetToPay"] = q.totals.grandTotal;
+      updatePrice["bookingDetails.bookingAmount"] = q.totals.grandTotal; // ✅ ADD THIS
+    }
+    await userBookings.findByIdAndUpdate(
+      leadId,
+      { $set: updatePrice },
+      { new: true }
+    );
 
     if (exclusive) {
       await Quote.updateMany(

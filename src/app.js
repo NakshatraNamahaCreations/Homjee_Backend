@@ -3,6 +3,9 @@ const routes = require("./routes");
 const bodyParser = require("body-parser");
 const morgan = require("morgan");
 const cors = require("cors");
+const {
+  startAutoCancelWorker,
+} = require("./controllers/user/autoCancelWorker");
 
 const app = express();
 
@@ -12,6 +15,9 @@ app.use(cors());
 app.use(bodyParser.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ limit: "50mb", extended: true }));
 app.use("/public", express.static("public"));
+
+// auto cancellation
+startAutoCancelWorker();
 
 app.use("/api", routes);
 

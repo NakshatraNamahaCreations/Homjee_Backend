@@ -48,5 +48,22 @@ router.post("/end-job", bookingController.endJob);
 router.post("/update-price", bookingController.updatePricing);
 router.post("/update-status", bookingController.updateStatus);
 router.post("/mark-pending-hiring", bookingController.markPendingHiring);
+router.post("/make-payment", bookingController.makePayment);
+router.post(
+  "/start-project/generating-otp/:bookingId",
+  bookingController.requestStartProjectOtp
+);
+router.post(
+  "/confirm-otp/start/project/:bookingId",
+  bookingController.verifyStartProjectOtp
+);
+router.post(
+  "/request-final-payment/final/project/:bookingId",
+  bookingController.requestFinalPayment
+);
+router.post(
+  "/completing-job/final/end-job/:bookingId",
+  bookingController.endingFinalJob
+);
 
 module.exports = router;
