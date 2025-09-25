@@ -1431,6 +1431,147 @@ exports.endingFinalJob = async (req, res) => {
   }
 };
 
+
+exports.updateBooking = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    
+    const booking = await UserBooking.findById(id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    const {
+      customer,
+      service,
+      bookingDetails,
+      assignedProfessional,
+      address,
+      selectedSlot,
+      isEnquiry,
+      formName,
+    } = req.body;
+
+    // ✅ Update customer
+    if (customer) {
+      booking.customer = {
+        ...booking.customer,
+        customerId: customer.customerId ?? booking.customer.customerId,
+        name: customer.name ?? booking.customer.name,
+        phone: customer.phone ?? booking.customer.phone,
+      };
+    }
+
+    // ✅ Update services
+    if (service && Array.isArray(service)) {
+      booking.service = service.map((s) => ({
+        category: s.category,
+        subCategory: s.subCategory,
+        serviceName: s.serviceName,
+        price: s.price,
+        quantity: s.quantity,
+      }));
+    }
+
+    // ✅ Update booking details
+    if (bookingDetails) {
+      booking.bookingDetails = {
+        ...booking.bookingDetails.toObject(),
+        ...bookingDetails,
+      };
+    }
+
+    // ✅ Update assigned professional
+    if (assignedProfessional) {
+      booking.assignedProfessional = {
+        professionalId: assignedProfessional.professionalId,
+        name: assignedProfessional.name,
+        phone: assignedProfessional.phone,
+      };
+    }
+
+    // ✅ Update address
+    if (address) {
+      if (
+        address.location &&
+        Array.isArray(address.location.coordinates) &&
+        address.location.coordinates.length === 2
+      ) {
+        booking.address = {
+          ...booking.address,
+          houseFlatNumber: address.houseFlatNumber,
+          streetArea: address.streetArea,
+          landMark: address.landMark,
+          location: {
+            type: "Point",
+            coordinates: address.location.coordinates,
+          },
+        };
+      }
+    }
+
+    // ✅ Update slot
+    if (selectedSlot) {
+      booking.selectedSlot = {
+        slotDate: selectedSlot.slotDate,
+        slotTime: selectedSlot.slotTime,
+      };
+    }
+
+    // ✅ Update isEnquiry & formName
+    if (typeof isEnquiry === "boolean") booking.isEnquiry = isEnquiry;
+    if (formName) booking.formName = formName;
+
+    await booking.save();
+
+    res.status(200).json({ message: "Booking updated successfully", booking });
+  } catch (error) {
+    console.error("Error updating booking:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+
+
+exports.updateAssignedProfessional = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { professionalId, name, phone } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({ success: false, message: "bookingId is required" });
+    }
+
+
+    const updatedBooking = await UserBooking.findByIdAndUpdate(
+      bookingId,
+      {
+        $set: {
+          "assignedProfessional.professionalId": professionalId,
+          "assignedProfessional.name": name,
+          "assignedProfessional.phone": phone,
+        },
+      },
+      { new: true, runValidators: true }
+    );
+
+    if (!updatedBooking) {
+      return res.status(404).json({ success: false, message: "Booking not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Assigned professional updated successfully",
+      booking: updatedBooking,
+    });
+  } catch (error) {
+    console.error("Error updating assigned professional:", error);
+    res.status(500).json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+
 // Delete booking
 // exports.deleteBooking = async (req, res) => {
 //   try {
