@@ -3,6 +3,7 @@ const otpSchema = require("../../models/user/otp");
 const userBooking = require("../../models/user/userBookings");
 const crypto = require("crypto");
 const moment = require("moment");
+const mongoose = require("mongoose");
 
 function generateOTP() {
   return crypto.randomInt(1000, 10000);
@@ -78,25 +79,26 @@ exports.createVendor = async (req, res) => {
 exports.addTeamMember = async (req, res) => {
   try {
     const vendorId = req.body.vendorId;
+
+    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ message: "Valid vendorId is required" });
+    }
+
     const member = JSON.parse(req.body.member || "{}");
     const documents = JSON.parse(req.body.documents || "{}");
     const bankDetails = JSON.parse(req.body.bankDetails || "{}");
     const addressDetails = JSON.parse(req.body.address || "{}");
 
-    const profileImageUrl = req.files["profileImage"]?.[0]?.path;
-    const aadhaarfrontImageUrl = req.files["aadhaarfrontImage"]?.[0]?.path;
-    const aadhaarbackImageUrl = req.files["aadhaarbackImage"]?.[0]?.path;
-    const panImageUrl = req.files["panImage"]?.[0]?.path;
-    const otherPolicyUrl = req.files["otherPolicy"]?.[0]?.path;
-
-    if (!vendorId) {
-      return res.status(400).json({ message: "vendorId is required" });
-    }
+    const profileImageUrl = req.files?.profileImage?.[0]?.path || "";
+    const aadhaarfrontImageUrl = req.files?.aadhaarfrontImage?.[0]?.path || "";
+    const aadhaarbackImageUrl = req.files?.aadhaarbackImage?.[0]?.path || "";
+    const panImageUrl = req.files?.panImage?.[0]?.path || "";
+    const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path || "";
 
     const teamMember = {
       name: member.name || "",
       mobileNumber: member.mobileNumber || "",
-      profileImage: profileImageUrl || "",
+      profileImage: profileImageUrl,
       dateOfBirth: member.dateOfBirth || "",
       city: member.city || "",
       serviceType: member.serviceType || "",
@@ -120,30 +122,27 @@ exports.addTeamMember = async (req, res) => {
       },
       address: {
         location: addressDetails.location || "",
-        latitude: addressDetails.latitude || "",
-        longitude: addressDetails.longitude || "",
+        latitude: parseFloat(addressDetails.latitude) || 0,
+        longitude: parseFloat(addressDetails.longitude) || 0,
       },
     };
 
     const vendor = await vendorAuthSchema.findByIdAndUpdate(
       vendorId,
       { $push: { team: teamMember } },
-      { new: true, runValidators: true }
+      { new: true }
     );
 
-    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    if (!vendor) {
+      return res.status(404).json({ message: "Vendor not found" });
+    }
 
-    res.status(200).json({
+    return res.status(200).json({
       message: "Team member added",
       team: vendor.team,
     });
   } catch (err) {
     console.error("addTeamMember error:", err);
-    if (err.name === "ValidationError") {
-      return res
-        .status(400)
-        .json({ message: "Validation error", error: err.errors });
-    }
     res.status(500).json({ message: "Server error", error: err.message });
   }
 };
