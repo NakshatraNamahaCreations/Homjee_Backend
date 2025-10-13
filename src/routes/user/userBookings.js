@@ -44,8 +44,10 @@ router.get(
   bookingController.getBookingExceptPending
 );
 router.post("/start-job", bookingController.startJob);
-router.post("/end-job", bookingController.endJob);
-router.post("/update-price", bookingController.updatePricing);
+router.post("/complete-survey", bookingController.completeSurvey);
+router.post("/update-price/:bookingId", bookingController.updatePricing);
+router.post("/approve-pricing/:bookingId", bookingController.approvePrice);
+router.post("/disapprove-pricing/:bookingId", bookingController.rejectPrice);
 router.post("/update-status", bookingController.updateStatus);
 router.post("/mark-pending-hiring", bookingController.markPendingHiring);
 router.post("/make-payment", bookingController.makePayment);
@@ -57,10 +59,15 @@ router.post(
   "/confirm-otp/start/project/:bookingId",
   bookingController.verifyStartProjectOtp
 );
+// router.post(
+//   "/request-final-payment/final/project/:bookingId",
+//   bookingController.requestFinalPayment  // not anymore
+// );
 router.post(
-  "/request-final-payment/final/project/:bookingId",
-  bookingController.requestFinalPayment
+  "/request-next-payment/second/project/:bookingId",
+  bookingController.requestSecondPayment
 );
+
 router.post(
   "/completing-job/final/end-job/:bookingId",
   bookingController.endingFinalJob

@@ -12,7 +12,32 @@ const serviceSchema = new mongoose.Schema({
   serviceName: String,
   price: Number,
   quantity: Number,
+  teamMembersRequired: Number,
 });
+const FirstMilestoneSchema = new mongoose.Schema(
+  {
+    baseTotal: { type: Number, min: 0 }, // baseline for 40% (usually bookingAmount)
+    requiredAmount: { type: Number, min: 0 }, // round(baseTotal * 0.40)
+    completedAt: { type: Date, default: null }, // set when paidAmount >= requiredAmount
+  },
+  { _id: false }
+);
+const PriceChangeSchema = new mongoose.Schema(
+  {
+    proposedAt: Date,
+    proposedBy: String, // "vendor", "admin", etc.
+    scopeType: { type: String, enum: ["Added", "Reduced"] },
+    delta: Number, // signed (+/-)
+    proposedTotal: Number,
+    baseAtProposal: Number, // the base we added delta to
+    state: { type: String, enum: ["pending", "approved", "rejected"] },
+    decidedAt: Date,
+    decidedBy: String, // "admin" | "customer"
+    reason: String,
+  },
+  { _id: false }
+);
+
 const bookingDetailsSchema = new mongoose.Schema({
   bookingDate: Date,
   bookingTime: String,
@@ -21,20 +46,25 @@ const bookingDetailsSchema = new mongoose.Schema({
     enum: [
       "Pending",
       "Confirmed", //accepted or responded
-      "Ongoing", //started
-      "Completed", //ended
+      "Job Ongoing", // started - deep cleaning
+      "Survey Ongoing", //started - house painting
+      "Survey Completed", //ended - house painting
+      "Job Completed", //ended - deep cleaning
       "Customer Cancelled",
       "Customer Unreachable",
       "Admin Cancelled",
       "Pending Hiring", // mark hiring
       "Hired", // payment done
-      "Job Ongoing", // project started
-      "Job Ended", // project completed
+      "Project Ongoing", // project started
+      "Waiting for final payment",
+      "Project Completed", // project completed
       "Negotiation",
       "Set Remainder",
     ],
     default: "Pending",
   },
+  priceChanges: { type: [PriceChangeSchema], default: [] },
+  isJobStarted: { type: Boolean, default: false },
   paymentMethod: {
     type: String,
     enum: ["Cash", "Card", "UPI", "Wallet"],
@@ -46,7 +76,7 @@ const bookingDetailsSchema = new mongoose.Schema({
       "Unpaid",
       "Refunded",
       "Partial Payment", // second installment sending
-      "Partially Completed", // seond installment done, job ongoing
+      "Partially Completed", // second installment done, job ongoing
       "Waiting for final payment", // job end, waiting for final payment
     ],
     default: "Unpaid",
@@ -56,6 +86,18 @@ const bookingDetailsSchema = new mongoose.Schema({
   amountYetToPay: Number, // update finalized quote amount - total amount
   bookingAmount: Number, // from website initial payment(included)
   originalTotalAmount: Number,
+  finalTotal: {
+    type: Number,
+    // default: function () {
+    //   // pick a sensible initial approved total
+    //   return (
+    //     this.currentTotalAmount ??
+    //     this.bookingAmount ??
+    //     this.originalTotalAmount ??
+    //     0
+    //   );
+    // },
+  },
   currentTotalAmount: {
     type: Number,
     default: function () {
@@ -68,11 +110,36 @@ const bookingDetailsSchema = new mongoose.Schema({
     providerRef: String,
   },
   otp: Number,
-  editedPrice: Number,
+  //  ........................
   reasonForChanging: String,
   // reasonForCancelled: String,
-  scope: String,
+  // edit scoping
+  newTotal: Number,
+  editedPrice: Number,
+  reasonForEditing: String,
+  scopeType: String,
+  priceApprovalStatus: { type: Boolean, default: false },
+  priceApprovalState: {
+    type: String,
+    enum: ["pending", "approved", "rejected"],
+    default: "pending",
+  },
   hasPriceUpdated: { type: Boolean, default: false },
+  firstMilestone: { type: FirstMilestoneSchema, default: {} },
+  approvedBy: { type: String, enum: ["admin", "customer"], default: null },
+  approvedAt: Date,
+  priceEditedDate: Date,
+  priceEditedTime: String,
+  priceApprovedDate: Date,
+  rejectedBy: {
+    type: String,
+    enum: ["admin", "customer", null],
+    default: null,
+  },
+  priceApprovedTime: String,
+  priceRejectedDate: Date,
+  priceRejectedTime: String,
+  //.....................
   startProject: { type: Boolean, default: false },
   startProjectOtp: {
     type: String, // store hashed OTP for security!
@@ -80,8 +147,14 @@ const bookingDetailsSchema = new mongoose.Schema({
   startProjectOtpExpiry: {
     type: Date,
   },
-  startProjectRequestedAt: Date, // when vendor requested to start
-  startProjectApprovedAt: Date, // when customer approved via OTP
+  projectStartDate: {
+    type: Date,
+    default: null,
+  },
+  startProjectRequestedAt: Date,
+  startProjectApprovedAt: Date,
+  jobEndedAt: Date,
+  jobEndRequestedAt: Date,
 });
 const invitedVendorSchema = new mongoose.Schema({
   professionalId: String,
@@ -129,6 +202,8 @@ const assignedProfessionalSchema = new mongoose.Schema({
   startedTime: String,
   endedDate: Date,
   endedTime: String,
+  completedDate: Date,
+  completedTime: String,
   completedDate: Date,
   completedTime: String,
   hiring: {

@@ -63,7 +63,7 @@ async function cancelHiringBooking(booking, reason = "auto-unpaid") {
     }
 
     // Flip statuses
-    details.status = "Completed"; // or "Customer Cancelled"
+    details.status = "Survey Completed"; // or "Customer Cancelled"
     hiring.status = "cancelled";
     hiring.cancelReason = reason;
     hiring.cancelledAt = new Date();
