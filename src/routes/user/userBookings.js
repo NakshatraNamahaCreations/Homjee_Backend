@@ -20,7 +20,6 @@ router.get(
   bookingController.getBookingForNearByVendorsDeepCleaning
 );
 
-
 router.get(
   "/deep-cleaning-vendor-performance-metrics/:vendorId/:lat/:long/:timeframe",
   bookingController.getVendorPerformanceMetricsDeepCleaning
@@ -70,13 +69,11 @@ router.post(
   bookingController.endingFinalJob
 );
 
-router.put("/update-user-booking/:id", bookingController.updateBooking);
+// router.put("/update-user-booking/:id", bookingController.updateBooking);
 
-router.put(
-  "/update-assigned-professional/:bookingId",
-  bookingController.updateAssignedProfessional
-);
+// router.put(
+//   "/update-assigned-professional/:bookingId",
+//   bookingController.updateAssignedProfessional
+// );
 
 module.exports = router;
-
-
