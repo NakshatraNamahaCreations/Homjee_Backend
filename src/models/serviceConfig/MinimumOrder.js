@@ -20,6 +20,6 @@ const MinimumOrderSchema = new mongoose.Schema(
 );
 
 // Unique per scope (only one doc for deep-cleaning)
-MinimumOrderSchema.index({ scope: 1 }, { unique: true });
+// MinimumOrderSchema.index({ scope: 1 }, { unique: true });
 
 module.exports = mongoose.model("MinimumOrder", MinimumOrderSchema);

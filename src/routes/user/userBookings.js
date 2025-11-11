@@ -41,9 +41,15 @@ router.get(
 );
 router.post("/start-job", bookingController.startJob);
 router.post("/complete-survey", bookingController.completeSurvey);
-router.post("/update-price/:bookingId", bookingController.updatePricing);
-router.post("/approve-pricing/:bookingId", bookingController.approvePrice);
-router.post("/disapprove-pricing/:bookingId", bookingController.rejectPrice);
+router.post("/update-price/:bookingId", bookingController.requestPriceChange);
+router.post(
+  "/approve-pricing/:bookingId",
+  bookingController.approvePriceChange
+);
+router.post(
+  "/disapprove-pricing/:bookingId",
+  bookingController.rejectPriceChange
+);
 router.post("/update-status", bookingController.updateStatus);
 router.post("/mark-pending-hiring", bookingController.markPendingHiring);
 router.post("/make-payment", bookingController.makePayment);
@@ -65,8 +71,8 @@ router.post(
 );
 
 router.post(
-  "/completing-job/final/end-job/:bookingId",
-  bookingController.endingFinalJob
+  "/completing-job/final-payemt/request/end-job/:bookingId",
+  bookingController.requestingFinalPaymentEndProject
 );
 
 // router.put("/update-user-booking/:id", bookingController.updateBooking);

@@ -25,7 +25,7 @@ router.use("/admin/auth", adminAuthRoutes);
 router.use("/deeppackage", deepCleaningRoutes);
 router.use("/minimumorder", minimumOrderRoutes);
 
-router.get("/", (req, res) => {
+router.get("/hello-world/testing", (req, res) => {
   res.json({ message: "Hi Jimmy!" });
 });
 

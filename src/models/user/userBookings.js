@@ -14,148 +14,190 @@ const serviceSchema = new mongoose.Schema({
   quantity: Number,
   teamMembersRequired: Number,
 });
-const FirstMilestoneSchema = new mongoose.Schema(
-  {
-    baseTotal: { type: Number, min: 0 }, // baseline for 40% (usually bookingAmount)
-    requiredAmount: { type: Number, min: 0 }, // round(baseTotal * 0.40)
-    completedAt: { type: Date, default: null }, // set when paidAmount >= requiredAmount
-  },
-  { _id: false }
-);
 const PriceChangeSchema = new mongoose.Schema(
   {
-    proposedAt: Date,
-    proposedBy: String, // "vendor", "admin", etc.
-    scopeType: { type: String, enum: ["Added", "Reduced"] },
-    delta: Number, // signed (+/-)
-    proposedTotal: Number,
-    baseAtProposal: Number, // the base we added delta to
-    state: { type: String, enum: ["pending", "approved", "rejected"] },
-    decidedAt: Date,
-    decidedBy: String, // "admin" | "customer"
-    reason: String,
+    adjustmentAmount: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    proposedTotal: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    reason: {
+      type: String,
+      // required: true, // enable it when production
+      // trim: true,
+    },
+    scopeType: {
+      type: String,
+      trim: true, // e.g., "Add Room", "Upgrade Paint", etc.
+    },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    requestedBy: {
+      type: String,
+      enum: ["admin", "vendor", "customer"],
+      required: true,
+    },
+    requestedAt: {
+      type: Date,
+      default: Date.now,
+    },
+
+    // Approval
+    approvedBy: {
+      type: String,
+      enum: ["admin", "customer"],
+    },
+    approvedAt: Date,
+
+    // Rejection
+    rejectedBy: {
+      type: String,
+      enum: ["admin", "customer"],
+    },
+    rejectedAt: Date,
   },
   { _id: false }
 );
 
-const bookingDetailsSchema = new mongoose.Schema({
-  bookingDate: Date,
-  bookingTime: String,
-  status: {
-    type: String,
-    enum: [
-      "Pending",
-      "Confirmed", //accepted or responded
-      "Job Ongoing", // started - deep cleaning
-      "Survey Ongoing", //started - house painting
-      "Survey Completed", //ended - house painting
-      "Job Completed", //ended - deep cleaning
-      "Customer Cancelled",
-      "Customer Unreachable",
-      "Admin Cancelled",
-      "Pending Hiring", // mark hiring
-      "Hired", // payment done
-      "Project Ongoing", // project started
-      "Waiting for final payment",
-      "Project Completed", // project completed
-      "Negotiation",
-      "Set Remainder",
-    ],
-    default: "Pending",
-  },
-  priceChanges: { type: [PriceChangeSchema], default: [] },
-  isJobStarted: { type: Boolean, default: false },
-  paymentMethod: {
-    type: String,
-    enum: ["Cash", "Card", "UPI", "Wallet"],
-  },
-  paymentStatus: {
-    type: String,
-    enum: [
-      "Paid",
-      "Unpaid",
-      "Refunded",
-      "Partial Payment", // second installment sending
-      "Partially Completed", // second installment done, job ongoing
-      "Waiting for final payment", // job end, waiting for final payment
-    ],
-    default: "Unpaid",
-  },
-  siteVisitCharges: Number,
-  paidAmount: Number, // three installment with 40% of quote amount
-  amountYetToPay: Number, // update finalized quote amount - total amount
-  bookingAmount: Number, // from website initial payment(included)
-  originalTotalAmount: Number,
-  finalTotal: {
-    type: Number,
-    // default: function () {
-    //   // pick a sensible initial approved total
-    //   return (
-    //     this.currentTotalAmount ??
-    //     this.bookingAmount ??
-    //     this.originalTotalAmount ??
-    //     0
-    //   );
-    // },
-  },
-  currentTotalAmount: {
-    type: Number,
-    default: function () {
-      return this.originalTotalAmount || 0;
+const PaymentMilestoneSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ["pending", "paid", "failed"],
+      default: "pending",
+    },
+    amount: {
+      type: Number,
+      default: 0,
+    },
+    paidAt: Date,
+    method: {
+      type: String,
+      enum: ["Cash", "Card", "UPI", "Wallet"],
     },
   },
-  paymentLink: {
-    url: String,
-    isActive: { type: Boolean, default: true },
-    providerRef: String,
+  { _id: false }
+);
+
+const bookingDetailsSchema = new mongoose.Schema(
+  {
+    bookingDate: Date,
+    bookingTime: String,
+
+    status: {
+      type: String,
+      enum: [
+        "Pending",
+        "Confirmed", //accepted or responded
+        "Job Ongoing", // started - deep cleaning
+        "Survey Ongoing", //started - house painting
+        "Survey Completed",//ended - house painting
+        "Job Completed", //ended - deep cleaning
+        "Customer Cancelled",
+        "Customer Unreachable",
+        "Admin Cancelled",
+        "Pending Hiring", // mark hiring
+        "Hired", // first payment done
+        "Project Ongoing", // project started house painting
+        "Waiting for final payment",
+        "Project Completed",// project completed
+        "Negotiation",
+        "Set Remainder",
+      ],
+      default: "Pending",
+    },
+    isJobStarted: { type: Boolean, default: false },
+
+    // 🔁 Price Change Tracking
+    priceChanges: {
+      type: [PriceChangeSchema],
+      default: [],
+    },
+    hasPriceUpdated: { type: Boolean, default: false },
+
+    // 💰 Core Amounts (never change original)
+    originalTotalAmount: {
+      type: Number,
+      required: true,
+    },
+    finalTotal: {
+      type: Number,
+      required: true, // will be set to originalTotalAmount initially
+    },
+
+    // 💳 Installment Tracking (clear & explicit)
+    firstPayment: {
+      type: PaymentMilestoneSchema,
+      default: () => ({}),
+    },
+    secondPayment: {
+      type: PaymentMilestoneSchema,
+      default: () => ({}),
+    },
+    finalPayment: {
+      type: PaymentMilestoneSchema,
+      default: () => ({}),
+    },
+
+    // 🧾 Legacy / Derived Fields (optional for compatibility)
+    paidAmount: { type: Number, default: 0 }, // total paid so far
+    amountYetToPay: { type: Number, default: 0 },
+    bookingAmount: Number, // initial payment from website
+
+    // 💳 Payment method (last used)
+    paymentMethod: {
+      type: String,
+      enum: ["Cash", "Card", "UPI", "Wallet"],
+    },
+
+    // 🔗 Payment Link
+    paymentLink: {
+      url: String,
+      isActive: { type: Boolean, default: true },
+      providerRef: String,
+    },
+    paymentStatus: {
+      type: String,
+      enum: [
+        "Paid",
+        "Unpaid",
+        "Refunded",
+        "Partial Payment", // second installment sending
+        "Partially Completed", // second installment done, job ongoing
+        "Waiting for final payment", // job end, waiting for final payment
+      ],
+      default: "Unpaid",
+    },
+
+    // 📅 Project Timing
+    startProject: { type: Boolean, default: false },
+    projectStartDate: Date,
+    startProjectRequestedAt: Date,
+    startProjectApprovedAt: Date,
+    jobEndRequestedAt: Date,
+    jobEndedAt: Date,
+
+    // 🔐 OTP for starting project
+    startProjectOtp: String, // hashed
+    startProjectOtpExpiry: Date,
+
+    // 📝 Other
+    siteVisitCharges: Number,
+    otp: Number,
   },
-  otp: Number,
-  //  ........................
-  reasonForChanging: String,
-  // reasonForCancelled: String,
-  // edit scoping
-  newTotal: Number,
-  editedPrice: Number,
-  reasonForEditing: String,
-  scopeType: String,
-  priceApprovalStatus: { type: Boolean, default: false },
-  priceApprovalState: {
-    type: String,
-    enum: ["pending", "approved", "rejected"],
-    default: "pending",
-  },
-  hasPriceUpdated: { type: Boolean, default: false },
-  firstMilestone: { type: FirstMilestoneSchema, default: {} },
-  approvedBy: { type: String, enum: ["admin", "customer"], default: null },
-  approvedAt: Date,
-  priceEditedDate: Date,
-  priceEditedTime: String,
-  priceApprovedDate: Date,
-  rejectedBy: {
-    type: String,
-    enum: ["admin", "customer", null],
-    default: null,
-  },
-  priceApprovedTime: String,
-  priceRejectedDate: Date,
-  priceRejectedTime: String,
-  //.....................
-  startProject: { type: Boolean, default: false },
-  startProjectOtp: {
-    type: String, // store hashed OTP for security!
-  },
-  startProjectOtpExpiry: {
-    type: Date,
-  },
-  projectStartDate: {
-    type: Date,
-    default: null,
-  },
-  startProjectRequestedAt: Date,
-  startProjectApprovedAt: Date,
-  jobEndedAt: Date,
-  jobEndRequestedAt: Date,
-});
+  {
+    _id: false, // if embedded in UserBooking
+  }
+);
+
 const invitedVendorSchema = new mongoose.Schema({
   professionalId: String,
   invitedAt: Date,
@@ -245,6 +287,20 @@ const userBookingSchema = new mongoose.Schema({
         required: true,
       },
     },
+  },
+  payments: [
+    {
+      at: { type: Date, default: Date.now },
+      method: { type: String, enum: ["Cash", "Card", "UPI", "Wallet"] },
+      amount: { type: Number, required: true },
+      providerRef: String,
+      installment: { type: String, enum: ["first", "second", "final"] }, // helpful for reporting
+    },
+  ],
+  serviceType: {
+    type: String,
+    enum: ["deep_cleaning", "house_painting"],
+    required: true,
   },
   selectedSlot: selectedSlot,
   isEnquiry: Boolean,
