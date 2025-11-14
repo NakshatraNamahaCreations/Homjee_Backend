@@ -75,7 +75,8 @@ router.post(
   bookingController.requestingFinalPaymentEndProject
 );
 
-// router.put("/update-user-booking/:id", bookingController.updateBooking);
+router.put("/update-user-booking/:id", bookingController.updateBooking);
+router.patch("/:bookingId/read-status", bookingController.updateMarkReadStatus);
 
 // router.put(
 //   "/update-assigned-professional/:bookingId",

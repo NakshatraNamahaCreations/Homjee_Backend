@@ -99,7 +99,7 @@ const bookingDetailsSchema = new mongoose.Schema(
         "Confirmed", //accepted or responded
         "Job Ongoing", // started - deep cleaning
         "Survey Ongoing", //started - house painting
-        "Survey Completed",//ended - house painting
+        "Survey Completed", //ended - house painting
         "Job Completed", //ended - deep cleaning
         "Customer Cancelled",
         "Customer Unreachable",
@@ -108,7 +108,7 @@ const bookingDetailsSchema = new mongoose.Schema(
         "Hired", // first payment done
         "Project Ongoing", // project started house painting
         "Waiting for final payment",
-        "Project Completed",// project completed
+        "Project Completed", // project completed
         "Negotiation",
         "Set Remainder",
       ],
@@ -276,6 +276,7 @@ const userBookingSchema = new mongoose.Schema({
     houseFlatNumber: String,
     streetArea: String,
     landMark: String,
+    city: String,
     location: {
       type: {
         type: String,
@@ -304,6 +305,7 @@ const userBookingSchema = new mongoose.Schema({
   },
   selectedSlot: selectedSlot,
   isEnquiry: Boolean,
+  markRead: { type: Boolean, default: false },//New Field
   invitedVendors: [invitedVendorSchema],
   formName: { type: String, required: true }, // Add formName
   createdDate: { type: Date, default: Date.now },
