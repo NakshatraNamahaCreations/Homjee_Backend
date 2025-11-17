@@ -2408,209 +2408,417 @@ exports.makePayment = async (req, res) => {
   }
 };
 
-exports.updateBooking = async (req, res) => {
-  try {
-    const bookingId = req.params.id;
-    const updateData = req.body;
+// exports.updateBooking = async (req, res) => {
+//   try {
+//     const bookingId = req.params.bookingId;
+//     const updateData = req.body;
 
-    console.log("Incoming update:", updateData);
+//     console.log("Incoming update:", updateData);
+
+//     const booking = await UserBooking.findById(bookingId);
+//     if (!booking) {
+//       return res.status(404).json({ message: "Booking not found" });
+//     }
+
+//     /* -------------------------------------------------------------
+//      🧩 1. CUSTOMER UPDATE
+//     ------------------------------------------------------------- */
+//     if (updateData.customer) {
+//       booking.customer = {
+//         ...booking.customer,
+//         ...updateData.customer,
+//       };
+//     }
+
+//     /* -------------------------------------------------------------
+//      🧩 2. SERVICE UPDATE (if service array sent)
+//         Recalculate total automatically
+//     ------------------------------------------------------------- */
+//     if (Array.isArray(updateData.service)) {
+//       booking.service = updateData.service.map((s) => ({
+//         category: s.category,
+//         subCategory: s.subCategory,
+//         serviceName: s.serviceName,
+//         price: Number(s.price || 0),
+//         quantity: Number(s.quantity || 1),
+//         teamMembersRequired: Number(s.teamMembersRequired || 1),
+//       }));
+
+//       // Auto recalc original total
+//       const newTotal = booking.service.reduce((sum, s) => {
+//         return sum + Number(s.price) * Number(s.quantity);
+//       }, 0);
+
+//       booking.bookingDetails.originalTotalAmount = newTotal;
+
+//       // if deep cleaning → finalTotal = bookingAmount
+//       if (booking.serviceType === "deep_cleaning") {
+//         booking.bookingDetails.finalTotal =
+//           booking.bookingDetails.bookingAmount || 0;
+//       }
+//     }
+
+//     /* -------------------------------------------------------------
+//      🧩 3. BOOKING DETAILS (deep merge)
+//     ------------------------------------------------------------- */
+//     if (updateData.bookingDetails) {
+//       booking.bookingDetails = {
+//         ...booking.bookingDetails,
+//         ...updateData.bookingDetails,
+//       };
+//     }
+
+//     /* -------------------------------------------------------------
+//      🧩 4. ADDRESS UPDATE
+//     ------------------------------------------------------------- */
+//     if (updateData.address) {
+//       booking.address = {
+//         ...booking.address,
+//         ...updateData.address,
+//       };
+
+//       // Validate coordinates if provided
+//       if (
+//         updateData.address.location &&
+//         Array.isArray(updateData.address.location.coordinates)
+//       ) {
+//         const [lng, lat] = updateData.address.location.coordinates;
+
+//         if (typeof lng === "number" && typeof lat === "number") {
+//           booking.address.location = {
+//             type: "Point",
+//             coordinates: [lng, lat],
+//           };
+//         }
+//       }
+//     }
+
+//     /* -------------------------------------------------------------
+//      🧩 5. ASSIGNED PROFESSIONAL
+//     ------------------------------------------------------------- */
+//     if (updateData.assignedProfessional) {
+//       booking.assignedProfessional = {
+//         ...booking.assignedProfessional,
+//         ...updateData.assignedProfessional,
+//       };
+//     }
+
+//     /* -------------------------------------------------------------
+//      🧩 6. SELECTED SLOT
+//     ------------------------------------------------------------- */
+//     if (updateData.selectedSlot) {
+//       booking.selectedSlot = {
+//         ...booking.selectedSlot,
+//         ...updateData.selectedSlot,
+//       };
+//     }
+
+//     /* -------------------------------------------------------------
+//      🧩 7. PAYMENT UPDATE (append new payment)
+//     ------------------------------------------------------------- */
+//     if (updateData.newPayment) {
+//       booking.payments.push({
+//         at: new Date(),
+//         amount: updateData.newPayment.amount,
+//         method: updateData.newPayment.method,
+//         providerRef: updateData.newPayment.providerRef || null,
+//         installment: updateData.newPayment.installment || null,
+//       });
+//     }
+
+//     /* -------------------------------------------------------------
+//      🧩 8. isEnquiry / formName / simple flags
+//     ------------------------------------------------------------- */
+//     if (typeof updateData.isEnquiry === "boolean") {
+//       booking.isEnquiry = updateData.isEnquiry;
+//     }
+
+//     if (updateData.formName) {
+//       booking.formName = updateData.formName;
+//     }
+
+//     /* -------------------------------------------------------------
+//      💾 SAVE BOOKING
+//     ------------------------------------------------------------- */
+//     await booking.save();
+
+//     res.status(200).json({
+//       message: "Booking updated successfully",
+//       booking,
+//     });
+
+//   } catch (err) {
+//     console.error("Error updating booking:", err);
+//     res.status(500).json({
+//       message: "Server error",
+//       error: err.message,
+//     });
+//   }
+// };
+
+
+// Update address and reset selected slots
+exports.updateAddressAndResetSlots = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { address } = req.body;
+
+    if (!address) {
+      return res.status(400).json({
+        success: false,
+        message: 'Address data is required'
+      });
+    }
 
     const booking = await UserBooking.findById(bookingId);
     if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    /* -------------------------------------------------------------
-     🧩 1. CUSTOMER UPDATE
-    ------------------------------------------------------------- */
-    if (updateData.customer) {
-      booking.customer = {
-        ...booking.customer,
-        ...updateData.customer,
-      };
-    }
-
-    /* -------------------------------------------------------------
-     🧩 2. SERVICE UPDATE (if service array sent)
-        Recalculate total automatically
-    ------------------------------------------------------------- */
-    if (Array.isArray(updateData.service)) {
-      booking.service = updateData.service.map((s) => ({
-        category: s.category,
-        subCategory: s.subCategory,
-        serviceName: s.serviceName,
-        price: Number(s.price || 0),
-        quantity: Number(s.quantity || 1),
-        teamMembersRequired: Number(s.teamMembersRequired || 1),
-      }));
-
-      // Auto recalc original total
-      const newTotal = booking.service.reduce((sum, s) => {
-        return sum + Number(s.price) * Number(s.quantity);
-      }, 0);
-
-      booking.bookingDetails.originalTotalAmount = newTotal;
-
-      // if deep cleaning → finalTotal = bookingAmount
-      if (booking.serviceType === "deep_cleaning") {
-        booking.bookingDetails.finalTotal =
-          booking.bookingDetails.bookingAmount || 0;
-      }
-    }
-
-    /* -------------------------------------------------------------
-     🧩 3. BOOKING DETAILS (deep merge)
-    ------------------------------------------------------------- */
-    if (updateData.bookingDetails) {
-      booking.bookingDetails = {
-        ...booking.bookingDetails,
-        ...updateData.bookingDetails,
-      };
-    }
-
-    /* -------------------------------------------------------------
-     🧩 4. ADDRESS UPDATE
-    ------------------------------------------------------------- */
-    if (updateData.address) {
-      booking.address = {
-        ...booking.address,
-        ...updateData.address,
-      };
-
-      // Validate coordinates if provided
-      if (
-        updateData.address.location &&
-        Array.isArray(updateData.address.location.coordinates)
-      ) {
-        const [lng, lat] = updateData.address.location.coordinates;
-
-        if (typeof lng === "number" && typeof lat === "number") {
-          booking.address.location = {
-            type: "Point",
-            coordinates: [lng, lat],
-          };
-        }
-      }
-    }
-
-    /* -------------------------------------------------------------
-     🧩 5. ASSIGNED PROFESSIONAL
-    ------------------------------------------------------------- */
-    if (updateData.assignedProfessional) {
-      booking.assignedProfessional = {
-        ...booking.assignedProfessional,
-        ...updateData.assignedProfessional,
-      };
-    }
-
-    /* -------------------------------------------------------------
-     🧩 6. SELECTED SLOT
-    ------------------------------------------------------------- */
-    if (updateData.selectedSlot) {
-      booking.selectedSlot = {
-        ...booking.selectedSlot,
-        ...updateData.selectedSlot,
-      };
-    }
-
-    /* -------------------------------------------------------------
-     🧩 7. PAYMENT UPDATE (append new payment)
-    ------------------------------------------------------------- */
-    if (updateData.newPayment) {
-      booking.payments.push({
-        at: new Date(),
-        amount: updateData.newPayment.amount,
-        method: updateData.newPayment.method,
-        providerRef: updateData.newPayment.providerRef || null,
-        installment: updateData.newPayment.installment || null,
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found'
       });
     }
 
-    /* -------------------------------------------------------------
-     🧩 8. isEnquiry / formName / simple flags
-    ------------------------------------------------------------- */
-    if (typeof updateData.isEnquiry === "boolean") {
-      booking.isEnquiry = updateData.isEnquiry;
-    }
+    // Update address and reset selected slots
+    booking.address = {
+      houseFlatNumber: address.houseFlatNumber || booking.address.houseFlatNumber,
+      streetArea: address.streetArea || booking.address.streetArea,
+      landMark: address.landMark || booking.address.landMark,
+      city: address.city || booking.address.city,
+      location: address.location || booking.address.location
+    };
 
-    if (updateData.formName) {
-      booking.formName = updateData.formName;
-    }
+    // Reset selected slots as requested
+    booking.selectedSlot = {
+      slotTime: "",
+      slotDate: ""
+    };
 
-    /* -------------------------------------------------------------
-     💾 SAVE BOOKING
-    ------------------------------------------------------------- */
     await booking.save();
 
-    res.status(200).json({
-      message: "Booking updated successfully",
-      booking,
-    });
-
-  } catch (err) {
-    console.error("Error updating booking:", err);
-    res.status(500).json({
-      message: "Server error",
-      error: err.message,
-    });
-  }
-};
-
-
-/**
- * @desc Update the markRead status for a specific booking
- * @route PATCH /api/bookings/:bookingId/read-status
- * @access Private (Admin/Internal System)
- */
-exports.updateMarkReadStatus = async (req, res) => {
-  const { bookingId } = req.params;
-  // Get the boolean value from the request body. 
-  // It should be passed as { isRead: true } or { isRead: false }
-  const { isRead } = req.body;
-
-  // 1. Basic Validation
-  if (typeof isRead !== "boolean") {
-    return res.status(400).json({ 
-        success: false, 
-        message: "Invalid input. 'isRead' must be a boolean value (true or false)." 
-    });
-  }
-
-  try {
-    // 2. Find and update the document
-    const updatedBooking = await UserBooking.findByIdAndUpdate(
-      bookingId,
-      { $set: { markRead: isRead } }, // Use $set to update only this field
-      { new: true, runValidators: true } // Return the updated document and run Mongoose validators
-    );
-
-    // 3. Check if booking exists
-    if (!updatedBooking) {
-      return res.status(404).json({ 
-          success: false, 
-          message: `Booking not found with ID: ${bookingId}` 
-      });
-    }
-
-    // 4. Success response
-    return res.status(200).json({
+    res.json({
       success: true,
-      message: `Booking read status updated to ${isRead}`,
-      data: {
-        _id: updatedBooking._id,
-        markRead: updatedBooking.markRead
-      },
+      message: 'Address updated and slots reset successfully',
+      booking: booking
     });
 
   } catch (error) {
-    console.error("Error updating markRead status:", error.message);
-    return res.status(500).json({ 
-        success: false, 
-        message: "Server error during update.", 
-        error: error.message 
+    console.error('Error updating address and slots:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
     });
   }
 };
+
+// Update selected slot only
+exports.updateSelectedSlot = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { selectedSlot } = req.body;
+
+    if (!selectedSlot) {
+      return res.status(400).json({
+        success: false,
+        message: 'Selected slot data is required'
+      });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found'
+      });
+    }
+
+    // Update selected slot
+    booking.selectedSlot = {
+      slotTime: selectedSlot.slotTime || "",
+      slotDate: selectedSlot.slotDate || ""
+    };
+
+    await booking.save();
+
+    res.json({
+      success: true,
+      message: 'Selected slot updated successfully',
+      booking: booking
+    });
+
+  } catch (error) {
+    console.error('Error updating selected slot:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// Update user booking (existing - modified to handle service updates properly)
+exports.updateUserBooking = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const {
+      customer,
+      service,
+      bookingDetails,
+      address,
+      selectedSlot,
+      isEnquiry,
+      formName
+    } = req.body;
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: 'Booking not found'
+      });
+    }
+
+    // Update customer info
+    if (customer) {
+      booking.customer = {
+        customerId: customer.customerId || booking.customer.customerId,
+        name: customer.name || booking.customer.name,
+        phone: customer.phone || booking.customer.phone
+      };
+    }
+
+    // Update services and recalculate total
+    if (service && Array.isArray(service)) {
+      booking.service = service.map(s => ({
+        category: s.category || '',
+        subCategory: s.subCategory || '',
+        serviceName: s.serviceName || '',
+        price: s.price || 0,
+        quantity: s.quantity || 1,
+        teamMembersRequired: s.teamMembersRequired || 1
+      }));
+
+      // Recalculate total amount
+      const totalAmount = service.reduce((sum, s) => sum + (s.price || 0), 0);
+      
+      // Update booking details with new total
+      booking.bookingDetails.finalTotal = totalAmount;
+      booking.bookingDetails.originalTotalAmount = totalAmount;
+    }
+
+    // Update booking details
+    if (bookingDetails) {
+      if (bookingDetails.status) booking.bookingDetails.status = bookingDetails.status;
+      if (bookingDetails.paymentMethod) booking.bookingDetails.paymentMethod = bookingDetails.paymentMethod;
+      if (bookingDetails.paymentStatus) booking.bookingDetails.paymentStatus = bookingDetails.paymentStatus;
+      
+      // Handle paid amount updates
+      if (bookingDetails.paidAmount !== undefined) {
+        booking.bookingDetails.paidAmount = bookingDetails.paidAmount;
+        booking.bookingDetails.amountYetToPay = booking.bookingDetails.finalTotal - bookingDetails.paidAmount;
+      }
+    }
+
+    // Update address
+    if (address) {
+      booking.address = {
+        houseFlatNumber: address.houseFlatNumber || booking.address.houseFlatNumber,
+        streetArea: address.streetArea || booking.address.streetArea,
+        landMark: address.landMark || booking.address.landMark,
+        city: address.city || booking.address.city,
+        location: address.location || booking.address.location
+      };
+    }
+
+    // Update selected slot
+    if (selectedSlot) {
+      booking.selectedSlot = {
+        slotTime: selectedSlot.slotTime || "",
+        slotDate: selectedSlot.slotDate || ""
+      };
+    }
+
+    // Update other fields
+    if (isEnquiry !== undefined) booking.isEnquiry = isEnquiry;
+    if (formName) booking.formName = formName;
+
+    await booking.save();
+
+    res.json({
+      success: true,
+      message: 'Booking updated successfully',
+      booking: booking
+    });
+
+  } catch (error) {
+    console.error('Error updating booking:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error'
+    });
+  }
+};
+
+// controllers/bookingController.js
+
+exports.updateMarkReadStatus = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { markRead } = req.body;
+
+    // Validate bookingId
+    if (!bookingId) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking ID is required"
+      });
+    }
+
+    // Validate markRead is boolean
+    if (typeof markRead !== 'boolean') {
+      return res.status(400).json({
+        success: false,
+        message: "markRead must be a boolean value (true or false)"
+      });
+    }
+
+    // Find the booking and update isRead field
+    const updatedBooking = await mongoose.model("UserBookings").findByIdAndUpdate(
+      bookingId,
+      { 
+        $set: { 
+          isRead: markRead 
+        } 
+      },
+      { 
+        new: true, // Return updated document
+        runValidators: true 
+      }
+    );
+
+    // Check if booking exists
+    if (!updatedBooking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found"
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: `Booking marked as ${markRead ? 'read' : 'unread'} successfully`,
+      booking: updatedBooking
+    });
+
+  } catch (error) {
+    console.error("Error updating markRead status:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message
+    });
+  }
+};
+
+
 
 
 // exports.makePayment = async (req, res) => {

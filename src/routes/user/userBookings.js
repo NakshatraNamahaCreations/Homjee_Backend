@@ -75,7 +75,16 @@ router.post(
   bookingController.requestingFinalPaymentEndProject
 );
 
-router.put("/update-user-booking/:id", bookingController.updateBooking);
+// router.put("/update-user-booking/:bookingId", bookingController.updateBooking);
+// Update address and reset slots
+router.put('/update-address-slot/:bookingId', bookingController.updateAddressAndResetSlots);
+
+// Update selected slot
+router.put('/update-slot/:bookingId', bookingController.updateSelectedSlot);
+
+// Update user booking (existing route - keep this)
+router.put('/update-user-booking/:bookingId', bookingController.updateUserBooking);
+
 router.patch("/:bookingId/read-status", bookingController.updateMarkReadStatus);
 
 // router.put(
