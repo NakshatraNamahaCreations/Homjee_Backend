@@ -306,6 +306,7 @@ const userBookingSchema = new mongoose.Schema({
   selectedSlot: selectedSlot,
   isEnquiry: Boolean,
   isRead: { type: Boolean, default: false },//New Field
+  isDismmised: { type: Boolean, default: false },//New Field
   invitedVendors: [invitedVendorSchema],
   formName: { type: String, required: true }, // Add formName
   createdDate: { type: Date, default: Date.now },

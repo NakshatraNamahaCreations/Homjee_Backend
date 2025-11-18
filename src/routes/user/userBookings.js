@@ -85,7 +85,9 @@ router.put('/update-slot/:bookingId', bookingController.updateSelectedSlot);
 // Update user booking (existing route - keep this)
 router.put('/update-user-booking/:bookingId', bookingController.updateUserBooking);
 
-router.patch("/:bookingId/read-status", bookingController.updateMarkReadStatus);
+
+router.patch("/:bookingId/status", bookingController.updateBookingField);
+
 
 // router.put(
 //   "/update-assigned-professional/:bookingId",

@@ -2758,62 +2758,72 @@ exports.updateUserBooking = async (req, res) => {
 };
 
 // controllers/bookingController.js
-
-exports.updateMarkReadStatus = async (req, res) => {
+exports.updateBookingField = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const { markRead } = req.body;
+    const { field, value } = req.body;
 
     // Validate bookingId
     if (!bookingId) {
       return res.status(400).json({
         success: false,
-        message: "Booking ID is required"
+        message: "Booking ID is required",
       });
     }
 
-    // Validate markRead is boolean
-    if (typeof markRead !== 'boolean') {
+    // Validate field
+    const allowedFields = ["isRead", "isDismised"];
+    if (!field || !allowedFields.includes(field)) {
       return res.status(400).json({
         success: false,
-        message: "markRead must be a boolean value (true or false)"
+        message: `field is required and must be one of: ${allowedFields.join(
+          ", "
+        )}`,
       });
     }
 
-    // Find the booking and update isRead field
-    const updatedBooking = await mongoose.model("UserBookings").findByIdAndUpdate(
+    // Validate value is boolean
+    if (typeof value !== "boolean") {
+      return res.status(400).json({
+        success: false,
+        message: "value must be a boolean (true or false)",
+      });
+    }
+
+    // Prepare update object
+    const updateObj = { [field]: value };
+
+    // If dismissing, ensure isRead is also set true
+    if (field === "isDismised" && value === true) {
+      updateObj.isRead = true;
+    }
+
+    const BookingModel = mongoose.model("UserBookings");
+
+    const updatedBooking = await BookingModel.findByIdAndUpdate(
       bookingId,
-      { 
-        $set: { 
-          isRead: markRead 
-        } 
-      },
-      { 
-        new: true, // Return updated document
-        runValidators: true 
-      }
+      { $set: updateObj },
+      { new: true, runValidators: true }
     );
 
-    // Check if booking exists
     if (!updatedBooking) {
       return res.status(404).json({
         success: false,
-        message: "Booking not found"
+        message: "Booking not found",
       });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      message: `Booking marked as ${markRead ? 'read' : 'unread'} successfully`,
-      booking: updatedBooking
+      message: `${field} set to ${value}`,
+      booking: updatedBooking,
     });
-
   } catch (error) {
-    console.error("Error updating markRead status:", error);
-    res.status(500).json({
+    console.error("Error in updateBookingField:", error);
+    return res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message
+      error: error.message,
     });
   }
 };
