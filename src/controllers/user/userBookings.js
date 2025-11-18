@@ -2772,7 +2772,7 @@ exports.updateBookingField = async (req, res) => {
     }
 
     // Validate field
-    const allowedFields = ["isRead", "isDismised"];
+    const allowedFields = ["isRead", "isDismmised"];
     if (!field || !allowedFields.includes(field)) {
       return res.status(400).json({
         success: false,
@@ -2794,7 +2794,7 @@ exports.updateBookingField = async (req, res) => {
     const updateObj = { [field]: value };
 
     // If dismissing, ensure isRead is also set true
-    if (field === "isDismised" && value === true) {
+    if (field === "isDismmised" && value === true) {
       updateObj.isRead = true;
     }
 
