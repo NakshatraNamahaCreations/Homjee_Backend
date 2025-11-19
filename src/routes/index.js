@@ -12,6 +12,7 @@ const productRoutes = require("./products/ProductRoutes");
 const adminAuthRoutes = require("./admin/adminAuthRoutes");
 const deepCleaningRoutes = require("./products/deepCleaning.routes");
 const minimumOrderRoutes = require("./serviceConfig/minimumOrder.routes");
+const reminderRoutes = require("../routes/user/reminder");
 
 router.use("/user", userRoutes);
 router.use("/bookings", bookingRoutes);
@@ -24,6 +25,7 @@ router.use("/products", productRoutes);
 router.use("/admin/auth", adminAuthRoutes);
 router.use("/deeppackage", deepCleaningRoutes);
 router.use("/minimumorder", minimumOrderRoutes);
+router.use("/reminders", reminderRoutes);
 
 router.get("/hello-world/testing", (req, res) => {
   res.json({ message: "Hi Jimmy!" });
