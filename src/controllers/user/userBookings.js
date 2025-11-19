@@ -231,7 +231,8 @@ exports.createBooking = async (req, res) => {
       isEnquiry,
       formName,
     } = req.body;
-    console.log("req.body", req.body);
+    // console.log("req.body", req.body);
+    console.log("commiting");
 
     // Validation
     if (!service || !Array.isArray(service) || service.length === 0) {
