@@ -6,12 +6,22 @@ const bcrypt = require("bcrypt");
 const dayjs = require("dayjs");
 const mongoose = require("mongoose");
 const { unlockRelatedQuotesByHiring } = require("../../helpers/quotes");
-const userBookings = require("../../models/user/userBookings");
+const DeepCleaningPackageModel = require("../../models/products/DeepCleaningPackage");
+const userSchema = require("../../models/user/userAuth");
 
+// 691dbf44b066964735737d4e check this tomorrow
 const citiesObj = {
   Bangalore: "Bengaluru",
   Pune: "Pune",
 };
+
+function generateBookingId() {
+  // Use today's date in YYYYMMDD format
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');  // e.g. "20251120"
+  // Generate a random 4-digit number or pull last count from DB for uniqueness
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `HJ-${dateStr}-${rand}`;
+}
 
 function generateOTP() {
   return crypto.randomInt(1000, 10000);
@@ -121,8 +131,8 @@ function computeFinalTotal(details) {
     (details.priceApprovalStatus
       ? "approved"
       : details.hasPriceUpdated
-      ? "pending"
-      : "approved");
+        ? "pending"
+        : "approved");
 
   if (state === "approved" && Number.isFinite(details.newTotal)) {
     return Number(details.newTotal);
@@ -164,9 +174,9 @@ function ensureFirstMilestone(details) {
     // but in your flow you want ORIGINAL for the 40% hurdle:
     const base = Number(
       details.bookingAmount ||
-        details.finalTotal ||
-        details.currentTotalAmount ||
-        0
+      details.finalTotal ||
+      details.currentTotalAmount ||
+      0
     );
     fm.baseTotal = base;
     fm.requiredAmount = roundMoney(base * 0.4);
@@ -218,7 +228,6 @@ function detectServiceType(formName, services) {
   // Default to deep_cleaning if unsure, or throw error
   return "deep_cleaning"; // or "other" if you prefer
 }
-
 exports.createBooking = async (req, res) => {
   try {
     const {
@@ -231,15 +240,32 @@ exports.createBooking = async (req, res) => {
       isEnquiry,
       formName,
     } = req.body;
-    // console.log("req.body", req.body);
-    console.log("commiting");
 
+    let checkUserIsExistOrNot = await userSchema.findOne({
+      mobileNumber: customer.phone
+    })
+    if (!checkUserIsExistOrNot) {
+      checkUserIsExistOrNot = new userSchema({
+        userName: customer.name,
+        mobileNumber: customer.phone,
+        savedAddress: {
+          uniqueCode: `ADDR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          address: address.streetArea,
+          houseNumber: address.houseFlatNumber,
+          landmark: address.landMark,
+          latitude: address.location.coordinates[1],
+          longitude: address.location.coordinates[0],
+          city: address.city,
+        }
+      })
+      await checkUserIsExistOrNot.save();
+    }
     // Validation
     if (!service || !Array.isArray(service) || service.length === 0) {
       return res.status(400).json({ message: "Service list cannot be empty." });
     }
 
-    // Parse coordinates
+    // Address coords validation
     let coords = [0, 0];
     if (
       address?.location?.coordinates &&
@@ -255,97 +281,96 @@ exports.createBooking = async (req, res) => {
         .json({ message: "Invalid or missing address coordinates." });
     }
 
-    // 🔍 Detect service type
+    // Service type detection
     const serviceType = detectServiceType(formName, service);
 
-    // 💰 Calculate total from services
-    const originalTotalAmount = service.reduce((sum, s) => {
-      return sum + Number(s.price) * Number(s.quantity || 1);
-    }, 0);
+    // Deep Cleaning: Amounts calculated from cart and packages
+    let bookingAmount = 0,
+      originalTotalAmount = 0,
+      paidAmount = 0,
+      amountYetToPay = 0,
+      siteVisitCharges = 0;
+    let firstPayment = {},
+      finalPayment = {},
+      secondPayment = {};
 
-    console.log("bookingDetails", bookingDetails);
+    const packageMaster = await DeepCleaningPackageModel.find({});
 
-    // Booking amount from frontend (paid on website)
-    const bookingAmount = Number(bookingDetails?.bookingAmount) || 0;
+    if (serviceType === "deep_cleaning") {
+      // Find package booking amounts by cart item name
+      const result = service.map((cartItem) => {
+        const pkg = packageMaster.find(
+          (p) => p.name === cartItem.serviceName
+        );
+        return pkg ? pkg.bookingAmount : 0;
+      });
+      bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
+      originalTotalAmount = service.reduce(
+        (sum, itm) => sum + Number(itm.price) * (itm.quantity || 1),
+        0
+      );
+      paidAmount = bookingAmount; // Or assign from bookingDetails if user paid already
+      amountYetToPay = originalTotalAmount - paidAmount;
 
-    // ✅ Prepare bookingDetails with correct installments
-    let bookingDetailsConfig = {
+      firstPayment = {
+        status: paidAmount > 0 ? "paid" : "pending",
+        amount: paidAmount,
+        paidAt: paidAmount > 0 ? new Date() : null,
+        method: bookingDetails?.paymentMethod || "UPI",
+      };
+      finalPayment = {
+        status: "pending",
+        amount: Math.max(0, originalTotalAmount - paidAmount),
+      };
+    }
+
+    if (serviceType === "house_painting") {
+      siteVisitCharges = Number(bookingDetails?.siteVisitCharges || 0);
+      bookingAmount = 0;  //siteVisitCharges; [change incase need. siteVisitCharges is website and 0 for admin panel]
+      paidAmount = siteVisitCharges;
+      originalTotalAmount = 0;
+      amountYetToPay = 0;
+
+      firstPayment = { status: "pending", amount: 0 };
+      secondPayment = { status: "pending", amount: 0 };
+      finalPayment = { status: "pending", amount: 0 };
+    }
+
+    const bookingDetailsConfig = {
+      booking_id: generateBookingId(),
       bookingDate: bookingDetails?.bookingDate
         ? new Date(bookingDetails.bookingDate)
         : new Date(),
       bookingTime: bookingDetails?.bookingTime || "10:30 AM",
       status: "Pending",
-      bookingAmount: 0,
-      originalTotalAmount: 0,
-      finalTotal: 0,
-      paidAmount: bookingDetails.paidAmount,
-      amountYetToPay: 0,
+      bookingAmount,
+      originalTotalAmount,
+      finalTotal: originalTotalAmount,
+      paidAmount,
+      amountYetToPay,
       paymentMethod: bookingDetails?.paymentMethod || "Cash",
-      paymentStatus: bookingAmount > 0 ? "Partial Payment" : "Unpaid",
-      otp: generateOTP(), // 4-digit OTP
-      siteVisitCharges: 0,
+      paymentStatus: paidAmount > 0 ? "Partial Payment" : "Unpaid",
+      otp: generateOTP(),
+      siteVisitCharges,
       paymentLink: { isActive: false },
+      firstPayment,
+      finalPayment,
+      // add secondPayment only for house painting
+      ...(serviceType === "house_painting" ? { secondPayment } : {}),
     };
 
-    if (serviceType === "deep_cleaning") {
-      // ✅ Deep Cleaning: total is known at booking
-      const bookingAmount = Number(bookingDetails?.bookingAmount) || 0;
-      const originalTotal = originalTotalAmount; // computed from service prices
-
-      bookingDetailsConfig.bookingAmount = bookingAmount;
-      bookingDetailsConfig.originalTotalAmount = originalTotal;
-      bookingDetailsConfig.finalTotal = bookingAmount;
-      bookingDetailsConfig.paidAmount = bookingDetails.paidAmount;
-      bookingDetailsConfig.amountYetToPay = Math.max(
-        0,
-        bookingAmount - bookingDetails.paidAmount
-      );
-      bookingDetailsConfig.paymentStatus =
-        bookingAmount > 0 ? "Partial Payment" : "Unpaid";
-
-      // Installments
-      bookingDetailsConfig.firstPayment = {
-        status: bookingAmount > 0 ? "paid" : "pending",
-        amount: bookingDetails.paidAmount,
-        paidAt: bookingAmount > 0 ? new Date() : null,
-        method: bookingDetails?.paymentMethod || "Cash",
-      };
-      bookingDetailsConfig.finalPayment = {
-        status: "pending",
-        amount: Math.max(0, originalTotal - bookingAmount),
-      };
-    } else if (serviceType === "house_painting") {
-      // 🏠 House Painting: ONLY site visit charges (if any) collected now
-      const siteVisitCharges = Number(bookingDetails?.siteVisitCharges) || 0;
-
-      // All main amounts are 0 — will be set later during quotation
-      bookingDetailsConfig.siteVisitCharges = siteVisitCharges;
-      bookingDetailsConfig.bookingAmount = siteVisitCharges; // this is the only "advance"
-      bookingDetailsConfig.paidAmount = siteVisitCharges;
-      bookingDetailsConfig.paymentStatus =
-        siteVisitCharges > 0 ? "Partial Payment" : "Unpaid";
-      bookingDetailsConfig.amountYetToPay = 0; // because total is unknown
-
-      // Installments: only firstPayment may have site visit amount (but usually 0)
-      // We'll leave all as pending with 0 — they'll be updated in `markPendingHiring`
-      bookingDetailsConfig.firstPayment = { status: "pending", amount: 0 };
-      bookingDetailsConfig.secondPayment = { status: "pending", amount: 0 };
-      bookingDetailsConfig.finalPayment = { status: "pending", amount: 0 };
-
-      // originalTotalAmount & finalTotal remain 0 until quote is finalized
-    }
     // Track payment line-item
     const payments =
       serviceType === "house_painting"
-        ? [] // empty array for house painting
+        ? []
         : [
-            {
-              at: new Date(),
-              method: "UPI", // You can replace this dynamically later once payment integration
-              amount: bookingDetails.paidAmount,
-              providerRef: "razorpay_order_xyz" || undefined,
-            },
-          ];
+          {
+            at: new Date(),
+            method: bookingDetailsConfig.paymentMethod,
+            amount: paidAmount,
+            providerRef: "razorpay_order_xyz",
+          },
+        ];
 
     // 📦 Create booking
     const booking = new UserBooking({
@@ -360,16 +385,16 @@ exports.createBooking = async (req, res) => {
         serviceName: s.serviceName,
         price: Number(s.price),
         quantity: Number(s.quantity) || 1,
-        teamMembersRequired: Number(s.teamMembersRequired) || 1,
+        teamMembersRequired: Number(s.teamMembersRequired) || 0,
       })),
-      serviceType, // NEW FIELD
+      serviceType,
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -404,6 +429,193 @@ exports.createBooking = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
+// exports.createBooking = async (req, res) => {
+//   try {
+//     const {
+//       customer,
+//       service,
+//       bookingDetails,
+//       assignedProfessional,
+//       address,
+//       selectedSlot,
+//       isEnquiry,
+//       formName,
+//     } = req.body;
+//     console.log("req.body", req.body);
+
+//     // Validation
+//     if (!service || !Array.isArray(service) || service.length === 0) {
+//       return res.status(400).json({ message: "Service list cannot be empty." });
+//     }
+
+//     // Parse coordinates
+//     let coords = [0, 0];
+//     if (
+//       address?.location?.coordinates &&
+//       Array.isArray(address.location.coordinates) &&
+//       address.location.coordinates.length === 2 &&
+//       typeof address.location.coordinates[0] === "number" &&
+//       typeof address.location.coordinates[1] === "number"
+//     ) {
+//       coords = address.location.coordinates;
+//     } else {
+//       return res
+//         .status(400)
+//         .json({ message: "Invalid or missing address coordinates." });
+//     }
+
+//     // 🔍 Detect service type
+//     const serviceType = detectServiceType(formName, service);
+
+//     // 💰 Calculate total from services
+//     const originalTotalAmount = service.reduce((sum, s) => {
+//       return sum + Number(s.price) * Number(s.quantity || 1);
+//     }, 0);
+
+//     console.log("bookingDetails", bookingDetails);
+
+//     // Booking amount from frontend (paid on website)
+//     const bookingAmount = Number(bookingDetails?.bookingAmount) || 0;
+
+//     // ✅ Prepare bookingDetails with correct installments
+//     let bookingDetailsConfig = {
+//       bookingDate: bookingDetails?.bookingDate
+//         ? new Date(bookingDetails.bookingDate)
+//         : new Date(),
+//       bookingTime: bookingDetails?.bookingTime || "10:30 AM",
+//       status: "Pending",
+//       bookingAmount: 0,
+//       originalTotalAmount: 0,
+//       finalTotal: 0,
+//       paidAmount: bookingDetails.paidAmount,
+//       amountYetToPay: 0,
+//       paymentMethod: bookingDetails?.paymentMethod || "Cash",
+//       paymentStatus: bookingAmount > 0 ? "Partial Payment" : "Unpaid",
+//       otp: generateOTP(), // 4-digit OTP
+//       siteVisitCharges: 0,
+//       paymentLink: { isActive: false },
+//     };
+
+//     if (serviceType === "deep_cleaning") {
+//       // ✅ Deep Cleaning: total is known at booking
+//       const bookingAmount = Number(bookingDetails?.bookingAmount) || 0;
+//       const originalTotal = originalTotalAmount; // computed from service prices
+
+//       bookingDetailsConfig.bookingAmount = bookingAmount;
+//       bookingDetailsConfig.originalTotalAmount = originalTotal;
+//       bookingDetailsConfig.finalTotal = originalTotal;
+//       bookingDetailsConfig.paidAmount = bookingDetails.paidAmount;
+//       bookingDetailsConfig.amountYetToPay = bookingDetails.amountYetToPay
+//       // Math.max(
+//       //   0,
+//       //   bookingAmount - bookingDetails.paidAmount
+//       // );
+//       bookingDetailsConfig.paymentStatus =
+//         bookingAmount > 0 ? "Partial Payment" : "Unpaid";
+
+//       // Installments
+//       bookingDetailsConfig.firstPayment = {
+//         status: bookingAmount > 0 ? "paid" : "pending",
+//         amount: bookingDetails.paidAmount,
+//         paidAt: bookingAmount > 0 ? new Date() : null,
+//         method: bookingDetails?.paymentMethod || "UPI",
+//       };
+//       bookingDetailsConfig.finalPayment = {
+//         status: "pending",
+//         amount: Math.max(0, originalTotal - bookingAmount),
+//       };
+//     } else if (serviceType === "house_painting") {
+//       // 🏠 House Painting: ONLY site visit charges (if any) collected now
+//       const siteVisitCharges = Number(bookingDetails?.siteVisitCharges) || 0;
+
+//       // All main amounts are 0 — will be set later during quotation
+//       bookingDetailsConfig.siteVisitCharges = siteVisitCharges;
+//       // bookingDetailsConfig.bookingAmount = siteVisitCharges; // this is the only "advance"
+//       bookingDetailsConfig.paidAmount = siteVisitCharges;
+//       bookingDetailsConfig.paymentStatus =
+//         siteVisitCharges > 0 ? "Partial Payment" : "Unpaid";
+//       bookingDetailsConfig.amountYetToPay = 0; // because total is unknown
+
+//       // Installments: only firstPayment may have site visit amount (but usually 0)
+//       // We'll leave all as pending with 0 — they'll be updated in `markPendingHiring`
+//       bookingDetailsConfig.firstPayment = { status: "pending", amount: 0 };
+//       bookingDetailsConfig.secondPayment = { status: "pending", amount: 0 };
+//       bookingDetailsConfig.finalPayment = { status: "pending", amount: 0 };
+
+//       // originalTotalAmount & finalTotal remain 0 until quote is finalized
+//     }
+
+//     // Track payment line-item
+//     const payments =
+//       serviceType === "house_painting"
+//         ? [] // empty array for house painting
+//         : [
+//           {
+//             at: new Date(),
+//             method: "UPI", // You can replace this dynamically later once payment integration
+//             amount: bookingDetails.paidAmount,
+//             providerRef: "razorpay_order_xyz" || undefined,
+//           },
+//         ];
+
+//     // 📦 Create booking
+//     const booking = new UserBooking({
+//       customer: {
+//         customerId: customer?.customerId,
+//         name: customer?.name,
+//         phone: customer?.phone,
+//       },
+//       service: service.map((s) => ({
+//         category: s.category,
+//         subCategory: s.subCategory,
+//         serviceName: s.serviceName,
+//         price: Number(s.price),
+//         quantity: Number(s.quantity) || 1,
+//         teamMembersRequired: Number(s.teamMembersRequired) || 1,
+//       })),
+//       serviceType, // NEW FIELD
+//       bookingDetails: bookingDetailsConfig,
+//       assignedProfessional: assignedProfessional
+//         ? {
+//           professionalId: assignedProfessional.professionalId,
+//           name: assignedProfessional.name,
+//           phone: assignedProfessional.phone,
+//         }
+//         : undefined,
+//       address: {
+//         houseFlatNumber: address?.houseFlatNumber || "",
+//         streetArea: address?.streetArea || "",
+//         landMark: address?.landMark || "",
+//         city: address?.city || "",
+//         location: {
+//           type: "Point",
+//           coordinates: coords,
+//         },
+//       },
+//       selectedSlot: {
+//         slotDate: selectedSlot?.slotDate || moment().format("YYYY-MM-DD"),
+//         slotTime: selectedSlot?.slotTime || "10:00 AM",
+//       },
+//       payments,
+//       isEnquiry: Boolean(isEnquiry),
+//       formName: formName || "Unknown",
+//       createdDate: new Date(),
+//     });
+
+//     await booking.save();
+
+//     res.status(201).json({
+//       message: "Booking created successfully",
+//       bookingId: booking._id,
+//       serviceType,
+//       booking,
+//     });
+//   } catch (error) {
+//     console.error("Error creating booking:", error);
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
 
 // exports.getAllBookings = async (req, res) => {
 //   try {
@@ -2557,7 +2769,6 @@ exports.makePayment = async (req, res) => {
 //   }
 // };
 
-
 // Update address and reset selected slots
 exports.updateAddressAndResetSlots = async (req, res) => {
   try {
@@ -2567,7 +2778,7 @@ exports.updateAddressAndResetSlots = async (req, res) => {
     if (!address) {
       return res.status(400).json({
         success: false,
-        message: 'Address data is required'
+        message: "Address data is required",
       });
     }
 
@@ -2575,38 +2786,38 @@ exports.updateAddressAndResetSlots = async (req, res) => {
     if (!booking) {
       return res.status(404).json({
         success: false,
-        message: 'Booking not found'
+        message: "Booking not found",
       });
     }
 
     // Update address and reset selected slots
     booking.address = {
-      houseFlatNumber: address.houseFlatNumber || booking.address.houseFlatNumber,
+      houseFlatNumber:
+        address.houseFlatNumber || booking.address.houseFlatNumber,
       streetArea: address.streetArea || booking.address.streetArea,
       landMark: address.landMark || booking.address.landMark,
       city: address.city || booking.address.city,
-      location: address.location || booking.address.location
+      location: address.location || booking.address.location,
     };
 
     // Reset selected slots as requested
     booking.selectedSlot = {
       slotTime: "",
-      slotDate: ""
+      slotDate: "",
     };
 
     await booking.save();
 
     res.json({
       success: true,
-      message: 'Address updated and slots reset successfully',
-      booking: booking
+      message: "Address updated and slots reset successfully",
+      booking: booking,
     });
-
   } catch (error) {
-    console.error('Error updating address and slots:', error);
+    console.error("Error updating address and slots:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -2620,7 +2831,7 @@ exports.updateSelectedSlot = async (req, res) => {
     if (!selectedSlot) {
       return res.status(400).json({
         success: false,
-        message: 'Selected slot data is required'
+        message: "Selected slot data is required",
       });
     }
 
@@ -2628,29 +2839,28 @@ exports.updateSelectedSlot = async (req, res) => {
     if (!booking) {
       return res.status(404).json({
         success: false,
-        message: 'Booking not found'
+        message: "Booking not found",
       });
     }
 
     // Update selected slot
     booking.selectedSlot = {
       slotTime: selectedSlot.slotTime || "",
-      slotDate: selectedSlot.slotDate || ""
+      slotDate: selectedSlot.slotDate || "",
     };
 
     await booking.save();
 
     res.json({
       success: true,
-      message: 'Selected slot updated successfully',
-      booking: booking
+      message: "Selected slot updated successfully",
+      booking: booking,
     });
-
   } catch (error) {
-    console.error('Error updating selected slot:', error);
+    console.error("Error updating selected slot:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -2666,14 +2876,14 @@ exports.updateUserBooking = async (req, res) => {
       address,
       selectedSlot,
       isEnquiry,
-      formName
+      formName,
     } = req.body;
 
     const booking = await UserBooking.findById(bookingId);
     if (!booking) {
       return res.status(404).json({
         success: false,
-        message: 'Booking not found'
+        message: "Booking not found",
       });
     }
 
@@ -2682,24 +2892,24 @@ exports.updateUserBooking = async (req, res) => {
       booking.customer = {
         customerId: customer.customerId || booking.customer.customerId,
         name: customer.name || booking.customer.name,
-        phone: customer.phone || booking.customer.phone
+        phone: customer.phone || booking.customer.phone,
       };
     }
 
     // Update services and recalculate total
     if (service && Array.isArray(service)) {
-      booking.service = service.map(s => ({
-        category: s.category || '',
-        subCategory: s.subCategory || '',
-        serviceName: s.serviceName || '',
+      booking.service = service.map((s) => ({
+        category: s.category || "",
+        subCategory: s.subCategory || "",
+        serviceName: s.serviceName || "",
         price: s.price || 0,
         quantity: s.quantity || 1,
-        teamMembersRequired: s.teamMembersRequired || 1
+        teamMembersRequired: s.teamMembersRequired || 1,
       }));
 
       // Recalculate total amount
       const totalAmount = service.reduce((sum, s) => sum + (s.price || 0), 0);
-      
+
       // Update booking details with new total
       booking.bookingDetails.finalTotal = totalAmount;
       booking.bookingDetails.originalTotalAmount = totalAmount;
@@ -2707,25 +2917,30 @@ exports.updateUserBooking = async (req, res) => {
 
     // Update booking details
     if (bookingDetails) {
-      if (bookingDetails.status) booking.bookingDetails.status = bookingDetails.status;
-      if (bookingDetails.paymentMethod) booking.bookingDetails.paymentMethod = bookingDetails.paymentMethod;
-      if (bookingDetails.paymentStatus) booking.bookingDetails.paymentStatus = bookingDetails.paymentStatus;
-      
+      if (bookingDetails.status)
+        booking.bookingDetails.status = bookingDetails.status;
+      if (bookingDetails.paymentMethod)
+        booking.bookingDetails.paymentMethod = bookingDetails.paymentMethod;
+      if (bookingDetails.paymentStatus)
+        booking.bookingDetails.paymentStatus = bookingDetails.paymentStatus;
+
       // Handle paid amount updates
       if (bookingDetails.paidAmount !== undefined) {
         booking.bookingDetails.paidAmount = bookingDetails.paidAmount;
-        booking.bookingDetails.amountYetToPay = booking.bookingDetails.finalTotal - bookingDetails.paidAmount;
+        booking.bookingDetails.amountYetToPay =
+          booking.bookingDetails.finalTotal - bookingDetails.paidAmount;
       }
     }
 
     // Update address
     if (address) {
       booking.address = {
-        houseFlatNumber: address.houseFlatNumber || booking.address.houseFlatNumber,
+        houseFlatNumber:
+          address.houseFlatNumber || booking.address.houseFlatNumber,
         streetArea: address.streetArea || booking.address.streetArea,
         landMark: address.landMark || booking.address.landMark,
         city: address.city || booking.address.city,
-        location: address.location || booking.address.location
+        location: address.location || booking.address.location,
       };
     }
 
@@ -2733,7 +2948,7 @@ exports.updateUserBooking = async (req, res) => {
     if (selectedSlot) {
       booking.selectedSlot = {
         slotTime: selectedSlot.slotTime || "",
-        slotDate: selectedSlot.slotDate || ""
+        slotDate: selectedSlot.slotDate || "",
       };
     }
 
@@ -2745,15 +2960,14 @@ exports.updateUserBooking = async (req, res) => {
 
     res.json({
       success: true,
-      message: 'Booking updated successfully',
-      booking: booking
+      message: "Booking updated successfully",
+      booking: booking,
     });
-
   } catch (error) {
-    console.error('Error updating booking:', error);
+    console.error("Error updating booking:", error);
     res.status(500).json({
       success: false,
-      message: 'Internal server error'
+      message: "Internal server error",
     });
   }
 };
@@ -2828,9 +3042,6 @@ exports.updateBookingField = async (req, res) => {
     });
   }
 };
-
-
-
 
 // exports.makePayment = async (req, res) => {
 //   try {

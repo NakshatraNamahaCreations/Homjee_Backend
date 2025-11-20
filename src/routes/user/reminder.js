@@ -7,7 +7,7 @@ const {
 } = require("../../controllers/user/reminder");
 
 router.post("/create", createReminder);
-router.get("/pending", getPendingReminders);
+router.get("/pending-reminder", getPendingReminders);
 router.patch("/:id/check", markReminderChecked);
 
 module.exports = router;

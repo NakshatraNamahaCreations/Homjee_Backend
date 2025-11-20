@@ -91,7 +91,7 @@ const bookingDetailsSchema = new mongoose.Schema(
   {
     bookingDate: Date,
     bookingTime: String,
-
+    booking_id: String,
     status: {
       type: String,
       enum: [

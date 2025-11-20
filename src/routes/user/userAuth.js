@@ -3,6 +3,7 @@ const router = express.Router();
 const userController = require("../../controllers/user/userAuth");
 
 router.post("/save-user", userController.saveUser);
+router.post("/finding-user-exist/mobilenumber", userController.findingExistingUserWithMobileNumber);
 router.post("/verify-otp", userController.verifyOTP);
 router.post("/resent-otp", userController.resendOTP);
 router.put("/save-address/:id", userController.addAddress);

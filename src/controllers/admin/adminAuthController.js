@@ -91,10 +91,6 @@ exports.loginWithMobile = async (req, res) => {
   }
 };
 
-/**
- * POST /api/admin/auth/verify-otp
- * body: { mobileNumber, otp }
- */
 exports.verifyOTP = async (req, res) => {
   try {
     const mobileNumber = normalizeMobile(req.body?.mobileNumber);
@@ -152,10 +148,6 @@ exports.verifyOTP = async (req, res) => {
   }
 };
 
-/**
- * POST /api/admin/auth/resend-otp
- * body: { mobileNumber }
- */
 exports.resendOTP = async (req, res) => {
   try {
     const mobileNumber = normalizeMobile(req.body?.mobileNumber);

@@ -97,6 +97,28 @@ exports.resendOTP = async (req, res) => {
   }
 };
 
+
+exports.findingExistingUserWithMobileNumber = async (req, res) => {
+  const { mobileNumber } = req.body;
+  try {
+    let user = await userSchema.findOne({ mobileNumber });
+    // If user does not exist, create after new 
+    if (user) {
+      res.status(200).json({
+        message: "User already exist",
+        data: user,
+        isNewUser: false,
+      });
+    } else {
+      return res.status(200).json({ message: "User not exist", data: [], isNewUser: true })
+    }
+  } catch (error) {
+    console.error("Error while check user state:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
+
 exports.addAddress = async (req, res) => {
   const { savedAddress } = req.body;
   try {
