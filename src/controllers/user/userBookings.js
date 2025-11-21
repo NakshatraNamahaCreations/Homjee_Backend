@@ -430,6 +430,376 @@ exports.createBooking = async (req, res) => {
   }
 };
 
+// Assumes these are already required at top of file:
+// const UserBooking = require("../../models/user/userBookings");
+// const DeepCleaningPackageModel = require("../../models/products/DeepCleaningPackage");
+// const generateBookingId = ... (function in your file)
+// const generateOTP = ... (function in your file)
+// const detectServiceType = ... (function in your file)
+
+exports.adminCreateBooking = async (req, res) => {
+  try {
+    const {
+      customer,
+      service,
+      bookingDetails = {},
+      assignedProfessional,
+      address,
+      selectedSlot,
+      formName,
+      isEnquiry,
+    } = req.body;
+
+    // ***************************************
+    // 🟢 CHECK USER EXISTS OR CREATE NEW USER
+    // ***************************************
+    let checkUser = await userSchema.findOne({
+      mobileNumber: customer.phone
+    });
+
+    if (!checkUser) {
+      // Create new user
+      checkUser = new userSchema({
+        userName: customer.name,
+        mobileNumber: customer.phone,
+        savedAddress: {
+          uniqueCode: `ADDR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          address: address.streetArea,
+          houseNumber: address.houseFlatNumber,
+          landmark: address.landMark,
+          latitude: address.location.coordinates[1],
+          longitude: address.location.coordinates[0],
+          city: address.city,
+        }
+      });
+
+      await checkUser.save();
+    }
+
+
+    // -----------------------
+    // Basic validations
+    // -----------------------
+    if (!service || !Array.isArray(service) || service.length === 0) {
+      return res.status(400).json({ message: "Service list cannot be empty." });
+    }
+
+    if (
+      !address ||
+      !address.location ||
+      !Array.isArray(address.location.coordinates) ||
+      address.location.coordinates.length !== 2
+    ) {
+      return res.status(400).json({ message: "Invalid address coordinates." });
+    }
+
+    // detect service type
+    const serviceType = detectServiceType(formName, service);
+
+    // bookingAmount coming from admin UI (Option A expects siteVisitCharges separate)
+    // Use let because we may adjust bookingAmount for house painting case
+    let bookingAmount = Number(bookingDetails?.bookingAmount || 0);
+    let paidAmount = 0;
+    let originalTotalAmount = 0;
+    let finalTotal = 0;
+    let amountYetToPay = 0;
+    let siteVisitCharges = 0;
+
+    let firstPayment = {};
+    let secondPayment = {};
+    let finalPayment = {};
+
+    // compute originalTotalAmount (sum of service price * qty) — used for deep cleaning
+    originalTotalAmount = service.reduce(
+      (sum, itm) => sum + Number(itm.price || 0) * (itm.quantity || 1),
+      0
+    );
+
+    // -----------------------
+    // Deep cleaning logic
+    // -----------------------
+    if (serviceType === "deep_cleaning") {
+      if (isEnquiry && bookingAmount > 0) {
+        // ADMIN ENQUIRY rules (Deep Cleaning)
+        // bookingAmount is from admin (frontend)
+        paidAmount = 0;
+        finalTotal = originalTotalAmount;
+        amountYetToPay = Math.max(0, originalTotalAmount - bookingAmount);
+
+        firstPayment = {
+          status: "pending",
+          amount: bookingAmount,
+          // paidAt: null,
+          // // include method only when needed; admin probably didn't collect payment for enquiry
+          // ...(bookingDetails?.paymentMethod && { method: bookingDetails.paymentMethod }),
+        };
+
+        finalPayment = {
+          status: "pending",
+          amount: Math.max(0, finalTotal - bookingAmount),
+        };
+      } else {
+        // Normal (customer-like) behavior: derive booking amount from package master
+        // const packageMaster = await DeepCleaningPackageModel.find({}).lean();
+        // const result = service.map((cartItem) => {
+        //   const pkg = packageMaster.find((p) => p.name === cartItem.serviceName);
+        //   return pkg ? Number(pkg.bookingAmount || 0) : 0;
+        // });
+
+        // bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
+        paidAmount = bookingAmount;
+        finalTotal = originalTotalAmount;
+        amountYetToPay = Math.max(0, finalTotal - paidAmount);
+
+        firstPayment = {
+          status: "No Payment",
+          amount: paidAmount,
+          paidAt: paidAmount > 0 ? new Date() : null,
+          method: "None",
+        };
+
+        finalPayment = {
+          status: "pending",
+          amount: Math.max(0, finalTotal - paidAmount),
+        };
+      }
+    }
+
+    // -----------------------
+    // House painting logic (Option A)
+    // -----------------------
+    if (serviceType === "house_painting") {
+      // As per Option A: admin passes bookingAmount which we treat as siteVisitCharges
+      siteVisitCharges = Number(bookingDetails?.bookingAmount || 0);
+
+      if (isEnquiry && siteVisitCharges > 0) {
+        // ADMIN ENQUIRY (Option A): store siteVisitCharges separately,
+        // bookingAmount and payment values should be 0
+        bookingAmount = 0;
+        paidAmount = 0;
+        originalTotalAmount = 0;
+        finalTotal = 0;
+        amountYetToPay = 0;
+
+        firstPayment = { status: "pending", amount: 0 };
+        secondPayment = { status: "pending", amount: 0 };
+        finalPayment = { status: "pending", amount: 0 };
+      } else {
+        // Normal customer-style booking for site visit: bookingAmount stays 0,
+        // paidAmount equals siteVisitCharges (if your flow collects it)
+        bookingAmount = 0;
+        paidAmount = 0;
+        originalTotalAmount = 0;
+        finalTotal = 0;
+        amountYetToPay = 0;
+
+        firstPayment = { status: "No Payment", amount: 0 };
+        secondPayment = { status: "pending", amount: 0 };
+        finalPayment = { status: "pending", amount: 0 };
+      }
+    }
+
+    // -----------------------
+    // Payment link and bookingId
+    // -----------------------
+    const bookingId = generateBookingId();
+
+    let paymentLink = { isActive: false };
+    if (bookingAmount > 0) {
+      const paymentLinkUrl = `https://pay.example.com/${bookingId}-${Date.now()}`;
+      paymentLink = {
+        url: paymentLinkUrl,
+        isActive: true,
+        providerRef: "razorpay_order_xyz", // optional
+      };
+    }
+
+    // -----------------------
+    // Build bookingDetails config
+    // -----------------------
+    const bookingDetailsConfig = {
+      booking_id: bookingId,
+      bookingDate: bookingDetails?.bookingDate
+        ? new Date(bookingDetails.bookingDate)
+        : new Date(),
+      bookingTime: bookingDetails?.bookingTime || "10:30 AM",
+      status: "Pending",
+      bookingAmount,
+      originalTotalAmount,
+      finalTotal: (finalTotal === 0 && serviceType === "deep_cleaning") ? originalTotalAmount : finalTotal,
+      paidAmount,
+      amountYetToPay,
+      paymentMethod: bookingDetails?.paymentMethod || "Cash",
+      paymentStatus: "Unpaid",
+      otp: generateOTP(),
+      siteVisitCharges,
+      firstPayment,
+      secondPayment,
+      finalPayment,
+      paymentLink,
+    };
+
+    // -----------------------
+    // Payments array: only add actual payment entries when not an enquiry and there is a paidAmount
+    // -----------------------
+    let payments = [];
+    if (!isEnquiry && paidAmount > 0) {
+      payments.push({
+        at: new Date(),
+        method: bookingDetailsConfig.paymentMethod,
+        amount: paidAmount,
+        providerRef: "razorpay_order_xyz",
+      });
+    }
+
+    // -----------------------
+    // Create booking object
+    // -----------------------
+    const booking = new UserBooking({
+      // customer: {
+      //   customerId: customer?.customerId,
+      //   name: customer?.name,
+      //   phone: customer?.phone,
+      // },
+
+      customer: {
+        customerId: checkUser._id,
+        name: checkUser.userName,
+        phone: checkUser.mobileNumber,
+      },
+      service: service.map((s) => ({
+        category: s.category,
+        subCategory: s.subCategory,
+        serviceName: s.serviceName,
+        price: Number(s.price || 0),
+        quantity: Number(s.quantity || 1),
+        teamMembersRequired: Number(s.teamMembersRequired || 0),
+      })),
+      serviceType,
+      bookingDetails: bookingDetailsConfig,
+      assignedProfessional: assignedProfessional
+        ? {
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
+        : undefined,
+      address: {
+        houseFlatNumber: address?.houseFlatNumber || "",
+        streetArea: address?.streetArea || "",
+        landMark: address?.landMark || "",
+        city: address?.city || "",
+        location: {
+          type: "Point",
+          coordinates: address.location.coordinates,
+        },
+      },
+      selectedSlot: {
+        slotDate: selectedSlot?.slotDate || new Date().toISOString().slice(0, 10),
+        slotTime: selectedSlot?.slotTime || "10:00 AM",
+      },
+      payments,
+      isEnquiry: Boolean(isEnquiry),
+      formName: formName || "admin panel",
+      createdDate: new Date(),
+    });
+
+    await booking.save();
+
+    return res.status(201).json({
+      message: "Admin booking created successfully",
+      bookingId: booking._id,
+      booking,
+    });
+  } catch (error) {
+    console.error("Admin Create Booking Error:", error);
+    return res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+
+// In your bookings controller
+exports.markAsLead = async (req, res) => {
+  try {
+    const { id } = req.params;
+    console.log("Mark as Lead - Booking ID:", id);
+
+    // Find the booking
+    const booking = await UserBooking.findById(id);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    console.log("Current booking:", {
+      isEnquiry: booking.isEnquiry,
+      serviceType: booking.serviceType,
+      bookingAmount: booking.bookingDetails?.bookingAmount,
+      siteVisitCharges: booking.bookingDetails?.siteVisitCharges,
+      firstPayment: booking.bookingDetails?.firstPayment
+    });
+
+    const { serviceType, bookingDetails } = booking;
+
+    // Calculate paid amount based on service type
+    let paidAmount = 0;
+
+    if (serviceType === "deep_cleaning") {
+      paidAmount = bookingDetails.bookingAmount || 0;
+      console.log("Deep Cleaning - Paid Amount:", paidAmount);
+    } else if (serviceType === "house_painting") {
+      paidAmount = bookingDetails.siteVisitCharges || 0;
+      console.log("House Painting - Paid Amount:", paidAmount);
+    }
+
+    // Update the document directly (this approach works better with nested objects)
+    booking.isEnquiry = false;
+    
+    if (booking.bookingDetails) {
+      // Update payment details
+      booking.bookingDetails.paymentMethod = "UPI";
+      booking.bookingDetails.paidAmount = paidAmount;
+      booking.bookingDetails.paymentStatus = "Partial Payment";
+      
+      // Update first payment - only change status, method and paidAt
+      booking.bookingDetails.firstPayment.status = "paid";
+      booking.bookingDetails.firstPayment.method = "UPI";
+      booking.bookingDetails.firstPayment.paidAt = new Date();
+      
+      // Keep the existing amount, don't override it
+      // booking.bookingDetails.firstPayment.amount remains the same
+    }
+
+    console.log("After update - booking details:", {
+      isEnquiry: booking.isEnquiry,
+      paidAmount: booking.bookingDetails?.paidAmount,
+      paymentMethod: booking.bookingDetails?.paymentMethod,
+      paymentStatus: booking.bookingDetails?.paymentStatus,
+      firstPayment: booking.bookingDetails?.firstPayment
+    });
+
+    // Save the updated document
+    const updatedBooking = await booking.save();
+
+    console.log("Successfully updated booking:", {
+      isEnquiry: updatedBooking.isEnquiry,
+      paidAmount: updatedBooking.bookingDetails?.paidAmount,
+      firstPayment: updatedBooking.bookingDetails?.firstPayment
+    });
+
+    res.status(200).json({
+      message: "Successfully marked as lead",
+      booking: updatedBooking
+    });
+
+  } catch (error) {
+    console.error("Mark as Lead Error:", error);
+    res.status(500).json({
+      message: "Server error",
+      error: error.message
+    });
+  }
+};
+
 // exports.createBooking = async (req, res) => {
 //   try {
 //     const {

@@ -71,7 +71,7 @@ const PaymentMilestoneSchema = new mongoose.Schema(
   {
     status: {
       type: String,
-      enum: ["pending", "paid", "failed"],
+      enum: ["pending", "paid", "failed","No Payment"],
       default: "pending",
     },
     amount: {
@@ -81,8 +81,10 @@ const PaymentMilestoneSchema = new mongoose.Schema(
     paidAt: Date,
     method: {
       type: String,
-      enum: ["Cash", "Card", "UPI", "Wallet"],
+      enum: ["None", "Cash", "Card", "UPI", "Wallet"],
+      default: "None"
     },
+
   },
   { _id: false }
 );
@@ -155,7 +157,8 @@ const bookingDetailsSchema = new mongoose.Schema(
     // 💳 Payment method (last used)
     paymentMethod: {
       type: String,
-      enum: ["Cash", "Card", "UPI", "Wallet"],
+      enum: ["Cash", "Card", "UPI", "Wallet","None"],
+      
     },
 
     // 🔗 Payment Link
