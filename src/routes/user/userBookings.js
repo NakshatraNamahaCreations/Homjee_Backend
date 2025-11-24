@@ -5,7 +5,7 @@ const bookingController = require("../../controllers/user/userBookings");
 
 router.post("/create-user-booking", bookingController.createBooking);
 router.post("/create-admin-booking", bookingController.adminCreateBooking);
-router.patch('/:id/mark-as-lead', bookingController.markAsLead); // new routes to udpate enquiry to lead
+// router.patch('/:id/mark-as-lead', bookingController.markAsLead); // new routes to udpate enquiry to lead
 router.get("/get-all-leads", bookingController.getAllLeadsBookings);
 router.get("/get-all-enquiries", bookingController.getAllEnquiries);
 router.get("/get-all-bookings", bookingController.getAllBookings);

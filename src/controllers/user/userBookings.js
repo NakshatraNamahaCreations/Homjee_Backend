@@ -619,7 +619,11 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDate: bookingDetails?.bookingDate
         ? new Date(bookingDetails.bookingDate)
         : new Date(),
-      bookingTime: bookingDetails?.bookingTime || "10:30 AM",
+      bookingTime: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      }),
       status: "Pending",
       bookingAmount,
       originalTotalAmount,
@@ -721,270 +725,83 @@ exports.adminCreateBooking = async (req, res) => {
 };
 
 // In your bookings controller
-exports.markAsLead = async (req, res) => {
-  try {
-    const { id } = req.params;
-    console.log("Mark as Lead - Booking ID:", id);
-
-    // Find the booking
-    const booking = await UserBooking.findById(id);
-    if (!booking) {
-      return res.status(404).json({ message: "Booking not found" });
-    }
-
-    console.log("Current booking:", {
-      isEnquiry: booking.isEnquiry,
-      serviceType: booking.serviceType,
-      bookingAmount: booking.bookingDetails?.bookingAmount,
-      siteVisitCharges: booking.bookingDetails?.siteVisitCharges,
-      firstPayment: booking.bookingDetails?.firstPayment,
-    });
-
-    const { serviceType, bookingDetails } = booking;
-
-    // Calculate paid amount based on service type
-    let paidAmount = 0;
-
-    if (serviceType === "deep_cleaning") {
-      paidAmount = bookingDetails.bookingAmount || 0;
-      console.log("Deep Cleaning - Paid Amount:", paidAmount);
-    } else if (serviceType === "house_painting") {
-      paidAmount = bookingDetails.siteVisitCharges || 0;
-      console.log("House Painting - Paid Amount:", paidAmount);
-    }
-
-    // Update the document directly (this approach works better with nested objects)
-    booking.isEnquiry = false;
-
-    if (booking.bookingDetails) {
-      // Update payment details
-      booking.bookingDetails.paymentMethod = "UPI";
-      booking.bookingDetails.paidAmount = paidAmount;
-      booking.bookingDetails.paymentStatus = "Partial Payment";
-
-      // Update first payment - only change status, method and paidAt
-      booking.bookingDetails.firstPayment.status = "paid";
-      booking.bookingDetails.firstPayment.method = "UPI";
-      booking.bookingDetails.firstPayment.paidAt = new Date();
-
-      // Keep the existing amount, don't override it
-      // booking.bookingDetails.firstPayment.amount remains the same
-    }
-
-    console.log("After update - booking details:", {
-      isEnquiry: booking.isEnquiry,
-      paidAmount: booking.bookingDetails?.paidAmount,
-      paymentMethod: booking.bookingDetails?.paymentMethod,
-      paymentStatus: booking.bookingDetails?.paymentStatus,
-      firstPayment: booking.bookingDetails?.firstPayment,
-    });
-
-    // Save the updated document
-    const updatedBooking = await booking.save();
-
-    console.log("Successfully updated booking:", {
-      isEnquiry: updatedBooking.isEnquiry,
-      paidAmount: updatedBooking.bookingDetails?.paidAmount,
-      firstPayment: updatedBooking.bookingDetails?.firstPayment,
-    });
-
-    res.status(200).json({
-      message: "Successfully marked as lead",
-      booking: updatedBooking,
-    });
-  } catch (error) {
-    console.error("Mark as Lead Error:", error);
-    res.status(500).json({
-      message: "Server error",
-      error: error.message,
-    });
-  }
-};
-
-// exports.createBooking = async (req, res) => {
+// exports.markAsLead = async (req, res) => {
 //   try {
-//     const {
-//       customer,
-//       service,
-//       bookingDetails,
-//       assignedProfessional,
-//       address,
-//       selectedSlot,
-//       isEnquiry,
-//       formName,
-//     } = req.body;
-//     console.log("req.body", req.body);
+//     const { id } = req.params;
+//     console.log("Mark as Lead - Booking ID:", id);
 
-//     // Validation
-//     if (!service || !Array.isArray(service) || service.length === 0) {
-//       return res.status(400).json({ message: "Service list cannot be empty." });
+//     // Find the booking
+//     const booking = await UserBooking.findById(id);
+//     if (!booking) {
+//       return res.status(404).json({ message: "Booking not found" });
 //     }
 
-//     // Parse coordinates
-//     let coords = [0, 0];
-//     if (
-//       address?.location?.coordinates &&
-//       Array.isArray(address.location.coordinates) &&
-//       address.location.coordinates.length === 2 &&
-//       typeof address.location.coordinates[0] === "number" &&
-//       typeof address.location.coordinates[1] === "number"
-//     ) {
-//       coords = address.location.coordinates;
-//     } else {
-//       return res
-//         .status(400)
-//         .json({ message: "Invalid or missing address coordinates." });
-//     }
+//     console.log("Current booking:", {
+//       isEnquiry: booking.isEnquiry,
+//       serviceType: booking.serviceType,
+//       bookingAmount: booking.bookingDetails?.bookingAmount,
+//       siteVisitCharges: booking.bookingDetails?.siteVisitCharges,
+//       firstPayment: booking.bookingDetails?.firstPayment,
+//     });
 
-//     // 🔍 Detect service type
-//     const serviceType = detectServiceType(formName, service);
+//     const { serviceType, bookingDetails } = booking;
 
-//     // 💰 Calculate total from services
-//     const originalTotalAmount = service.reduce((sum, s) => {
-//       return sum + Number(s.price) * Number(s.quantity || 1);
-//     }, 0);
-
-//     console.log("bookingDetails", bookingDetails);
-
-//     // Booking amount from frontend (paid on website)
-//     const bookingAmount = Number(bookingDetails?.bookingAmount) || 0;
-
-//     // ✅ Prepare bookingDetails with correct installments
-//     let bookingDetailsConfig = {
-//       bookingDate: bookingDetails?.bookingDate
-//         ? new Date(bookingDetails.bookingDate)
-//         : new Date(),
-//       bookingTime: bookingDetails?.bookingTime || "10:30 AM",
-//       status: "Pending",
-//       bookingAmount: 0,
-//       originalTotalAmount: 0,
-//       finalTotal: 0,
-//       paidAmount: bookingDetails.paidAmount,
-//       amountYetToPay: 0,
-//       paymentMethod: bookingDetails?.paymentMethod || "Cash",
-//       paymentStatus: bookingAmount > 0 ? "Partial Payment" : "Unpaid",
-//       otp: generateOTP(), // 4-digit OTP
-//       siteVisitCharges: 0,
-//       paymentLink: { isActive: false },
-//     };
+//     // Calculate paid amount based on service type
+//     let paidAmount = 0;
 
 //     if (serviceType === "deep_cleaning") {
-//       // ✅ Deep Cleaning: total is known at booking
-//       const bookingAmount = Number(bookingDetails?.bookingAmount) || 0;
-//       const originalTotal = originalTotalAmount; // computed from service prices
-
-//       bookingDetailsConfig.bookingAmount = bookingAmount;
-//       bookingDetailsConfig.originalTotalAmount = originalTotal;
-//       bookingDetailsConfig.finalTotal = originalTotal;
-//       bookingDetailsConfig.paidAmount = bookingDetails.paidAmount;
-//       bookingDetailsConfig.amountYetToPay = bookingDetails.amountYetToPay
-//       // Math.max(
-//       //   0,
-//       //   bookingAmount - bookingDetails.paidAmount
-//       // );
-//       bookingDetailsConfig.paymentStatus =
-//         bookingAmount > 0 ? "Partial Payment" : "Unpaid";
-
-//       // Installments
-//       bookingDetailsConfig.firstPayment = {
-//         status: bookingAmount > 0 ? "paid" : "pending",
-//         amount: bookingDetails.paidAmount,
-//         paidAt: bookingAmount > 0 ? new Date() : null,
-//         method: bookingDetails?.paymentMethod || "UPI",
-//       };
-//       bookingDetailsConfig.finalPayment = {
-//         status: "pending",
-//         amount: Math.max(0, originalTotal - bookingAmount),
-//       };
+//       paidAmount = bookingDetails.bookingAmount || 0;
+//       console.log("Deep Cleaning - Paid Amount:", paidAmount);
 //     } else if (serviceType === "house_painting") {
-//       // 🏠 House Painting: ONLY site visit charges (if any) collected now
-//       const siteVisitCharges = Number(bookingDetails?.siteVisitCharges) || 0;
-
-//       // All main amounts are 0 — will be set later during quotation
-//       bookingDetailsConfig.siteVisitCharges = siteVisitCharges;
-//       // bookingDetailsConfig.bookingAmount = siteVisitCharges; // this is the only "advance"
-//       bookingDetailsConfig.paidAmount = siteVisitCharges;
-//       bookingDetailsConfig.paymentStatus =
-//         siteVisitCharges > 0 ? "Partial Payment" : "Unpaid";
-//       bookingDetailsConfig.amountYetToPay = 0; // because total is unknown
-
-//       // Installments: only firstPayment may have site visit amount (but usually 0)
-//       // We'll leave all as pending with 0 — they'll be updated in `markPendingHiring`
-//       bookingDetailsConfig.firstPayment = { status: "pending", amount: 0 };
-//       bookingDetailsConfig.secondPayment = { status: "pending", amount: 0 };
-//       bookingDetailsConfig.finalPayment = { status: "pending", amount: 0 };
-
-//       // originalTotalAmount & finalTotal remain 0 until quote is finalized
+//       paidAmount = bookingDetails.siteVisitCharges || 0;
+//       console.log("House Painting - Paid Amount:", paidAmount);
 //     }
 
-//     // Track payment line-item
-//     const payments =
-//       serviceType === "house_painting"
-//         ? [] // empty array for house painting
-//         : [
-//           {
-//             at: new Date(),
-//             method: "UPI", // You can replace this dynamically later once payment integration
-//             amount: bookingDetails.paidAmount,
-//             providerRef: "razorpay_order_xyz" || undefined,
-//           },
-//         ];
+//     // Update the document directly (this approach works better with nested objects)
+//     booking.isEnquiry = false;
 
-//     // 📦 Create booking
-//     const booking = new UserBooking({
-//       customer: {
-//         customerId: customer?.customerId,
-//         name: customer?.name,
-//         phone: customer?.phone,
-//       },
-//       service: service.map((s) => ({
-//         category: s.category,
-//         subCategory: s.subCategory,
-//         serviceName: s.serviceName,
-//         price: Number(s.price),
-//         quantity: Number(s.quantity) || 1,
-//         teamMembersRequired: Number(s.teamMembersRequired) || 1,
-//       })),
-//       serviceType, // NEW FIELD
-//       bookingDetails: bookingDetailsConfig,
-//       assignedProfessional: assignedProfessional
-//         ? {
-//           professionalId: assignedProfessional.professionalId,
-//           name: assignedProfessional.name,
-//           phone: assignedProfessional.phone,
-//         }
-//         : undefined,
-//       address: {
-//         houseFlatNumber: address?.houseFlatNumber || "",
-//         streetArea: address?.streetArea || "",
-//         landMark: address?.landMark || "",
-//         city: address?.city || "",
-//         location: {
-//           type: "Point",
-//           coordinates: coords,
-//         },
-//       },
-//       selectedSlot: {
-//         slotDate: selectedSlot?.slotDate || moment().format("YYYY-MM-DD"),
-//         slotTime: selectedSlot?.slotTime || "10:00 AM",
-//       },
-//       payments,
-//       isEnquiry: Boolean(isEnquiry),
-//       formName: formName || "Unknown",
-//       createdDate: new Date(),
+//     if (booking.bookingDetails) {
+//       // Update payment details
+//       booking.bookingDetails.paymentMethod = "UPI";
+//       booking.bookingDetails.paidAmount = paidAmount;
+//       booking.bookingDetails.paymentStatus = "Partial Payment";
+
+//       // Update first payment - only change status, method and paidAt
+//       booking.bookingDetails.firstPayment.status = "paid";
+//       booking.bookingDetails.firstPayment.method = "UPI";
+//       booking.bookingDetails.firstPayment.paidAt = new Date();
+
+//       // Keep the existing amount, don't override it
+//       // booking.bookingDetails.firstPayment.amount remains the same
+//     }
+
+//     console.log("After update - booking details:", {
+//       isEnquiry: booking.isEnquiry,
+//       paidAmount: booking.bookingDetails?.paidAmount,
+//       paymentMethod: booking.bookingDetails?.paymentMethod,
+//       paymentStatus: booking.bookingDetails?.paymentStatus,
+//       firstPayment: booking.bookingDetails?.firstPayment,
 //     });
 
-//     await booking.save();
+//     // Save the updated document
+//     const updatedBooking = await booking.save();
 
-//     res.status(201).json({
-//       message: "Booking created successfully",
-//       bookingId: booking._id,
-//       serviceType,
-//       booking,
+//     console.log("Successfully updated booking:", {
+//       isEnquiry: updatedBooking.isEnquiry,
+//       paidAmount: updatedBooking.bookingDetails?.paidAmount,
+//       firstPayment: updatedBooking.bookingDetails?.firstPayment,
+//     });
+
+//     res.status(200).json({
+//       message: "Successfully marked as lead",
+//       booking: updatedBooking,
 //     });
 //   } catch (error) {
-//     console.error("Error creating booking:", error);
-//     res.status(500).json({ message: "Server error", error: error.message });
+//     console.error("Mark as Lead Error:", error);
+//     res.status(500).json({
+//       message: "Server error",
+//       error: error.message,
+//     });
 //   }
 // };
 
@@ -1393,7 +1210,6 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
     }
 
-
     const bookings = await bookingsQuery.exec();
     let totalLeads = bookings.length; // count ALL geo-filtered leads shown to vendor
     let respondedLeads = 0;
@@ -1542,11 +1358,10 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       // "vendor has actually started the job"
       if (
         booking.bookingDetails &&
-        (
-          booking.bookingDetails.status === "Project Ongoing" ||       // actively started
-          booking.bookingDetails.status === "Survey Ongoing" ||        // survey started
-          (booking.assignedProfessional && booking.assignedProfessional.startedDate)
-        )
+        (booking.bookingDetails.status === "Project Ongoing" || // actively started
+          booking.bookingDetails.status === "Survey Ongoing" || // survey started
+          (booking.assignedProfessional &&
+            booking.assignedProfessional.startedDate))
       ) {
         surveyLeads++;
       }
@@ -1555,18 +1370,19 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       // "customer paid, project confirmed"
       if (
         booking.bookingDetails &&
-        (
-          booking.bookingDetails.status === "Hired" ||                                   // status marks hired
-          booking.bookingDetails.status === "Project Ongoing" ||                         // project in progress
-          (booking.bookingDetails.firstPayment && booking.bookingDetails.firstPayment.status === "paid") // milestone paid
-        )
+        (booking.bookingDetails.status === "Hired" || // status marks hired
+          booking.bookingDetails.status === "Project Ongoing" || // project in progress
+          (booking.bookingDetails.firstPayment &&
+            booking.bookingDetails.firstPayment.status === "paid")) // milestone paid
       ) {
         hiredLeads++;
       }
 
       // ------ GSV LOGIC ------
       // Use finalTotal (the actual job value)
-      totalGsv += booking.bookingDetails ? (booking.bookingDetails.finalTotal || 0) : 0;
+      totalGsv += booking.bookingDetails
+        ? booking.bookingDetails.finalTotal || 0
+        : 0;
     }
 
     // KPIs
@@ -1588,7 +1404,6 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     res.status(500).json({ message: "Server error calculating performance" });
   }
 };
-
 
 exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
   try {
@@ -3110,154 +2925,6 @@ exports.makePayment = async (req, res) => {
   }
 };
 
-// exports.updateBooking = async (req, res) => {
-//   try {
-//     const bookingId = req.params.bookingId;
-//     const updateData = req.body;
-
-//     console.log("Incoming update:", updateData);
-
-//     const booking = await UserBooking.findById(bookingId);
-//     if (!booking) {
-//       return res.status(404).json({ message: "Booking not found" });
-//     }
-
-//     /* -------------------------------------------------------------
-//      🧩 1. CUSTOMER UPDATE
-//     ------------------------------------------------------------- */
-//     if (updateData.customer) {
-//       booking.customer = {
-//         ...booking.customer,
-//         ...updateData.customer,
-//       };
-//     }
-
-//     /* -------------------------------------------------------------
-//      🧩 2. SERVICE UPDATE (if service array sent)
-//         Recalculate total automatically
-//     ------------------------------------------------------------- */
-//     if (Array.isArray(updateData.service)) {
-//       booking.service = updateData.service.map((s) => ({
-//         category: s.category,
-//         subCategory: s.subCategory,
-//         serviceName: s.serviceName,
-//         price: Number(s.price || 0),
-//         quantity: Number(s.quantity || 1),
-//         teamMembersRequired: Number(s.teamMembersRequired || 1),
-//       }));
-
-//       // Auto recalc original total
-//       const newTotal = booking.service.reduce((sum, s) => {
-//         return sum + Number(s.price) * Number(s.quantity);
-//       }, 0);
-
-//       booking.bookingDetails.originalTotalAmount = newTotal;
-
-//       // if deep cleaning → finalTotal = bookingAmount
-//       if (booking.serviceType === "deep_cleaning") {
-//         booking.bookingDetails.finalTotal =
-//           booking.bookingDetails.bookingAmount || 0;
-//       }
-//     }
-
-//     /* -------------------------------------------------------------
-//      🧩 3. BOOKING DETAILS (deep merge)
-//     ------------------------------------------------------------- */
-//     if (updateData.bookingDetails) {
-//       booking.bookingDetails = {
-//         ...booking.bookingDetails,
-//         ...updateData.bookingDetails,
-//       };
-//     }
-
-//     /* -------------------------------------------------------------
-//      🧩 4. ADDRESS UPDATE
-//     ------------------------------------------------------------- */
-//     if (updateData.address) {
-//       booking.address = {
-//         ...booking.address,
-//         ...updateData.address,
-//       };
-
-//       // Validate coordinates if provided
-//       if (
-//         updateData.address.location &&
-//         Array.isArray(updateData.address.location.coordinates)
-//       ) {
-//         const [lng, lat] = updateData.address.location.coordinates;
-
-//         if (typeof lng === "number" && typeof lat === "number") {
-//           booking.address.location = {
-//             type: "Point",
-//             coordinates: [lng, lat],
-//           };
-//         }
-//       }
-//     }
-
-//     /* -------------------------------------------------------------
-//      🧩 5. ASSIGNED PROFESSIONAL
-//     ------------------------------------------------------------- */
-//     if (updateData.assignedProfessional) {
-//       booking.assignedProfessional = {
-//         ...booking.assignedProfessional,
-//         ...updateData.assignedProfessional,
-//       };
-//     }
-
-//     /* -------------------------------------------------------------
-//      🧩 6. SELECTED SLOT
-//     ------------------------------------------------------------- */
-//     if (updateData.selectedSlot) {
-//       booking.selectedSlot = {
-//         ...booking.selectedSlot,
-//         ...updateData.selectedSlot,
-//       };
-//     }
-
-//     /* -------------------------------------------------------------
-//      🧩 7. PAYMENT UPDATE (append new payment)
-//     ------------------------------------------------------------- */
-//     if (updateData.newPayment) {
-//       booking.payments.push({
-//         at: new Date(),
-//         amount: updateData.newPayment.amount,
-//         method: updateData.newPayment.method,
-//         providerRef: updateData.newPayment.providerRef || null,
-//         installment: updateData.newPayment.installment || null,
-//       });
-//     }
-
-//     /* -------------------------------------------------------------
-//      🧩 8. isEnquiry / formName / simple flags
-//     ------------------------------------------------------------- */
-//     if (typeof updateData.isEnquiry === "boolean") {
-//       booking.isEnquiry = updateData.isEnquiry;
-//     }
-
-//     if (updateData.formName) {
-//       booking.formName = updateData.formName;
-//     }
-
-//     /* -------------------------------------------------------------
-//      💾 SAVE BOOKING
-//     ------------------------------------------------------------- */
-//     await booking.save();
-
-//     res.status(200).json({
-//       message: "Booking updated successfully",
-//       booking,
-//     });
-
-//   } catch (err) {
-//     console.error("Error updating booking:", err);
-//     res.status(500).json({
-//       message: "Server error",
-//       error: err.message,
-//     });
-//   }
-// };
-
 // Update address and reset selected slots
 exports.updateAddressAndResetSlots = async (req, res) => {
   try {
@@ -3488,26 +3155,60 @@ exports.updateEnquiry = async (req, res) => {
       isEnquiry,
     } = bookingData;
 
+    //----------------------------
+    // DETECT SERVICE TYPE
+    //----------------------------
     const serviceType = detectServiceType(formName, service);
 
-    let bookingAmount = Number(bookingDetails.bookingAmount || 0);
+    //----------------------------
+    // DECLARE VARIABLES
+    //----------------------------
+    let bookingAmount = Number(bookingDetails.bookingAmount || 0); // FROM FRONTEND
+    let paidAmount = Number(bookingDetails.paidAmount || 0) || 0;
     let originalTotalAmount = 0;
     let finalTotal = 0;
     let amountYetToPay = 0;
-    let paidAmount = 0;
     let siteVisitCharges = 0;
 
+    //----------------------------
+    // RE-CALCULATE TOTALS
+    //----------------------------
+
     if (serviceType === "deep_cleaning") {
+      // 1️⃣ Calculate total price from services
       originalTotalAmount = service.reduce(
         (sum, itm) => sum + Number(itm.price || 0) * (itm.quantity || 1),
         0
       );
+
+      // 2️⃣ Final total equals service total
+      finalTotal = originalTotalAmount;
+
+      // 3️⃣ Amount yet to pay formula (CORRECTED)
+      amountYetToPay = Math.max(0, finalTotal - bookingAmount - paidAmount);
+
+      // 4️⃣ First payment is booking amount
+      booking.bookingDetails.firstPayment = {
+        status: "pending",
+        amount: bookingAmount,
+      };
+
+      // 5️⃣ Remaining after first payment
+      booking.bookingDetails.finalPayment = {
+        status: "pending",
+        amount: Math.max(0, finalTotal - bookingAmount),
+      };
     }
 
+    //----------------------------------------------
+    // HOUSE PAINTING LOGIC (NO CHANGE REQUIRED)
+    //----------------------------------------------
     if (serviceType === "house_painting") {
       siteVisitCharges = Number(bookingDetails.bookingAmount || 0);
-      bookingAmount = 0;
-      paidAmount = siteVisitCharges;
+
+      // for house painting bookingAmount = site visit only
+      bookingAmount = siteVisitCharges;
+      paidAmount = 0;
       originalTotalAmount = 0;
       finalTotal = 0;
       amountYetToPay = 0;
@@ -3517,23 +3218,9 @@ exports.updateEnquiry = async (req, res) => {
       booking.bookingDetails.finalPayment = { status: "pending", amount: 0 };
     }
 
-    if (serviceType === "deep_cleaning") {
-      paidAmount = 0;
-      finalTotal =
-        Number(bookingDetails.finalTotal || 0) || originalTotalAmount;
-      amountYetToPay = Math.max(0, bookingAmount - finalTotal);
-
-      booking.bookingDetails.firstPayment = {
-        status: "pending",
-        amount: bookingAmount,
-      };
-
-      booking.bookingDetails.finalPayment = {
-        status: "pending",
-        amount: Math.max(0, finalTotal - bookingAmount),
-      };
-    }
-
+    //----------------------------
+    // UPDATE SERVICES
+    //----------------------------
     booking.service = service.map((s) => ({
       category: s.category || "",
       subCategory: s.subCategory || "",
@@ -3543,27 +3230,28 @@ exports.updateEnquiry = async (req, res) => {
       teamMembersRequired: Number(s.teamMembersRequired || 1),
     }));
 
-    booking.formName = formName || booking.formName;
-
+    //----------------------------
+    // UPDATE BOOKING DETAILS
+    //----------------------------
     booking.bookingDetails.bookingAmount = bookingAmount;
     booking.bookingDetails.paidAmount = paidAmount;
     booking.bookingDetails.originalTotalAmount = originalTotalAmount;
     booking.bookingDetails.finalTotal = finalTotal;
     booking.bookingDetails.amountYetToPay = amountYetToPay;
     booking.bookingDetails.siteVisitCharges = siteVisitCharges;
+
     booking.bookingDetails.paymentMethod =
       bookingDetails.paymentMethod || booking.bookingDetails.paymentMethod;
+
     booking.bookingDetails.paymentStatus =
       paidAmount > 0 ? "Partial Payment" : "Unpaid";
-    booking.bookingDetails.firstPayment.status =
-      booking.bookingDetails.firstPayment.status || "pending";
-    booking.bookingDetails.secondPayment =
-      booking.bookingDetails.secondPayment || {};
-    booking.bookingDetails.finalPayment.status =
-      booking.bookingDetails.finalPayment.status || "pending";
+
     booking.bookingDetails.paymentLink =
       bookingDetails.paymentLink || booking.bookingDetails.paymentLink;
 
+    //----------------------------
+    // UPDATE ADDRESS
+    //----------------------------
     if (address) {
       booking.address = {
         houseFlatNumber:
@@ -3575,6 +3263,9 @@ exports.updateEnquiry = async (req, res) => {
       };
     }
 
+    //----------------------------
+    // UPDATE SLOT
+    //----------------------------
     if (selectedSlot) {
       booking.selectedSlot = {
         slotTime: selectedSlot.slotTime || booking.selectedSlot.slotTime,
@@ -3586,15 +3277,25 @@ exports.updateEnquiry = async (req, res) => {
       booking.isEnquiry = isEnquiry;
     }
 
+    //----------------------------
+    // UPDATE FORM NAME
+    //----------------------------
+    booking.formName = formName || booking.formName;
+
+    //----------------------------
+    // SAVE BOOKING
+    //----------------------------
     await booking.save();
 
-    res.status(200).json({
-      message: "Enquiry updated successfully",
+    return res.status(200).json({
+      success: true,
+      message: "Booking updated successfully",
       booking,
     });
   } catch (error) {
     console.error("Error updating enquiry:", error);
-    res.status(500).json({
+    return res.status(500).json({
+      success: false,
       message: "Server error",
       error: error.message,
     });
