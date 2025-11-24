@@ -1371,7 +1371,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: [parseFloat(long), parseFloat(lat)],
+            coordinates: [parseFloat(long), parseFloat(lat)], //(within 5km).
           },
           $maxDistance: 5000,
         },
@@ -1381,7 +1381,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     };
 
     let query = { ...baseQuery };
-
+    //["month", filter for bookings created in the current month, last 50 leads sorted by most recent]
     if (timeframe === "month") {
       const startOfMonth = moment().startOf("month").toDate();
       query.createdDate = { $gte: startOfMonth };
@@ -1393,12 +1393,15 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
     }
 
+
     const bookings = await bookingsQuery.exec();
     let totalLeads = bookings.length; // count ALL geo-filtered leads shown to vendor
     let respondedLeads = 0;
     let cancelledLeads = 0;
     let totalGsv = 0;
 
+    // .Runs the Mongo query for filtered bookings.
+    // .If none found, responds with zeros for all metrics.
     if (!bookings.length) {
       return res.status(200).json({
         responseRate: 0,
@@ -1471,6 +1474,121 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     res.status(500).json({ message: "Server error calculating performance" });
   }
 };
+
+exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
+  try {
+    const { vendorId, lat, long, timeframe } = req.params;
+
+    if (!vendorId || !lat || !long || !timeframe) {
+      return res.status(400).json({
+        message: "Vendor ID, Latitude, Longitude, and Timeframe are required",
+      });
+    }
+
+    // Geo, category, enquiry filter
+    const baseQuery = {
+      "address.location": {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [parseFloat(long), parseFloat(lat)],
+          },
+          $maxDistance: 5000,
+        },
+      },
+      "service.category": "House Painting",
+      isEnquiry: false,
+    };
+    let query = { ...baseQuery };
+
+    // Month filter
+    if (timeframe === "month") {
+      const startOfMonth = moment().startOf("month").toDate();
+      query.createdDate = { $gte: startOfMonth };
+    }
+
+    let bookingsQuery = UserBooking.find(query);
+    if (timeframe === "last") {
+      bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
+    }
+    const bookings = await bookingsQuery.exec();
+
+    // Metrics
+    let totalLeads = bookings.length;
+    let surveyLeads = 0;
+    let hiredLeads = 0;
+    let totalGsv = 0;
+
+    if (totalLeads === 0) {
+      return res.status(200).json({
+        surveyRate: 0,
+        hiringRate: 0,
+        averageGsv: 0,
+        totalLeads: 0,
+        surveyLeads: 0,
+        hiredLeads: 0,
+        timeframe,
+      });
+    }
+
+    for (const booking of bookings) {
+      // Only count leads for THIS vendor (use invitedVendors or assignedProfessional)
+      const invited = (booking.invitedVendors || []).find(
+        (v) => String(v.professionalId) === String(vendorId)
+      );
+      if (!invited) continue;
+
+      // ------ SURVEY LOGIC ------
+      // "vendor has actually started the job"
+      if (
+        booking.bookingDetails &&
+        (
+          booking.bookingDetails.status === "Project Ongoing" ||       // actively started
+          booking.bookingDetails.status === "Survey Ongoing" ||        // survey started
+          (booking.assignedProfessional && booking.assignedProfessional.startedDate)
+        )
+      ) {
+        surveyLeads++;
+      }
+
+      // ------ HIRING LOGIC ------
+      // "customer paid, project confirmed"
+      if (
+        booking.bookingDetails &&
+        (
+          booking.bookingDetails.status === "Hired" ||                                   // status marks hired
+          booking.bookingDetails.status === "Project Ongoing" ||                         // project in progress
+          (booking.bookingDetails.firstPayment && booking.bookingDetails.firstPayment.status === "paid") // milestone paid
+        )
+      ) {
+        hiredLeads++;
+      }
+
+      // ------ GSV LOGIC ------
+      // Use finalTotal (the actual job value)
+      totalGsv += booking.bookingDetails ? (booking.bookingDetails.finalTotal || 0) : 0;
+    }
+
+    // KPIs
+    const surveyRate = totalLeads > 0 ? (surveyLeads / totalLeads) * 100 : 0;
+    const hiringRate = totalLeads > 0 ? (hiredLeads / totalLeads) * 100 : 0;
+    const averageGsv = totalLeads > 0 ? totalGsv / totalLeads : 0;
+
+    res.status(200).json({
+      surveyRate: parseFloat(surveyRate.toFixed(2)),
+      hiringRate: parseFloat(hiringRate.toFixed(2)),
+      averageGsv: parseFloat(averageGsv.toFixed(2)),
+      totalLeads,
+      surveyLeads,
+      hiredLeads,
+      timeframe,
+    });
+  } catch (error) {
+    console.error("Error calculating house painters vendor metrics:", error);
+    res.status(500).json({ message: "Server error calculating performance" });
+  }
+};
+
 
 exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
   try {
