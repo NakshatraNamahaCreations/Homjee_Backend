@@ -2,9 +2,10 @@ const express = require("express");
 const router = express.Router();
 const bookingController = require("../../controllers/user/userBookings");
 
+
 router.post("/create-user-booking", bookingController.createBooking);
 router.post("/create-admin-booking", bookingController.adminCreateBooking);
-router.patch('/bookings/:id/mark-as-lead', bookingController.markAsLead); // new routes to udpate enquiry to lead
+router.patch('/:id/mark-as-lead', bookingController.markAsLead); // new routes to udpate enquiry to lead
 router.get("/get-all-leads", bookingController.getAllLeadsBookings);
 router.get("/get-all-enquiries", bookingController.getAllEnquiries);
 router.get("/get-all-bookings", bookingController.getAllBookings);
@@ -86,6 +87,7 @@ router.put('/update-slot/:bookingId', bookingController.updateSelectedSlot);
 
 // Update user booking (existing route - keep this)
 router.put('/update-user-booking/:bookingId', bookingController.updateUserBooking);
+router.put('/update-user-enquiry/:bookingId', bookingController.updateEnquiry);
 
 
 router.patch("/:bookingId/status", bookingController.updateBookingField);
