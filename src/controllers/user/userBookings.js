@@ -9,6 +9,8 @@ const { unlockRelatedQuotesByHiring } = require("../../helpers/quotes");
 const DeepCleaningPackageModel = require("../../models/products/DeepCleaningPackage");
 const userSchema = require("../../models/user/userAuth");
 
+const redirectionUrl = "http://localhost:5173/checkout"
+
 // 691dbf44b066964735737d4e check this tomorrow
 const citiesObj = {
   Bangalore: "Bengaluru",
@@ -2562,7 +2564,7 @@ exports.markPendingHiring = async (req, res) => {
     booking.bookingDetails.amountYetToPay = firstInstallment; // 40% due now
 
     // 6) Payment link (change to razor pay)
-    const paymentLinkUrl = `https://pay.example.com/${bookingId}-${Date.now()}`;
+    const paymentLinkUrl = `${redirectionUrl}${bookingId}-${Date.now()}`;
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,

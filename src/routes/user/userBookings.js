@@ -22,7 +22,7 @@ router.get(
   "/get-nearest-booking-by-location-deep-cleaning/:lat/:long",
   bookingController.getBookingForNearByVendorsDeepCleaning
 );
-
+// .............metrics routes..................
 router.get(
   "/deep-cleaning-vendor-performance-metrics/:vendorId/:lat/:long/:timeframe",
   bookingController.getVendorPerformanceMetricsDeepCleaning
@@ -32,7 +32,7 @@ router.get(
   "/house-painting-vendor-performance-metrics/:vendorId/:lat/:long/:timeframe",
   bookingController.getVendorPerformanceMetricsHousePainting
 );
-
+// .............................................
 router.get(
   "/get-nearest-booking-by-location-house-painting/:lat/:long",
   bookingController.getBookingForNearByVendorsHousePainting
