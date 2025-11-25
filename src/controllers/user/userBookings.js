@@ -131,8 +131,8 @@ function computeFinalTotal(details) {
     (details.priceApprovalStatus
       ? "approved"
       : details.hasPriceUpdated
-      ? "pending"
-      : "approved");
+        ? "pending"
+        : "approved");
 
   if (state === "approved" && Number.isFinite(details.newTotal)) {
     return Number(details.newTotal);
@@ -174,9 +174,9 @@ function ensureFirstMilestone(details) {
     // but in your flow you want ORIGINAL for the 40% hurdle:
     const base = Number(
       details.bookingAmount ||
-        details.finalTotal ||
-        details.currentTotalAmount ||
-        0
+      details.finalTotal ||
+      details.currentTotalAmount ||
+      0
     );
     fm.baseTotal = base;
     fm.requiredAmount = roundMoney(base * 0.4);
@@ -362,13 +362,13 @@ exports.createBooking = async (req, res) => {
       serviceType === "house_painting"
         ? []
         : [
-            {
-              at: new Date(),
-              method: bookingDetailsConfig.paymentMethod,
-              amount: paidAmount,
-              providerRef: "razorpay_order_xyz",
-            },
-          ];
+          {
+            at: new Date(),
+            method: bookingDetailsConfig.paymentMethod,
+            amount: paidAmount,
+            providerRef: "razorpay_order_xyz",
+          },
+        ];
 
     // 📦 Create booking
     const booking = new UserBooking({
@@ -389,10 +389,10 @@ exports.createBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -679,10 +679,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -1356,6 +1356,125 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
   }
 };
 
+// deep cleaning performance metrics
+// exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
+//   try {
+//     const { vendorId, lat, long, timeframe } = req.params;
+
+//     if (!vendorId || !lat || !long || !timeframe) {
+//       return res.status(400).json({
+//         message: "Vendor ID, Latitude, Longitude, and Timeframe are required",
+//       });
+//     }
+
+//     const baseQuery = {
+//       "address.location": {
+//         $near: {
+//           $geometry: {
+//             type: "Point",
+//             coordinates: [parseFloat(long), parseFloat(lat)], //(within 5km).
+//           },
+//           $maxDistance: 5000,
+//         },
+//       },
+//       "service.category": "Deep Cleaning",
+//       isEnquiry: false,
+//     };
+
+//     let query = { ...baseQuery };
+//     //["month", filter for bookings created in the current month, last 50 leads sorted by most recent]
+//     if (timeframe === "month") {
+//       const startOfMonth = moment().startOf("month").toDate();
+//       query.createdDate = { $gte: startOfMonth };
+//     }
+
+//     let bookingsQuery = UserBooking.find(query);
+
+//     if (timeframe === "last") {
+//       bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
+//     }
+
+
+//     const bookings = await bookingsQuery.exec();
+//     let totalLeads = bookings.length; // count ALL geo-filtered leads shown to vendor
+//     let respondedLeads = 0;
+//     let cancelledLeads = 0;
+//     let totalGsv = 0;
+
+//     // .Runs the Mongo query for filtered bookings.
+//     // .If none found, responds with zeros for all metrics.
+//     if (!bookings.length) {
+//       return res.status(200).json({
+//         responseRate: 0,
+//         cancellationRate: 0,
+//         averageGsv: 0,
+//         totalLeads: 0,
+//         respondedLeads: 0,
+//         cancelledLeads: 0,
+//         timeframe: timeframe,
+//       });
+//     }
+
+//     for (const booking of bookings) {
+//       // GSV of every lead (not just responded)
+//       const bookingGsv = (booking.service || []).reduce(
+//         (sum, s) => sum + (s.price || 0) * (s.quantity || 0),
+//         0
+//       );
+//       totalGsv += bookingGsv;
+
+//       const vendorInvitation = (booking.invitedVendors || []).find(
+//         (v) => String(v.professionalId) === String(vendorId)
+//       );
+//       if (!vendorInvitation) continue;
+
+//       // considered "responded" = accepted (or your special “customer_cancelled” flag)
+//       if (
+//         vendorInvitation.responseStatus === "accepted" ||
+//         vendorInvitation.responseStatus === "customer_cancelled"
+//       ) {
+//         respondedLeads += 1;
+//       }
+
+//       // “cancelled within 3 hours” logic
+//       if (
+//         vendorInvitation.responseStatus === "customer_cancelled" &&
+//         vendorInvitation.cancelledAt &&
+//         vendorInvitation.cancelledBy === "internal"
+//       ) {
+//         const bookedSlot = moment(
+//           `${booking.selectedSlot.slotDate} ${booking.selectedSlot.slotTime}`,
+//           "YYYY-MM-DD hh:mm A"
+//         );
+//         const hoursDiff = Math.abs(
+//           bookedSlot.diff(moment(vendorInvitation.cancelledAt), "hours", true)
+//         );
+//         if (hoursDiff <= 3) cancelledLeads += 1;
+//       }
+//     }
+
+//     const responseRate =
+//       totalLeads > 0 ? (respondedLeads / totalLeads) * 100 : 0;
+
+//     const cancellationRate =
+//       respondedLeads > 0 ? (cancelledLeads / respondedLeads) * 100 : 0;
+
+//     const averageGsv = totalLeads > 0 ? totalGsv / totalLeads : 0;
+
+//     res.status(200).json({
+//       responseRate: parseFloat(responseRate.toFixed(2)),
+//       cancellationRate: parseFloat(cancellationRate.toFixed(2)),
+//       averageGsv: parseFloat(averageGsv.toFixed(2)),
+//       totalLeads,
+//       respondedLeads,
+//       cancelledLeads,
+//       timeframe: timeframe,
+//     });
+//   } catch (error) {
+//     console.error("Error calculating vendor performance metrics:", error);
+//     res.status(500).json({ message: "Server error calculating performance" });
+//   }
+// };
 exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
   try {
     const { vendorId, lat, long, timeframe } = req.params;
@@ -1366,22 +1485,28 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       });
     }
 
+    // -------------------------------
+    //  BASE GEO + CATEGORY FILTER
+    // -------------------------------
     const baseQuery = {
       "address.location": {
         $near: {
           $geometry: {
             type: "Point",
-            coordinates: [parseFloat(long), parseFloat(lat)], //(within 5km).
+            coordinates: [parseFloat(long), parseFloat(lat)],
           },
-          $maxDistance: 5000,
+          $maxDistance: 5000, // 5km radius
         },
       },
       "service.category": "Deep Cleaning",
       isEnquiry: false,
     };
 
+    // -------------------------------
+    //  TIMEFRAME FILTER
+    // -------------------------------
     let query = { ...baseQuery };
-    //["month", filter for bookings created in the current month, last 50 leads sorted by most recent]
+
     if (timeframe === "month") {
       const startOfMonth = moment().startOf("month").toDate();
       query.createdDate = { $gte: startOfMonth };
@@ -1393,15 +1518,9 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
     }
 
-
     const bookings = await bookingsQuery.exec();
-    let totalLeads = bookings.length; // count ALL geo-filtered leads shown to vendor
-    let respondedLeads = 0;
-    let cancelledLeads = 0;
-    let totalGsv = 0;
 
-    // .Runs the Mongo query for filtered bookings.
-    // .If none found, responds with zeros for all metrics.
+    // If no bookings found
     if (!bookings.length) {
       return res.status(200).json({
         responseRate: 0,
@@ -1410,48 +1529,72 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
         totalLeads: 0,
         respondedLeads: 0,
         cancelledLeads: 0,
-        timeframe: timeframe,
+        timeframe,
       });
     }
 
+    // -------------------------------
+    //  METRIC COUNTERS
+    // -------------------------------
+    let totalLeads = bookings.length;
+    let respondedLeads = 0;
+    let cancelledLeads = 0;
+    let totalGsv = 0;
+
+    // -------------------------------
+    //  PROCESS EACH BOOKING
+    // -------------------------------
     for (const booking of bookings) {
-      // GSV of every lead (not just responded)
+      // 1️⃣ Calculate GSV
       const bookingGsv = (booking.service || []).reduce(
         (sum, s) => sum + (s.price || 0) * (s.quantity || 0),
         0
       );
       totalGsv += bookingGsv;
 
+      // 2️⃣ Get vendor invitation
       const vendorInvitation = (booking.invitedVendors || []).find(
         (v) => String(v.professionalId) === String(vendorId)
       );
+
       if (!vendorInvitation) continue;
 
-      // considered "responded" = accepted (or your special “customer_cancelled” flag)
-      if (
-        vendorInvitation.responseStatus === "accepted" ||
-        vendorInvitation.responseStatus === "customer_cancelled"
-      ) {
+      const status = vendorInvitation.responseStatus;
+
+      // 3️⃣ Responded logic:
+      // accepted = responded
+      // customer_cancelled = vendor cancelled (this counts as responded)
+      if (status === "accepted" || status === "customer_cancelled") {
         respondedLeads += 1;
       }
 
-      // “cancelled within 3 hours” logic
+      // 4️⃣ Vendor cancellation KPI logic
       if (
-        vendorInvitation.responseStatus === "customer_cancelled" &&
-        vendorInvitation.cancelledAt &&
-        vendorInvitation.cancelledBy === "internal"
+        status === "customer_cancelled" &&              // vendor cancelled on behalf of customer
+        vendorInvitation.cancelledBy === "internal" &&  // done through vendor app
+        vendorInvitation.cancelledAt
       ) {
         const bookedSlot = moment(
           `${booking.selectedSlot.slotDate} ${booking.selectedSlot.slotTime}`,
           "YYYY-MM-DD hh:mm A"
         );
-        const hoursDiff = Math.abs(
-          bookedSlot.diff(moment(vendorInvitation.cancelledAt), "hours", true)
-        );
-        if (hoursDiff <= 3) cancelledLeads += 1;
+
+        const cancelledAt = moment(vendorInvitation.cancelledAt);
+
+        // HOURS difference BEFORE slot
+        // diff must be >= 0 (vendor cancelled BEFORE slot)
+        // diff must be <= 3 (within 3 hours)
+        const diffHours = bookedSlot.diff(cancelledAt, "hours", true);
+
+        if (diffHours >= 0 && diffHours <= 3) {
+          cancelledLeads += 1;
+        }
       }
     }
 
+    // -------------------------------
+    //  FINAL METRICS
+    // -------------------------------
     const responseRate =
       totalLeads > 0 ? (respondedLeads / totalLeads) * 100 : 0;
 
@@ -1460,21 +1603,28 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
 
     const averageGsv = totalLeads > 0 ? totalGsv / totalLeads : 0;
 
-    res.status(200).json({
+    // -------------------------------
+    //  RESPONSE
+    // -------------------------------
+    return res.status(200).json({
       responseRate: parseFloat(responseRate.toFixed(2)),
       cancellationRate: parseFloat(cancellationRate.toFixed(2)),
       averageGsv: parseFloat(averageGsv.toFixed(2)),
       totalLeads,
       respondedLeads,
       cancelledLeads,
-      timeframe: timeframe,
+      timeframe,
     });
   } catch (error) {
     console.error("Error calculating vendor performance metrics:", error);
-    res.status(500).json({ message: "Server error calculating performance" });
+    return res.status(500).json({
+      message: "Server error calculating performance",
+      error: error.message,
+    });
   }
 };
 
+// house painting performance metrics
 exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
   try {
     const { vendorId, lat, long, timeframe } = req.params;
