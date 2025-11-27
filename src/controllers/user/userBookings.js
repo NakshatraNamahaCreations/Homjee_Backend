@@ -9,7 +9,7 @@ const { unlockRelatedQuotesByHiring } = require("../../helpers/quotes");
 const DeepCleaningPackageModel = require("../../models/products/DeepCleaningPackage");
 const userSchema = require("../../models/user/userAuth");
 
-const redirectionUrl = "http://localhost:5173/checkout"
+const redirectionUrl = "http://localhost:5173/checkout/payment/"
 
 // 691dbf44b066964735737d4e check this tomorrow
 const citiesObj = {
@@ -726,244 +726,6 @@ exports.adminCreateBooking = async (req, res) => {
   }
 };
 
-// In your bookings controller
-// exports.markAsLead = async (req, res) => {
-//   try {
-//     const { id } = req.params;
-//     console.log("Mark as Lead - Booking ID:", id);
-
-//     // Find the booking
-//     const booking = await UserBooking.findById(id);
-//     if (!booking) {
-//       return res.status(404).json({ message: "Booking not found" });
-//     }
-
-//     console.log("Current booking:", {
-//       isEnquiry: booking.isEnquiry,
-//       serviceType: booking.serviceType,
-//       bookingAmount: booking.bookingDetails?.bookingAmount,
-//       siteVisitCharges: booking.bookingDetails?.siteVisitCharges,
-//       firstPayment: booking.bookingDetails?.firstPayment,
-//     });
-
-//     const { serviceType, bookingDetails } = booking;
-
-//     // Calculate paid amount based on service type
-//     let paidAmount = 0;
-
-//     if (serviceType === "deep_cleaning") {
-//       paidAmount = bookingDetails.bookingAmount || 0;
-//       console.log("Deep Cleaning - Paid Amount:", paidAmount);
-//     } else if (serviceType === "house_painting") {
-//       paidAmount = bookingDetails.siteVisitCharges || 0;
-//       console.log("House Painting - Paid Amount:", paidAmount);
-//     }
-
-//     // Update the document directly (this approach works better with nested objects)
-//     booking.isEnquiry = false;
-
-//     if (booking.bookingDetails) {
-//       // Update payment details
-//       booking.bookingDetails.paymentMethod = "UPI";
-//       booking.bookingDetails.paidAmount = paidAmount;
-//       booking.bookingDetails.paymentStatus = "Partial Payment";
-
-//       // Update first payment - only change status, method and paidAt
-//       booking.bookingDetails.firstPayment.status = "paid";
-//       booking.bookingDetails.firstPayment.method = "UPI";
-//       booking.bookingDetails.firstPayment.paidAt = new Date();
-
-//       // Keep the existing amount, don't override it
-//       // booking.bookingDetails.firstPayment.amount remains the same
-//     }
-
-//     console.log("After update - booking details:", {
-//       isEnquiry: booking.isEnquiry,
-//       paidAmount: booking.bookingDetails?.paidAmount,
-//       paymentMethod: booking.bookingDetails?.paymentMethod,
-//       paymentStatus: booking.bookingDetails?.paymentStatus,
-//       firstPayment: booking.bookingDetails?.firstPayment,
-//     });
-
-//     // Save the updated document
-//     const updatedBooking = await booking.save();
-
-//     console.log("Successfully updated booking:", {
-//       isEnquiry: updatedBooking.isEnquiry,
-//       paidAmount: updatedBooking.bookingDetails?.paidAmount,
-//       firstPayment: updatedBooking.bookingDetails?.firstPayment,
-//     });
-
-//     res.status(200).json({
-//       message: "Successfully marked as lead",
-//       booking: updatedBooking,
-//     });
-//   } catch (error) {
-//     console.error("Mark as Lead Error:", error);
-//     res.status(500).json({
-//       message: "Server error",
-//       error: error.message,
-//     });
-//   }
-// };
-
-// exports.getAllBookings = async (req, res) => {
-//   try {
-//     const { service, city, timePeriod, startDate, endDate } = req.query;
-//     console.log({ service, city, timePeriod, startDate, endDate })
-
-//     // Build filter
-//     let filter = {};
-
-//     // Filter by service if not 'All Services'
-//     if (service && service !== 'All Services') {
-//       filter['service.category'] = service; // assuming your service schema has a field like serviceName
-//     }
-
-//     // // Filter by city if not 'All Cities'
-//     // if (city && city !== 'All Cities') {
-//     //   filter['address.city'] = city; // assuming you have city field inside address
-//     // }
-
-//     // Filter by city if not 'All Cities'
-//     if (city && city !== 'All Cities') {
-//       // Get the actual city name from the map, default to user input if not found
-//       const dbCity = citiesObj[city] || city;
-
-//       // Use regex to match inside streetArea
-//       filter['address.streetArea'] = { $regex: dbCity, $options: 'i' };
-//     }
-
-//     // Add date filter if provided
-//     if (startDate || endDate) {
-//       filter["bookingDetails.bookingDate"] = {};
-//       if (startDate) {
-//         filter["bookingDetails.bookingDate"].$gte = new Date(startDate);
-//       }
-//       if (endDate) {
-//         const end = new Date(endDate);
-//         end.setHours(23, 59, 59, 999); // include the whole day
-//         filter["bookingDetails.bookingDate"].$lte = end;
-//       }
-//     }
-
-//     console.log("filter:", filter)
-//     const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
-//     res.status(200).json({ bookings });
-//   } catch (error) {
-//     console.error("Error fetching bookings:", error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// };
-
-// exports.getAllLeadsBookings = async (req, res) => {
-//   try {
-//     const { service, city, timePeriod, startDate, endDate } = req.query;
-//     console.log({ service, city, timePeriod, startDate, endDate })
-
-//     // Build filter
-//     let filter = { isEnquiry: false };
-
-//     // Filter by service if not 'All Services'
-//     if (service && service !== 'All Services') {
-//       filter['service.category'] = service; // assuming your service schema has a field like serviceName
-//     }
-
-//     // // Filter by city if not 'All Cities'
-//     // if (city && city !== 'All Cities') {
-//     //   filter['address.city'] = city; // assuming you have city field inside address
-//     // }
-
-//     // Filter by city if not 'All Cities'
-//     if (city && city !== 'All Cities') {
-//       // Get the actual city name from the map, default to user input if not found
-//       const dbCity = citiesObj[city] || city;
-
-//       // Use regex to match inside streetArea
-//       filter['address.streetArea'] = { $regex: dbCity, $options: 'i' };
-//     }
-
-//     // Add date filter if provided
-//     if (startDate || endDate) {
-//       filter["bookingDetails.bookingDate"] = {};
-//       if (startDate) {
-//         filter["bookingDetails.bookingDate"].$gte = new Date(startDate);
-//       }
-//       if (endDate) {
-//         const end = new Date(endDate);
-//         end.setHours(23, 59, 59, 999); // include the whole day
-//         filter["bookingDetails.bookingDate"].$lte = end;
-//       }
-//     }
-
-//     console.log("filter:", filter)
-//     const bookings = await UserBooking.find(filter).sort({
-//       createdAt: -1,
-//     });
-//     res.status(200).json({ allLeads: bookings });
-//   } catch (error) {
-//     console.error("Error fetching all leads:", error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// };
-
-// exports.getAllEnquiries = async (req, res) => {
-//   try {
-
-//     const { service, city, timePeriod, startDate, endDate } = req.query;
-//     console.log({ service, city, timePeriod, startDate, endDate })
-
-//     // Build filter
-//     let filter = { isEnquiry: true };
-
-//     // Filter by service if not 'All Services'
-//     if (service && service !== 'All Services') {
-//       filter['service.category'] = service; // assuming your service schema has a field like serviceName
-//     }
-
-//     // // Filter by city if not 'All Cities'
-//     // if (city && city !== 'All Cities') {
-//     //   filter['address.city'] = city; // assuming you have city field inside address
-//     // }
-
-//     // Filter by city if not 'All Cities'
-//     if (city && city !== 'All Cities') {
-//       // Get the actual city name from the map, default to user input if not found
-//       const dbCity = citiesObj[city] || city;
-
-//       // Use regex to match inside streetArea
-//       filter['address.streetArea'] = { $regex: dbCity, $options: 'i' };
-//     }
-
-//     // Add date filter if provided
-//     if (startDate || endDate) {
-//       filter["bookingDetails.bookingDate"] = {};
-//       if (startDate) {
-//         filter["bookingDetails.bookingDate"].$gte = new Date(startDate);
-//       }
-//       if (endDate) {
-//         const end = new Date(endDate);
-//         end.setHours(23, 59, 59, 999); // include the whole day
-//         filter["bookingDetails.bookingDate"].$lte = end;
-//       }
-//     }
-
-//     console.log("filter:", filter)
-
-//     const bookings = await UserBooking.find(filter).sort({
-//       createdAt: -1,
-//     });
-//     res.status(200).json({ allEnquies: bookings });
-//   } catch (error) {
-//     console.error("Error fetching all leads:", error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// };
-
-// -----------------------------
-// 📦 User Booking Controllers
-// -----------------------------
-
 exports.getAllBookings = async (req, res) => {
   try {
     const { service, city, timePeriod, startDate, endDate } = req.query;
@@ -1294,6 +1056,7 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
 //     res.status(500).json({ message: "Server error calculating performance" });
 //   }
 // };
+
 exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
   try {
     const { vendorId, lat, long, timeframe } = req.params;
@@ -1425,6 +1188,18 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     // -------------------------------
     //  RESPONSE
     // -------------------------------
+
+    const RESPONSE_DATA = {
+      responseRate: parseFloat(responseRate.toFixed(2)),
+      cancellationRate: parseFloat(cancellationRate.toFixed(2)),
+      averageGsv: parseFloat(averageGsv.toFixed(2)),
+      totalLeads,
+      respondedLeads,
+      cancelledLeads,
+      timeframe,
+    }
+    console.log("RESPONSE_DATA_DEEP_CLEANING_PERFORMANCE", RESPONSE_DATA)
+
     return res.status(200).json({
       responseRate: parseFloat(responseRate.toFixed(2)),
       cancellationRate: parseFloat(cancellationRate.toFixed(2)),
@@ -2380,12 +2155,15 @@ exports.markPendingHiring = async (req, res) => {
     booking.bookingDetails.amountYetToPay = firstInstallment; // 40% due now
 
     // 6) Payment link (change to razor pay)
-    const paymentLinkUrl = `${redirectionUrl}${bookingId}-${Date.now()}`;
+    const userId = booking.customer?.customerId
+    const pay_type = "auto-pay";
+    const paymentLinkUrl = `${redirectionUrl}/${bookingId}/${Date.now()}/${pay_type}`;
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
       providerRef: "razorpay_order_xyz", // fill if you have gateway id
     };
+    console.log("paymentLinkUrl", paymentLinkUrl);
 
     if (process.env.NODE_ENV !== "production") {
       booking.assignedProfessional.hiring.autoCancelAt = new Date(
