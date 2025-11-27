@@ -10,7 +10,7 @@ const DeepCleaningPackageSchema = new mongoose.Schema(
     service: { type: String, default: "" , trim: true},
 
     totalAmount: { type: Number, required: true, min: 0 },
-    bookingAmount: { type: Number, required: true, min: 0 },
+    // bookingAmount: { type: Number, required: true, min: 0 },
     coinsForVendor: { type: Number, required: true, min: 0 },
     teamMembers: { type: Number, required: true, min: 1 },
 

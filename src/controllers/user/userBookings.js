@@ -497,22 +497,25 @@ exports.adminCreateBooking = async (req, res) => {
 
     // bookingAmount coming from admin UI (Option A expects siteVisitCharges separate)
     // Use let because we may adjust bookingAmount for house painting case
-    let bookingAmount = Number(bookingDetails?.bookingAmount || 0);
-    let paidAmount = 0;
-    let originalTotalAmount = 0;
-    let finalTotal = 0;
+    // Use client-provided values whenever present (admin decides these)
+    let bookingAmount = Number(bookingDetails?.bookingAmount ?? 0);
+    // Accept paidAmount from payload — admin may pass 0 or existing paid values
+    let paidAmount = Number(bookingDetails?.paidAmount ?? 0);
+    // originalTotalAmount must come from client/frontend. Do NOT compute it server-side.
+    // Fall back to finalTotal or 0 if client didn't provide it explicitly.
+    let originalTotalAmount = Number(
+      bookingDetails?.originalTotalAmount ?? bookingDetails?.finalTotal ?? 0
+    );
+    let finalTotal = Number(bookingDetails?.finalTotal ?? 0) || originalTotalAmount;
     let amountYetToPay = 0;
     let siteVisitCharges = 0;
+    // When true, skip any updates to pricing/payment fields for this request
+    let skipPriceUpdate = false;
 
     let firstPayment = {};
     let secondPayment = {};
     let finalPayment = {};
 
-    // compute originalTotalAmount (sum of service price * qty) — used for deep cleaning
-    originalTotalAmount = service.reduce(
-      (sum, itm) => sum + Number(itm.price || 0) * (itm.quantity || 1),
-      0
-    );
 
     // -----------------------
     // Deep cleaning logic
@@ -520,21 +523,18 @@ exports.adminCreateBooking = async (req, res) => {
     if (serviceType === "deep_cleaning") {
       if (isEnquiry && bookingAmount > 0) {
         // ADMIN ENQUIRY rules (Deep Cleaning)
-        // bookingAmount is from admin (frontend)
-        paidAmount = 0;
-        finalTotal = originalTotalAmount;
-        amountYetToPay = Math.max(0, originalTotalAmount - bookingAmount);
+        // Use bookingAmount/finalTotal/paidAmount provided by client — do not overwrite
+        amountYetToPay = Math.max(0, finalTotal - bookingAmount);
 
         firstPayment = {
-          status: "pending",
+          status: paidAmount > 0 ? "paid" : "pending",
           amount: bookingAmount,
-          // paidAt: null,
-          // // include method only when needed; admin probably didn't collect payment for enquiry
-          // ...(bookingDetails?.paymentMethod && { method: bookingDetails.paymentMethod }),
+          paidAt: paidAmount > 0 ? new Date() : null,
+          method: paidAmount > 0 ? bookingDetails?.paymentMethod || "None" : undefined,
         };
 
         finalPayment = {
-          status: "pending",
+          status: amountYetToPay > 0 ? "pending" : "paid",
           amount: Math.max(0, finalTotal - bookingAmount),
         };
       } else {
@@ -546,19 +546,20 @@ exports.adminCreateBooking = async (req, res) => {
         // });
 
         // bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
-        paidAmount = bookingAmount;
-        finalTotal = originalTotalAmount;
+        // Non-enquiry path: use provided paidAmount (if any) — otherwise treat bookingAmount as paid
+        paidAmount = Number(bookingDetails?.paidAmount ?? bookingAmount);
+        // If client hasn't provided finalTotal, fallback already handled above
         amountYetToPay = Math.max(0, finalTotal - paidAmount);
 
         firstPayment = {
-          status: "No Payment",
+          status: paidAmount > 0 ? "paid" : "No Payment",
           amount: paidAmount,
           paidAt: paidAmount > 0 ? new Date() : null,
-          method: "None",
+          method: paidAmount > 0 ? bookingDetails?.paymentMethod || "None" : "None",
         };
 
         finalPayment = {
-          status: "pending",
+          status: amountYetToPay > 0 ? "pending" : "paid",
           amount: Math.max(0, finalTotal - paidAmount),
         };
       }
@@ -575,6 +576,7 @@ exports.adminCreateBooking = async (req, res) => {
         // ADMIN ENQUIRY (Option A): store siteVisitCharges separately,
         // bookingAmount and payment values should be 0
         bookingAmount = 0;
+        // For house painting enquiries we keep paidAmount 0 as per requirement
         paidAmount = 0;
         originalTotalAmount = 0;
         finalTotal = 0;
@@ -587,6 +589,7 @@ exports.adminCreateBooking = async (req, res) => {
         // Normal customer-style booking for site visit: bookingAmount stays 0,
         // paidAmount equals siteVisitCharges (if your flow collects it)
         bookingAmount = 0;
+        // For house painting non-enquiry admin flow we currently do not accept paid amount here (keep 0)
         paidAmount = 0;
         originalTotalAmount = 0;
         finalTotal = 0;
@@ -2165,6 +2168,7 @@ exports.markPendingHiring = async (req, res) => {
     };
     console.log("paymentLinkUrl", paymentLinkUrl);
 
+    
     if (process.env.NODE_ENV !== "production") {
       booking.assignedProfessional.hiring.autoCancelAt = new Date(
         Date.now() + 2 * 60 * 1000
@@ -2974,6 +2978,46 @@ exports.updateUserBooking = async (req, res) => {
       });
     }
 
+    // Detect service type early so we can enforce enquiry rules
+    const serviceType = detectServiceType(formName, service || booking.service || []);
+
+    // Special rule: when this booking is an enquiry and the service is house_painting,
+    // only allow updating the address and selectedSlot — do NOT change price/payment/customer/service.
+    if (booking.isEnquiry && serviceType === "house_painting") {
+      // Update address only
+      if (address) {
+        booking.address = {
+          houseFlatNumber:
+            address.houseFlatNumber || booking.address.houseFlatNumber,
+          streetArea: address.streetArea || booking.address.streetArea,
+          landMark: address.landMark || booking.address.landMark,
+          city: address.city || booking.address.city,
+          location: address.location || booking.address.location,
+        };
+      }
+
+      // Update selected slot only
+      if (selectedSlot) {
+        booking.selectedSlot = {
+          slotTime: selectedSlot.slotTime || booking.selectedSlot.slotTime,
+          slotDate: selectedSlot.slotDate || booking.selectedSlot.slotDate,
+        };
+      }
+
+      // Respect explicit isEnquiry/formName toggles only if provided
+      if (isEnquiry !== undefined) booking.isEnquiry = isEnquiry;
+      if (formName) booking.formName = formName;
+
+      await booking.save();
+
+      return res.json({
+        success: true,
+        message:
+          "Booking updated (enquiry - house_painting). Only address & selectedSlot were changed.",
+        booking,
+      });
+    }
+
     // Update customer info
     if (customer) {
       booking.customer = {
@@ -3062,7 +3106,7 @@ exports.updateUserBooking = async (req, res) => {
 exports.updateEnquiry = async (req, res) => {
   try {
     const { bookingId } = req.params;
-    const bookingData = req.body;
+    const data = req.body;
 
     if (!bookingId) {
       return res.status(400).json({ message: "bookingId is required" });
@@ -3077,150 +3121,137 @@ exports.updateEnquiry = async (req, res) => {
       return res.status(400).json({ message: "Booking is not an enquiry" });
     }
 
-    const {
-      service = [],
-      bookingDetails = {},
-      address,
-      selectedSlot,
-      formName,
-      isEnquiry,
-    } = bookingData;
+    const { address, selectedSlot, formName, service } = data;
 
-    //----------------------------
+    //---------------------------------------------
     // DETECT SERVICE TYPE
-    //----------------------------
-    const serviceType = detectServiceType(formName, service);
+    //---------------------------------------------
+    const serviceType =
+      booking.serviceType ||
+      detectServiceType(formName, service || booking.service);
 
-    //----------------------------
-    // DECLARE VARIABLES
-    //----------------------------
-    let bookingAmount = Number(bookingDetails.bookingAmount || 0); // FROM FRONTEND
-    let paidAmount = Number(bookingDetails.paidAmount || 0) || 0;
-    let originalTotalAmount = 0;
-    let finalTotal = 0;
-    let amountYetToPay = 0;
-    let siteVisitCharges = 0;
-
-    //----------------------------
-    // RE-CALCULATE TOTALS
-    //----------------------------
-
-    if (serviceType === "deep_cleaning") {
-      // 1️⃣ Calculate total price from services
-      originalTotalAmount = service.reduce(
-        (sum, itm) => sum + Number(itm.price || 0) * (itm.quantity || 1),
-        0
-      );
-
-      // 2️⃣ Final total equals service total
-      finalTotal = originalTotalAmount;
-
-      // 3️⃣ Amount yet to pay formula (CORRECTED)
-      amountYetToPay = Math.max(0, finalTotal - bookingAmount - paidAmount);
-
-      // 4️⃣ First payment is booking amount
-      booking.bookingDetails.firstPayment = {
-        status: "pending",
-        amount: bookingAmount,
-      };
-
-      // 5️⃣ Remaining after first payment
-      booking.bookingDetails.finalPayment = {
-        status: "pending",
-        amount: Math.max(0, finalTotal - bookingAmount),
-      };
-    }
-
-    //----------------------------------------------
-    // HOUSE PAINTING LOGIC (NO CHANGE REQUIRED)
-    //----------------------------------------------
+    //========================================================
+    // 📌 RULE: HOUSE PAINTING — ONLY UPDATE ADDRESS + SLOT
+    //========================================================
     if (serviceType === "house_painting") {
-      siteVisitCharges = Number(bookingDetails.bookingAmount || 0);
+      console.log("Updating ONLY address & slot for house painting enquiry");
 
-      // for house painting bookingAmount = site visit only
-      bookingAmount = siteVisitCharges;
-      paidAmount = 0;
-      originalTotalAmount = 0;
-      finalTotal = 0;
-      amountYetToPay = 0;
+      // Update Address
+      if (address) {
+        booking.address.houseFlatNumber =
+          address.houseFlatNumber ?? booking.address.houseFlatNumber;
 
-      booking.bookingDetails.firstPayment = { status: "pending", amount: 0 };
-      booking.bookingDetails.secondPayment = { status: "pending", amount: 0 };
-      booking.bookingDetails.finalPayment = { status: "pending", amount: 0 };
+        booking.address.streetArea =
+          address.streetArea ?? booking.address.streetArea;
+
+        booking.address.landMark =
+          address.landMark ?? booking.address.landMark;
+
+        booking.address.city = address.city ?? booking.address.city;
+
+        booking.address.location =
+          address.location ?? booking.address.location;
+      }
+
+      // Update Slot
+      if (selectedSlot) {
+        booking.selectedSlot.slotDate =
+          selectedSlot.slotDate ?? booking.selectedSlot.slotDate;
+
+        booking.selectedSlot.slotTime =
+          selectedSlot.slotTime ?? booking.selectedSlot.slotTime;
+      }
+
+      // FORM NAME update allowed
+      if (formName) {
+        booking.formName = formName;
+      }
+
+      await booking.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "House painting enquiry updated (address & slot only)",
+        booking,
+      });
+    }
+
+    //========================================================
+    // 📌 DEEP CLEANING OR OTHER SERVICE TYPES
+    // → Normal full update logic
+    //========================================================
+
+    const {
+      bookingDetails = {},
+      isEnquiry,
+    } = data;
+
+    // Ensure nested objects
+    booking.bookingDetails = booking.bookingDetails || {};
+    booking.bookingDetails.firstPayment =
+      booking.bookingDetails.firstPayment || {};
+    booking.bookingDetails.finalPayment =
+      booking.bookingDetails.finalPayment || {};
+
+    //----------------------------
+    // SERVICE UPDATE
+    //----------------------------
+    if (service?.length) {
+      booking.service = service.map((s) => ({
+        category: s.category || "",
+        subCategory: s.subCategory || "",
+        serviceName: s.serviceName || "",
+        price: Number(s.price || 0),
+        quantity: Number(s.quantity || 1),
+        teamMembersRequired: Number(s.teamMembersRequired || 1),
+      }));
     }
 
     //----------------------------
-    // UPDATE SERVICES
+    // BOOKING DETAILS UPDATE
     //----------------------------
-    booking.service = service.map((s) => ({
-      category: s.category || "",
-      subCategory: s.subCategory || "",
-      serviceName: s.serviceName || "",
-      price: Number(s.price || 0),
-      quantity: Number(s.quantity || 1),
-      teamMembersRequired: Number(s.teamMembersRequired || 1),
-    }));
+    const bookingAmount = Number(bookingDetails.bookingAmount || 0);
+    const finalTotal = Number(bookingDetails.finalTotal || 0);
+    const paidAmount = Number(bookingDetails.paidAmount || 0);
 
-    //----------------------------
-    // UPDATE BOOKING DETAILS
-    //----------------------------
+    booking.bookingDetails.originalTotalAmount =
+      Number(bookingDetails.originalTotalAmount ?? finalTotal ?? 0);
+
+    booking.bookingDetails.finalTotal = finalTotal;
     booking.bookingDetails.bookingAmount = bookingAmount;
     booking.bookingDetails.paidAmount = paidAmount;
-    booking.bookingDetails.originalTotalAmount = originalTotalAmount;
-    booking.bookingDetails.finalTotal = finalTotal;
-    booking.bookingDetails.amountYetToPay = amountYetToPay;
-    booking.bookingDetails.siteVisitCharges = siteVisitCharges;
-
-    booking.bookingDetails.paymentMethod =
-      bookingDetails.paymentMethod || booking.bookingDetails.paymentMethod;
-
-    booking.bookingDetails.paymentStatus =
-      paidAmount > 0 ? "Partial Payment" : "Unpaid";
-
-    booking.bookingDetails.paymentLink =
-      bookingDetails.paymentLink || booking.bookingDetails.paymentLink;
+    booking.bookingDetails.amountYetToPay =
+      Math.max(0, finalTotal - bookingAmount);
 
     //----------------------------
-    // UPDATE ADDRESS
+    // ADDRESS UPDATE (deep cleaning)
     //----------------------------
     if (address) {
       booking.address = {
-        houseFlatNumber:
-          address.houseFlatNumber || booking.address.houseFlatNumber,
-        streetArea: address.streetArea || booking.address.streetArea,
-        landMark: address.landMark || booking.address.landMark,
-        city: address.city || booking.address.city,
-        location: address.location || booking.address.location,
+        ...booking.address,
+        ...address,
       };
     }
 
     //----------------------------
-    // UPDATE SLOT
+    // SLOT UPDATE (deep cleaning)
     //----------------------------
     if (selectedSlot) {
       booking.selectedSlot = {
-        slotTime: selectedSlot.slotTime || booking.selectedSlot.slotTime,
-        slotDate: selectedSlot.slotDate || booking.selectedSlot.slotDate,
+        ...booking.selectedSlot,
+        ...selectedSlot,
       };
     }
 
-    if (typeof isEnquiry === "boolean") {
-      booking.isEnquiry = isEnquiry;
-    }
+    if (typeof isEnquiry === "boolean") booking.isEnquiry = isEnquiry;
 
-    //----------------------------
-    // UPDATE FORM NAME
-    //----------------------------
-    booking.formName = formName || booking.formName;
+    if (formName) booking.formName = formName;
 
-    //----------------------------
-    // SAVE BOOKING
-    //----------------------------
     await booking.save();
 
     return res.status(200).json({
       success: true,
-      message: "Booking updated successfully",
+      message: "Enquiry updated successfully",
       booking,
     });
   } catch (error) {
@@ -3232,6 +3263,7 @@ exports.updateEnquiry = async (req, res) => {
     });
   }
 };
+
 
 // controllers/bookingController.js
 exports.updateBookingField = async (req, res) => {

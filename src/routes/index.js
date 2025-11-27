@@ -13,6 +13,11 @@ const adminAuthRoutes = require("./admin/adminAuthRoutes");
 const deepCleaningRoutes = require("./products/deepCleaning.routes");
 const minimumOrderRoutes = require("./serviceConfig/minimumOrder.routes");
 const reminderRoutes = require("../routes/user/reminder");
+const manualPaymentRoutes = require("../routes/user/manualPayment");
+const kpiParametersRoutes = require("./perfomance/kpiparameters");
+
+// Performance KPI Parameters Routes
+router.use("/kpi-parameters", kpiParametersRoutes);
 
 router.use("/user", userRoutes);
 router.use("/bookings", bookingRoutes);
@@ -26,6 +31,7 @@ router.use("/admin/auth", adminAuthRoutes);
 router.use("/deeppackage", deepCleaningRoutes);
 router.use("/minimumorder", minimumOrderRoutes);
 router.use("/reminders", reminderRoutes);
+router.use("/manual-payment", manualPaymentRoutes);
 
 router.get("/hello-world/testing", (req, res) => {
   res.json({ message: "Hi Jimmy!" });
