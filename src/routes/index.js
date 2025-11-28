@@ -14,7 +14,7 @@ const deepCleaningRoutes = require("./products/deepCleaning.routes");
 const minimumOrderRoutes = require("./serviceConfig/minimumOrder.routes");
 const reminderRoutes = require("../routes/user/reminder");
 const manualPaymentRoutes = require("../routes/user/manualPayment");
-const kpiParametersRoutes = require("./perfomance/kpiparameters");
+const kpiParametersRoutes = require("../routes/perfomance/kpi");
 
 // Performance KPI Parameters Routes
 router.use("/kpi-parameters", kpiParametersRoutes);
