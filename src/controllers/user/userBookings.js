@@ -1827,6 +1827,13 @@ exports.requestPriceChange = async (req, res) => {
       .status(400)
       .json({ error: "A price change is already pending approval" });
   }
+
+  if (scopeType === "Added") {
+    booking.bookingDetails.priceUpdateRequestedToUser = true;
+  } else {
+    booking.bookingDetails.priceUpdateRequestedToAdmin = true;
+  }
+
   booking.bookingDetails.hasPriceUpdated = true;
 
   const newChange = {
@@ -1866,7 +1873,8 @@ exports.approvePriceChange = async (req, res) => {
       .status(400)
       .json({ error: "No pending price change to approve" });
   }
-
+  d.priceUpdateRequestedToUser = false;
+  d.priceUpdateRequestedToAdmin = false
   // Approve it
   pendingChange.status = "approved";
   pendingChange.approvedBy = approvedBy;
@@ -1897,7 +1905,8 @@ exports.rejectPriceChange = async (req, res) => {
   if (!pendingChange) {
     return res.status(400).json({ error: "No pending price change to reject" });
   }
-
+  d.priceUpdateRequestedToUser = false;
+  d.priceUpdateRequestedToAdmin = false
   pendingChange.status = "rejected";
   pendingChange.rejectedBy = rejectedBy;
   pendingChange.rejectedAt = new Date();
@@ -2157,15 +2166,15 @@ exports.markPendingHiring = async (req, res) => {
     booking.bookingDetails.paidAmount = 0; // nothing paid yet
     booking.bookingDetails.amountYetToPay = firstInstallment; // 40% due now
 
-    // 6) Payment link (change to razor pay)
-    const userId = booking.customer?.customerId
+    // 6) Payment link (change to razor pay) 
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}/${bookingId}/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${bookingId}/${Date.now()}/${pay_type}`;
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
       providerRef: "razorpay_order_xyz", // fill if you have gateway id
     };
+
     console.log("paymentLinkUrl", paymentLinkUrl);
 
     

@@ -71,7 +71,7 @@ const PaymentMilestoneSchema = new mongoose.Schema(
   {
     status: {
       type: String,
-      enum: ["pending", "paid", "failed","No Payment"],
+      enum: ["pending", "paid", "failed", "No Payment"],
       default: "pending",
     },
     amount: {
@@ -124,7 +124,8 @@ const bookingDetailsSchema = new mongoose.Schema(
       default: [],
     },
     hasPriceUpdated: { type: Boolean, default: false },
-
+    priceUpdateRequestedToUser: { type: Boolean, default: false },
+    priceUpdateRequestedToAdmin: { type: Boolean, default: false },
     // 💰 Core Amounts (never change original)
     originalTotalAmount: {
       type: Number,
@@ -157,8 +158,8 @@ const bookingDetailsSchema = new mongoose.Schema(
     // 💳 Payment method (last used)
     paymentMethod: {
       type: String,
-      enum: ["Cash", "Card", "UPI", "Wallet","None"],
-      
+      enum: ["Cash", "Card", "UPI", "Wallet", "None"],
+
     },
 
     // 🔗 Payment Link
