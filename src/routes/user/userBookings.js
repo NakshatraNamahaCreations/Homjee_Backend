@@ -32,6 +32,13 @@ router.get(
   "/house-painting-vendor-performance-metrics/:vendorId/:lat/:long/:timeframe",
   bookingController.getVendorPerformanceMetricsHousePainting
 );
+
+// router.get(
+//   "/house-painting-vendor-performance-metrics/:vendorId/:lat/:long/:timeframe",
+//   bookingController.getVendorPerformanceMetricsHousePainting
+// );
+
+router.get("/overall", bookingController.getOverallPerformance);
 // .............................................
 router.get(
   "/get-nearest-booking-by-location-house-painting/:lat/:long",

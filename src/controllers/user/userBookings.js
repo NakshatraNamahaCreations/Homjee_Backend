@@ -1060,6 +1060,8 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
 //   }
 // };
 
+//metric
+
 exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
   try {
     const { vendorId, lat, long, timeframe } = req.params;
@@ -1335,6 +1337,258 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     res.status(500).json({ message: "Server error calculating performance" });
   }
 };
+
+exports.getOverallPerformance = async (req, res) => {
+  try {
+    const { city = "All", period = "all" } = req.query;
+
+    /* -----------------------------
+        1. PREPARE DATE FILTER
+    ----------------------------- */
+    let dateFilter = {};
+
+    if (period === "this_month") {
+      dateFilter.createdDate = {
+        $gte: moment().startOf("month").toDate(),
+      };
+    }
+
+    if (period === "last_month") {
+      dateFilter.createdDate = {
+        $gte: moment().subtract(1, "month").startOf("month").toDate(),
+        $lte: moment().subtract(1, "month").endOf("month").toDate(),
+      };
+    }
+
+    /* -----------------------------
+        2. CITY FILTER
+    ----------------------------- */
+    let cityFilter = {};
+    if (city !== "All") {
+      cityFilter["address.city"] = city;
+    }
+
+    /* -----------------------------
+        3. FETCH ALL LEADS
+    ----------------------------- */
+    const leads = await UserBooking.find({
+      ...dateFilter,
+      ...cityFilter,
+      isEnquiry: false,
+    });
+
+    const normalize = (v) => (v ?? "").toString().trim().toLowerCase();
+    const isHP = (lead) =>
+      lead.service?.some((s) => normalize(s.category) === "house painting");
+    const isDC = (lead) =>
+      lead.service?.some((s) => normalize(s.category) === "deep cleaning");
+
+    const hpLeads = leads.filter(isHP);
+    const dcLeads = leads.filter(isDC);
+
+    /* -----------------------------
+        4. CALCULATE GSV
+    ----------------------------- */
+    const calcGSV = (arr) => {
+      let total = 0;
+      arr.forEach((l) => {
+        l.service?.forEach((s) => {
+          total += (s.price || 0) * (s.quantity || 1);
+        });
+      });
+      return total;
+    };
+
+    /* -----------------------------
+        5. HOUSE PAINTING METRICS
+    ----------------------------- */
+    let hpResponded = 0;
+    let hpSurvey = 0;
+    let hpHiring = 0;
+
+    hpLeads.forEach((lead) => {
+      const prof = lead.assignedProfessional;
+      if (!prof) return;
+
+      if (prof.acceptedDate) hpResponded++;
+      if (prof.startedDate) hpSurvey++;
+
+      const status = normalize(lead.bookingDetails?.status);
+
+      const isHired =
+        status === "hired" ||
+        status === "project ongoing" ||
+        lead.bookingDetails?.firstPayment?.status === "paid";
+
+      if (isHired) hpHiring++;
+    });
+
+    const hpTotalGsv = calcGSV(hpLeads);
+    const hpAvgGsv = hpLeads.length ? hpTotalGsv / hpLeads.length : 0;
+
+    /* -----------------------------
+        6. DEEP CLEANING METRICS - FIXED
+    ----------------------------- */
+    let dcResponded = 0;
+    let dcCancelled = 0;
+
+    dcLeads.forEach((lead) => {
+      const invited = lead.invitedVendors?.[0];
+      if (!invited) return;
+
+      if (invited.responseStatus === "accepted") dcResponded++;
+
+      // FIX: Proper cancellation counting logic
+      if (invited.responseStatus === "customer_cancelled") {
+        const slot = moment(
+          `${lead.selectedSlot.slotDate} ${lead.selectedSlot.slotTime}`,
+          "YYYY-MM-DD hh:mm A"
+        );
+        const cancelled = moment(invited.cancelledAt);
+        const diff = slot.diff(cancelled, "hours", true);
+
+        if (diff >= 0 && diff <= 3) {
+          dcCancelled++;
+        }
+      }
+    });
+
+    const dcTotalGsv = calcGSV(dcLeads);
+    const dcAvgGsv = dcLeads.length ? dcTotalGsv / dcLeads.length : 0;
+
+    /* -----------------------------
+        7. RATINGS & STRIKES (currently forced 0)
+    ----------------------------- */
+    const hpAverageRating = 0;
+    const hpStrikes = 0;
+    const dcAverageRating = 0;
+    const dcStrikes = 0;
+
+    /* -----------------------------
+        8. VENDOR-WISE METRICS
+    ----------------------------- */
+    const getVendorStats = (arr, type) => {
+      const map = {};
+
+      arr.forEach((lead) => {
+        const prof = lead.assignedProfessional;
+        if (!prof) return;
+
+        const id = prof.professionalId;
+        if (!map[id]) {
+          map[id] = {
+            vendorId: id,
+            name: prof.name,
+            totalLeads: 0,
+            responded: 0,
+            survey: 0,
+            hired: 0,
+            cancelled: 0,
+            gsv: 0,
+            ratingSum: 0,
+            ratingCount: 0,
+            strikes: 0,
+          };
+        }
+
+        const v = map[id];
+
+        v.totalLeads++;
+
+        if (prof.acceptedDate) v.responded++;
+        if (prof.startedDate) v.survey++;
+
+        const status = normalize(lead.bookingDetails?.status);
+        const isHired =
+          status === "hired" ||
+          status === "project ongoing" ||
+          lead.bookingDetails?.firstPayment?.status === "paid";
+
+        if (isHired) v.hired++;
+
+        if (type === "dc") {
+          const invited = lead.invitedVendors?.find(
+            (i) => String(i.professionalId) === String(id)
+          );
+          if (invited?.responseStatus === "customer_cancelled") {
+            const slot = moment(
+              `${lead.selectedSlot.slotDate} ${lead.selectedSlot.slotTime}`,
+              "YYYY-MM-DD hh:mm A"
+            );
+            const cancelled = moment(invited.cancelledAt);
+            const diff = slot.diff(cancelled, "hours", true);
+
+            if (diff >= 0 && diff <= 3) {
+              v.cancelled++;
+            }
+          }
+        }
+
+        lead.service?.forEach((s) => {
+          v.gsv += (s.price || 0) * (s.quantity || 1);
+        });
+      });
+
+      return Object.values(map).map((v) => ({
+        ...v,
+        responseRate: v.totalLeads
+          ? ((v.responded / v.totalLeads) * 100).toFixed(2)
+          : "0",
+        surveyRate: v.responded
+          ? ((v.survey / v.responded) * 100).toFixed(2)
+          : "0",
+        hiringRate: v.responded
+          ? ((v.hired / v.responded) * 100).toFixed(2)
+          : "0",
+        cancellationRate: v.responded
+          ? ((v.cancelled / v.responded) * 100).toFixed(2)
+          : "0",
+        avgRating: 0,
+        strikes: 0,
+      }));
+    };
+
+    const hpVendorStats = getVendorStats(hpLeads, "hp");
+    const dcVendorStats = getVendorStats(dcLeads, "dc");
+
+    /* -----------------------------
+        9. SEND RESPONSE - WITH FIXED PERCENTAGES
+    ----------------------------- */
+    return res.status(200).json({
+      housePainting: {
+        totalLeads: hpLeads.length,
+        surveyPercentage: hpResponded ? Math.min((hpSurvey / hpResponded) * 100, 100) : 0,
+        hiringPercentage: hpResponded ? Math.min((hpHiring / hpResponded) * 100, 100) : 0,
+        averageGsv: hpAvgGsv,
+        averageRating: hpAverageRating,
+        strikes: hpStrikes,
+        cancellationPercentage: 0, // House painting doesn't have cancellation in your current logic
+      },
+
+      deepCleaning: {
+        totalLeads: dcLeads.length,
+        responsePercentage: dcLeads.length
+          ? Math.min((dcResponded / dcLeads.length) * 100, 100)
+          : 0,
+        cancellationPercentage: dcResponded
+          ? Math.min((dcCancelled / dcResponded) * 100, 100)
+          : 0,
+        averageGsv: dcAvgGsv,
+        averageRating: dcAverageRating,
+        strikes: dcStrikes,
+      },
+
+      vendors: {
+        housePainting: hpVendorStats,
+        deepCleaning: dcVendorStats,
+      },
+    });
+  } catch (err) {
+    console.error("Performance error:", err);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 
 exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
   try {

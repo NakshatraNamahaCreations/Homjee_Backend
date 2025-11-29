@@ -21,6 +21,7 @@ router.use("/kpi-parameters", kpiParametersRoutes);
 
 router.use("/user", userRoutes);
 router.use("/bookings", bookingRoutes);
+
 router.use("/service", serviceConfigRoutes);
 router.use("/vendor", vendorRoute);
 router.use("/package", packageRoute);
