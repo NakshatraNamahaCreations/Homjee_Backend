@@ -2427,11 +2427,12 @@ exports.markPendingHiring = async (req, res) => {
       url: paymentLinkUrl,
       isActive: true,
       providerRef: "razorpay_order_xyz", // fill if you have gateway id
+      installmentStage: "first"
     };
 
     console.log("paymentLinkUrl", paymentLinkUrl);
 
-    
+
     if (process.env.NODE_ENV !== "production") {
       booking.assignedProfessional.hiring.autoCancelAt = new Date(
         Date.now() + 2 * 60 * 1000
@@ -2688,6 +2689,7 @@ exports.requestSecondPayment = async (req, res) => {
       url: paymentLinkUrl,
       isActive: true,
       providerRef: "razorpay_order_xyz",
+      installmentStage: "second"
     };
 
     // 🏷 Update legacy paymentStatus for compatibility (optional)
@@ -2878,6 +2880,7 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
       url: paymentLinkUrl,
       isActive: true,
       providerRef: "razorpay_order_xyz",
+      installmentStage: "final"
     };
 
     // ✅ Update status and payment status

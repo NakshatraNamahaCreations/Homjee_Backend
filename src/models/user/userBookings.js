@@ -167,6 +167,7 @@ const bookingDetailsSchema = new mongoose.Schema(
       url: String,
       isActive: { type: Boolean, default: true },
       providerRef: String,
+      installmentStage: { type: String, }
     },
     paymentStatus: {
       type: String,
