@@ -82,9 +82,8 @@ const PaymentMilestoneSchema = new mongoose.Schema(
     method: {
       type: String,
       enum: ["None", "Cash", "Card", "UPI", "Wallet"],
-      default: "None"
+      default: "None",
     },
-
   },
   { _id: false }
 );
@@ -154,12 +153,11 @@ const bookingDetailsSchema = new mongoose.Schema(
     paidAmount: { type: Number, default: 0 }, // total paid so far
     amountYetToPay: { type: Number, default: 0 },
     bookingAmount: Number, // initial payment from website
-
+    refundAmount: Number, // New field
     // 💳 Payment method (last used)
     paymentMethod: {
       type: String,
       enum: ["Cash", "Card", "UPI", "Wallet", "None"],
-
     },
 
     // 🔗 Payment Link
@@ -167,7 +165,7 @@ const bookingDetailsSchema = new mongoose.Schema(
       url: String,
       isActive: { type: Boolean, default: true },
       providerRef: String,
-      installmentStage: { type: String, }
+      installmentStage: { type: String },
     },
     paymentStatus: {
       type: String,
@@ -310,8 +308,8 @@ const userBookingSchema = new mongoose.Schema({
   },
   selectedSlot: selectedSlot,
   isEnquiry: Boolean,
-  isRead: { type: Boolean, default: false },//New Field
-  isDismmised: { type: Boolean, default: false },//New Field
+  isRead: { type: Boolean, default: false }, //New Field
+  isDismmised: { type: Boolean, default: false }, //New Field
   invitedVendors: [invitedVendorSchema],
   formName: { type: String, required: true }, // Add formName
   createdDate: { type: Date, default: Date.now },

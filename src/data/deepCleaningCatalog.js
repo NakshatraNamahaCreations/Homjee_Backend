@@ -3,7 +3,7 @@
 
 const CATALOG = [
   {
-    category: "Furnished apartment",
+    category: "Furnished Apartment",
     subcategories: [
       { subcategory: "1 BHK Cleaning", services: ["Classic", "Premium", "Platinum"] },
       { subcategory: "2 BHK Cleaning", services: ["Classic", "Premium", "Platinum"] },
@@ -13,7 +13,7 @@ const CATALOG = [
     ]
   },
   {
-    category: "Unfurnished apartment",
+    category: "Unfurnished Apartment",
     subcategories: [
       { subcategory: "1 BHK Cleaning", services: ["Classic", "Premium"] },
       { subcategory: "2 BHK Cleaning", services: ["Classic", "Premium"] },
@@ -23,7 +23,7 @@ const CATALOG = [
     ]
   },
   {
-    category: "Book by room",
+    category: "Book By Room",
     subcategories: [
       { subcategory: "Bedroom Cleaning", services: ["Unfurnished", "Furnished"] },
       { subcategory: "Living Room Cleaning", services: ["Unfurnished", "Furnished"] },
@@ -33,7 +33,7 @@ const CATALOG = [
     ]
   },
   {
-    category: "Furnished bungalow/duplex",
+    category: "Furnished Bungalow/Duplex",
     subcategories: [
       { subcategory: "<1200 sqft Bungalow Cleaning", services: ["Classic", "Premium", "Platinum"] },
       { subcategory: "1200-2000 sqft Bungalow Cleaning", services: ["Classic", "Premium", "Platinum"] },
