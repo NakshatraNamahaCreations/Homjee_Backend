@@ -196,7 +196,7 @@
 
 
 // controllers/perfomance/kpiController.js
-const KPI = require("../../models/perfomance/KPIParameters");
+const KPI = require("../../models/perfomance/kpiparameters");
 
 // Default range template
 const defaultRange = { a: 0, b: 0, c: 0, d: 0, e: 0 };
