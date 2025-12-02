@@ -300,16 +300,21 @@ exports.createBooking = async (req, res) => {
 
     if (serviceType === "deep_cleaning") {
       // Find package booking amounts by cart item name
-      const result = service.map((cartItem) => {
-        const pkg = packageMaster.find((p) => p.name === cartItem.serviceName);
-        return pkg ? pkg.bookingAmount : 0;
-      });
-      bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
+      // const result = service.map((cartItem) => {
+      //   const pkg = packageMaster.find((p) => p.name === cartItem.serviceName);
+      //   return pkg ? pkg.bookingAmount : 0;
+      // });
+      // const result = service.reduce((acc, val) => acc + val.price * (val.quantity || 1), 0)
+
+
+      // bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
       originalTotalAmount = service.reduce(
         (sum, itm) => sum + Number(itm.price) * (itm.quantity || 1),
         0
       );
-      paidAmount = bookingAmount; // Or assign from bookingDetails if user paid already
+      bookingAmount = Math.round(originalTotalAmount * 0.2);  //originalTotalAmount    // 20%
+
+      paidAmount = bookingAmount; // Math.round(originalTotalAmount * 0.2); // Or assign from bookingDetails if user paid already
       amountYetToPay = originalTotalAmount - paidAmount;
 
       firstPayment = {

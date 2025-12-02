@@ -275,21 +275,21 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
     // ---- preserve additional services from prev line ----
     const preservedAdditional = Array.isArray(prevLine?.additionalServices)
       ? prevLine.additionalServices.map((s) => ({
-          serviceType: String(s.serviceType || ""),
-          materialId: s.materialId != null ? String(s.materialId) : undefined,
-          materialName: String(s.materialName || s.customName || ""),
-          surfaceType: String(s.surfaceType || ""),
-          withPaint: !!s.withPaint,
-          areaSqft: Number(s.areaSqft || 0),
-          unitPrice: Number(s.unitPrice || 0),
-          total: Number(
-            Number(
-              s.total || Number(s.areaSqft || 0) * Number(s.unitPrice || 0)
-            ).toFixed(2)
-          ),
-          customName: String(s.customName || ""),
-          customNote: String(s.customNote || ""),
-        }))
+        serviceType: String(s.serviceType || ""),
+        materialId: s.materialId != null ? String(s.materialId) : undefined,
+        materialName: String(s.materialName || s.customName || ""),
+        surfaceType: String(s.surfaceType || ""),
+        withPaint: !!s.withPaint,
+        areaSqft: Number(s.areaSqft || 0),
+        unitPrice: Number(s.unitPrice || 0),
+        total: Number(
+          Number(
+            s.total || Number(s.areaSqft || 0) * Number(s.unitPrice || 0)
+          ).toFixed(2)
+        ),
+        customName: String(s.customName || ""),
+        customNote: String(s.customNote || ""),
+      }))
       : [];
 
     const preservedAdditionalTotal = preservedAdditional.reduce(
@@ -750,7 +750,7 @@ exports.removeAdditionalService = async (req, res) => {
       eqNum(s.areaSqft, where.areaSqft) &&
       !!s.withPaint === !!where.withPaint &&
       norm(s.materialName || s.customName || "") ===
-        norm(where.materialName || where.customName || "");
+      norm(where.materialName || where.customName || "");
 
     const i = list.findIndex(same);
     if (i < 0) {
@@ -1037,6 +1037,7 @@ exports.finalizeQuote = async (req, res) => {
     const updatePrice = {};
     if (q.totals?.grandTotal) {
       updatePrice["bookingDetails.amountYetToPay"] = q.totals.grandTotal;
+      updatePrice["bookingDetails.originalTotalAmount"] = q.totals.grandTotal;
       updatePrice["bookingDetails.bookingAmount"] = q.totals.grandTotal; // ✅ ADD THIS
     }
     await userBookings.findByIdAndUpdate(
