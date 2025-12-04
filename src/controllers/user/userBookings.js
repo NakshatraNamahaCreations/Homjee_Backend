@@ -133,8 +133,8 @@ function computeFinalTotal(details) {
     (details.priceApprovalStatus
       ? "approved"
       : details.hasPriceUpdated
-      ? "pending"
-      : "approved");
+        ? "pending"
+        : "approved");
 
   if (state === "approved" && Number.isFinite(details.newTotal)) {
     return Number(details.newTotal);
@@ -176,9 +176,9 @@ function ensureFirstMilestone(details) {
     // but in your flow you want ORIGINAL for the 40% hurdle:
     const base = Number(
       details.bookingAmount ||
-        details.finalTotal ||
-        details.currentTotalAmount ||
-        0
+      details.finalTotal ||
+      details.currentTotalAmount ||
+      0
     );
     fm.baseTotal = base;
     fm.requiredAmount = roundMoney(base * 0.4);
@@ -357,7 +357,9 @@ exports.createBooking = async (req, res) => {
       paymentStatus: paidAmount > 0 ? "Partial Payment" : "Unpaid",
       otp: generateOTP(),
       siteVisitCharges,
-      paymentLink: { isActive: false },
+      paymentLink: {
+        isActive: false
+      },
       firstPayment,
       finalPayment,
       // add secondPayment only for house painting
@@ -369,13 +371,14 @@ exports.createBooking = async (req, res) => {
       serviceType === "house_painting"
         ? []
         : [
-            {
-              at: new Date(),
-              method: bookingDetailsConfig.paymentMethod,
-              amount: paidAmount,
-              providerRef: "razorpay_order_xyz",
-            },
-          ];
+          {
+            at: new Date(),
+            method: bookingDetailsConfig.paymentMethod,
+            amount: paidAmount,
+            providerRef: "razorpay_order_xyz",
+
+          },
+        ];
 
     // 📦 Create booking
     const booking = new UserBooking({
@@ -396,10 +399,10 @@ exports.createBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -423,9 +426,31 @@ exports.createBooking = async (req, res) => {
 
     await booking.save();
 
+    // now generate and store payment link
+    const pay_type = "auto-pay";
+    const paymentLinkUrl = `${redirectionUrl}${booking._id}/${Date.now()}/${pay_type}`;
+
+    booking.bookingDetails.paymentLink = {
+      url: paymentLinkUrl,
+      isActive: true,
+      providerRef: "razorpay_order_xyz",
+    };
+    const updatedBooking = await UserBooking.findByIdAndUpdate(
+      booking._id,
+      {
+        $set: {
+          "bookingDetails.paymentLink": {
+            url: paymentLinkUrl,
+            isActive: true,
+            providerRef: "razorpay_order_xyz",
+          },
+        },
+      },
+      { new: true }
+    );
     res.status(201).json({
       message: "Booking created successfully",
-      bookingId: booking._id,
+      bookingId: updatedBooking._id,
       serviceType,
       booking,
     });
@@ -697,10 +722,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -3502,7 +3527,7 @@ exports.updateUserBooking = async (req, res) => {
     // -----------------------------------------------------------
     // OTHER FIELDS
     // -----------------------------------------------------------
-  
+
     if (formName) booking.formName = formName;
 
     await booking.save();
