@@ -7,8 +7,8 @@ const {
 
 const router = express.Router();
 
-router.post("/create", createManualPayment);
+router.post("/", createManualPayment);
 router.put("/mark-paid/:id", markManualPaymentPaid);
-router.get("/list", getManualPayments);
+router.get("/", getManualPayments);
 
 module.exports = router;

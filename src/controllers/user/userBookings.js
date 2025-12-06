@@ -133,8 +133,8 @@ function computeFinalTotal(details) {
     (details.priceApprovalStatus
       ? "approved"
       : details.hasPriceUpdated
-        ? "pending"
-        : "approved");
+      ? "pending"
+      : "approved");
 
   if (state === "approved" && Number.isFinite(details.newTotal)) {
     return Number(details.newTotal);
@@ -176,9 +176,9 @@ function ensureFirstMilestone(details) {
     // but in your flow you want ORIGINAL for the 40% hurdle:
     const base = Number(
       details.bookingAmount ||
-      details.finalTotal ||
-      details.currentTotalAmount ||
-      0
+        details.finalTotal ||
+        details.currentTotalAmount ||
+        0
     );
     fm.baseTotal = base;
     fm.requiredAmount = roundMoney(base * 0.4);
@@ -306,13 +306,12 @@ exports.createBooking = async (req, res) => {
       // });
       // const result = service.reduce((acc, val) => acc + val.price * (val.quantity || 1), 0)
 
-
       // bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
       originalTotalAmount = service.reduce(
         (sum, itm) => sum + Number(itm.price) * (itm.quantity || 1),
         0
       );
-      bookingAmount = Math.round(originalTotalAmount * 0.2);  //originalTotalAmount    // 20%
+      bookingAmount = Math.round(originalTotalAmount * 0.2); //originalTotalAmount    // 20%
 
       paidAmount = bookingAmount; // Math.round(originalTotalAmount * 0.2); // Or assign from bookingDetails if user paid already
       amountYetToPay = originalTotalAmount - paidAmount;
@@ -358,7 +357,7 @@ exports.createBooking = async (req, res) => {
       otp: generateOTP(),
       siteVisitCharges,
       paymentLink: {
-        isActive: false
+        isActive: false,
       },
       firstPayment,
       finalPayment,
@@ -371,14 +370,13 @@ exports.createBooking = async (req, res) => {
       serviceType === "house_painting"
         ? []
         : [
-          {
-            at: new Date(),
-            method: bookingDetailsConfig.paymentMethod,
-            amount: paidAmount,
-            providerRef: "razorpay_order_xyz",
-
-          },
-        ];
+            {
+              at: new Date(),
+              method: bookingDetailsConfig.paymentMethod,
+              amount: paidAmount,
+              providerRef: "razorpay_order_xyz",
+            },
+          ];
 
     // 📦 Create booking
     const booking = new UserBooking({
@@ -399,10 +397,10 @@ exports.createBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -428,7 +426,9 @@ exports.createBooking = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id}/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -460,13 +460,301 @@ exports.createBooking = async (req, res) => {
   }
 };
 
-// Assumes these are already required at top of file:
-// const UserBooking = require("../../models/user/userBookings");
-// const DeepCleaningPackageModel = require("../../models/products/DeepCleaningPackage");
-// const generateBookingId = ... (function in your file)
-// const generateOTP = ... (function in your file)
-// const detectServiceType = ... (function in your file)
+// exports.adminCreateBooking = async (req, res) => {
+//   try {
+//     const {
+//       customer,
+//       service,
+//       bookingDetails = {},
+//       assignedProfessional,
+//       address,
+//       selectedSlot,
+//       formName,
+//       isEnquiry,
+//     } = req.body;
 
+//     // ***************************************
+//     // 🟢 CHECK USER EXISTS OR CREATE NEW USER
+//     // ***************************************
+//     let checkUser = await userSchema.findOne({
+//       mobileNumber: customer.phone,
+//     });
+
+//     if (!checkUser) {
+//       // Create new user
+//       checkUser = new userSchema({
+//         userName: customer.name,
+//         mobileNumber: customer.phone,
+//         savedAddress: {
+//           uniqueCode: `ADDR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+//           address: address.streetArea,
+//           houseNumber: address.houseFlatNumber,
+//           landmark: address.landMark,
+//           latitude: address.location.coordinates[1],
+//           longitude: address.location.coordinates[0],
+//           city: address.city,
+//         },
+//       });
+
+//       await checkUser.save();
+//     }
+
+//     // -----------------------
+//     // Basic validations
+//     // -----------------------
+//     if (!service || !Array.isArray(service) || service.length === 0) {
+//       return res.status(400).json({ message: "Service list cannot be empty." });
+//     }
+
+//     if (
+//       !address ||
+//       !address.location ||
+//       !Array.isArray(address.location.coordinates) ||
+//       address.location.coordinates.length !== 2
+//     ) {
+//       return res.status(400).json({ message: "Invalid address coordinates." });
+//     }
+
+//     // detect service type
+//     const serviceType = detectServiceType(formName, service);
+
+//     // bookingAmount coming from admin UI (Option A expects siteVisitCharges separate)
+//     // Use let because we may adjust bookingAmount for house painting case
+//     // Use client-provided values whenever present (admin decides these)
+//     let bookingAmount = Number(bookingDetails?.bookingAmount ?? 0);
+//     // Accept paidAmount from payload — admin may pass 0 or existing paid values
+//     let paidAmount = Number(bookingDetails?.paidAmount ?? 0);
+//     // originalTotalAmount must come from client/frontend. Do NOT compute it server-side.
+//     // Fall back to finalTotal or 0 if client didn't provide it explicitly.
+//     let originalTotalAmount = Number(
+//       bookingDetails?.originalTotalAmount ?? bookingDetails?.finalTotal ?? 0
+//     );
+//     let finalTotal =
+//       Number(bookingDetails?.finalTotal ?? 0) || originalTotalAmount;
+//     let amountYetToPay = 0;
+//     let siteVisitCharges = 0;
+//     // When true, skip any updates to pricing/payment fields for this request
+//     let skipPriceUpdate = false;
+
+//     let firstPayment = {};
+//     let secondPayment = {};
+//     let finalPayment = {};
+
+//     // -----------------------
+//     // Deep cleaning logic
+//     // -----------------------
+//     if (serviceType === "deep_cleaning") {
+//       if (isEnquiry && bookingAmount > 0) {
+//         // ADMIN ENQUIRY rules (Deep Cleaning)
+//         // Use bookingAmount/finalTotal/paidAmount provided by client — do not overwrite
+//         amountYetToPay = Math.max(0, finalTotal - bookingAmount);
+
+//         firstPayment = {
+//           status: paidAmount > 0 ? "paid" : "pending",
+//           amount: bookingAmount,
+//           paidAt: paidAmount > 0 ? new Date() : null,
+//           method:
+//             paidAmount > 0
+//               ? bookingDetails?.paymentMethod || "None"
+//               : undefined,
+//         };
+
+//         finalPayment = {
+//           status: amountYetToPay > 0 ? "pending" : "paid",
+//           amount: Math.max(0, finalTotal - bookingAmount),
+//         };
+//       } else {
+//         // Normal (customer-like) behavior: derive booking amount from package master
+//         // const packageMaster = await DeepCleaningPackageModel.find({}).lean();
+//         // const result = service.map((cartItem) => {
+//         //   const pkg = packageMaster.find((p) => p.name === cartItem.serviceName);
+//         //   return pkg ? Number(pkg.bookingAmount || 0) : 0;
+//         // });
+
+//         // bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
+//         // Non-enquiry path: use provided paidAmount (if any) — otherwise treat bookingAmount as paid
+//         paidAmount = Number(bookingDetails?.paidAmount ?? bookingAmount);
+//         // If client hasn't provided finalTotal, fallback already handled above
+//         amountYetToPay = Math.max(0, finalTotal - paidAmount);
+
+//         firstPayment = {
+//           status: paidAmount > 0 ? "paid" : "No Payment",
+//           amount: paidAmount,
+//           paidAt: paidAmount > 0 ? new Date() : null,
+//           method:
+//             paidAmount > 0 ? bookingDetails?.paymentMethod || "None" : "None",
+//         };
+
+//         finalPayment = {
+//           status: amountYetToPay > 0 ? "pending" : "paid",
+//           amount: Math.max(0, finalTotal - paidAmount),
+//         };
+//       }
+//     }
+
+//     // -----------------------
+//     // House painting logic (Option A)
+//     // -----------------------
+//     if (serviceType === "house_painting") {
+//       // As per Option A: admin passes bookingAmount which we treat as siteVisitCharges
+//       siteVisitCharges = Number(bookingDetails?.bookingAmount || 0);
+
+//       if (isEnquiry && siteVisitCharges > 0) {
+//         // ADMIN ENQUIRY (Option A): store siteVisitCharges separately,
+//         // bookingAmount and payment values should be 0
+//         bookingAmount = 0;
+//         // For house painting enquiries we keep paidAmount 0 as per requirement
+//         paidAmount = 0;
+//         originalTotalAmount = 0;
+//         finalTotal = 0;
+//         amountYetToPay = 0;
+
+//         firstPayment = { status: "pending", amount: 0 };
+//         secondPayment = { status: "pending", amount: 0 };
+//         finalPayment = { status: "pending", amount: 0 };
+//       } else {
+//         // Normal customer-style booking for site visit: bookingAmount stays 0,
+//         // paidAmount equals siteVisitCharges (if your flow collects it)
+//         bookingAmount = 0;
+//         // For house painting non-enquiry admin flow we currently do not accept paid amount here (keep 0)
+//         paidAmount = 0;
+//         originalTotalAmount = 0;
+//         finalTotal = 0;
+//         amountYetToPay = 0;
+
+//         firstPayment = { status: "No Payment", amount: 0 };
+//         secondPayment = { status: "pending", amount: 0 };
+//         finalPayment = { status: "pending", amount: 0 };
+//       }
+//     }
+
+//     // -----------------------
+//     // Payment link and bookingId
+//     // -----------------------
+//     const bookingId = generateBookingId();
+
+//     let paymentLink = { isActive: false };
+//     if (bookingAmount > 0) {
+//       const paymentLinkUrl = `https://pay.example.com/${bookingId}-${Date.now()}`;
+//       paymentLink = {
+//         url: paymentLinkUrl,
+//         isActive: true,
+//         providerRef: "razorpay_order_xyz", // optional
+//       };
+//     }
+
+//     // -----------------------
+//     // Build bookingDetails config
+//     // -----------------------
+//     const bookingDetailsConfig = {
+//       booking_id: bookingId,
+//       bookingDate: bookingDetails?.bookingDate
+//         ? new Date(bookingDetails.bookingDate)
+//         : new Date(),
+//       bookingTime: new Date().toLocaleTimeString([], {
+//         hour: "2-digit",
+//         minute: "2-digit",
+//         hour12: true,
+//       }),
+//       status: "Pending",
+//       bookingAmount,
+//       originalTotalAmount,
+//       finalTotal:
+//         finalTotal === 0 && serviceType === "deep_cleaning"
+//           ? originalTotalAmount
+//           : finalTotal,
+//       paidAmount,
+//       amountYetToPay,
+//       paymentMethod: bookingDetails?.paymentMethod || "Cash",
+//       paymentStatus: "Unpaid",
+//       otp: generateOTP(),
+//       siteVisitCharges,
+//       firstPayment,
+//       secondPayment,
+//       finalPayment,
+//       paymentLink,
+//     };
+
+//     // -----------------------
+//     // Payments array: only add actual payment entries when not an enquiry and there is a paidAmount
+//     // -----------------------
+//     let payments = [];
+//     if (!isEnquiry && paidAmount > 0) {
+//       payments.push({
+//         at: new Date(),
+//         method: bookingDetailsConfig.paymentMethod,
+//         amount: paidAmount,
+//         providerRef: "razorpay_order_xyz",
+//       });
+//     }
+
+//     // -----------------------
+//     // Create booking object
+//     // -----------------------
+//     const booking = new UserBooking({
+//       // customer: {
+//       //   customerId: customer?.customerId,
+//       //   name: customer?.name,
+//       //   phone: customer?.phone,
+//       // },
+
+//       customer: {
+//         customerId: checkUser._id,
+//         name: checkUser.userName,
+//         phone: checkUser.mobileNumber,
+//       },
+//       service: service.map((s) => ({
+//         category: s.category,
+//         subCategory: s.subCategory,
+//         serviceName: s.serviceName,
+//         price: Number(s.price || 0),
+//         quantity: Number(s.quantity || 1),
+//         teamMembersRequired: Number(s.teamMembersRequired || 0),
+//       })),
+//       serviceType,
+//       bookingDetails: bookingDetailsConfig,
+//       assignedProfessional: assignedProfessional
+//         ? {
+//           professionalId: assignedProfessional.professionalId,
+//           name: assignedProfessional.name,
+//           phone: assignedProfessional.phone,
+//         }
+//         : undefined,
+//       address: {
+//         houseFlatNumber: address?.houseFlatNumber || "",
+//         streetArea: address?.streetArea || "",
+//         landMark: address?.landMark || "",
+//         city: address?.city || "",
+//         location: {
+//           type: "Point",
+//           coordinates: address.location.coordinates,
+//         },
+//       },
+//       selectedSlot: {
+//         slotDate:
+//           selectedSlot?.slotDate || new Date().toISOString().slice(0, 10),
+//         slotTime: selectedSlot?.slotTime || "10:00 AM",
+//       },
+//       payments,
+//       isEnquiry: Boolean(isEnquiry),
+//       formName: formName || "admin panel",
+//       createdDate: new Date(),
+//     });
+
+//     await booking.save();
+
+//     return res.status(201).json({
+//       message: "Admin booking created successfully",
+//       bookingId: booking._id,
+//       booking,
+//     });
+//   } catch (error) {
+//     console.error("Admin Create Booking Error:", error);
+//     return res
+//       .status(500)
+//       .json({ message: "Server error", error: error.message });
+//   }
+// };
 exports.adminCreateBooking = async (req, res) => {
   try {
     const {
@@ -488,7 +776,6 @@ exports.adminCreateBooking = async (req, res) => {
     });
 
     if (!checkUser) {
-      // Create new user
       checkUser = new userSchema({
         userName: customer.name,
         mobileNumber: customer.phone,
@@ -525,23 +812,17 @@ exports.adminCreateBooking = async (req, res) => {
     // detect service type
     const serviceType = detectServiceType(formName, service);
 
-    // bookingAmount coming from admin UI (Option A expects siteVisitCharges separate)
-    // Use let because we may adjust bookingAmount for house painting case
-    // Use client-provided values whenever present (admin decides these)
+    // Extract fields & default values
     let bookingAmount = Number(bookingDetails?.bookingAmount ?? 0);
-    // Accept paidAmount from payload — admin may pass 0 or existing paid values
     let paidAmount = Number(bookingDetails?.paidAmount ?? 0);
-    // originalTotalAmount must come from client/frontend. Do NOT compute it server-side.
-    // Fall back to finalTotal or 0 if client didn't provide it explicitly.
     let originalTotalAmount = Number(
       bookingDetails?.originalTotalAmount ?? bookingDetails?.finalTotal ?? 0
     );
     let finalTotal =
       Number(bookingDetails?.finalTotal ?? 0) || originalTotalAmount;
+
     let amountYetToPay = 0;
     let siteVisitCharges = 0;
-    // When true, skip any updates to pricing/payment fields for this request
-    let skipPriceUpdate = false;
 
     let firstPayment = {};
     let secondPayment = {};
@@ -552,8 +833,6 @@ exports.adminCreateBooking = async (req, res) => {
     // -----------------------
     if (serviceType === "deep_cleaning") {
       if (isEnquiry && bookingAmount > 0) {
-        // ADMIN ENQUIRY rules (Deep Cleaning)
-        // Use bookingAmount/finalTotal/paidAmount provided by client — do not overwrite
         amountYetToPay = Math.max(0, finalTotal - bookingAmount);
 
         firstPayment = {
@@ -568,20 +847,10 @@ exports.adminCreateBooking = async (req, res) => {
 
         finalPayment = {
           status: amountYetToPay > 0 ? "pending" : "paid",
-          amount: Math.max(0, finalTotal - bookingAmount),
+          amount: amountYetToPay,
         };
       } else {
-        // Normal (customer-like) behavior: derive booking amount from package master
-        // const packageMaster = await DeepCleaningPackageModel.find({}).lean();
-        // const result = service.map((cartItem) => {
-        //   const pkg = packageMaster.find((p) => p.name === cartItem.serviceName);
-        //   return pkg ? Number(pkg.bookingAmount || 0) : 0;
-        // });
-
-        // bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
-        // Non-enquiry path: use provided paidAmount (if any) — otherwise treat bookingAmount as paid
         paidAmount = Number(bookingDetails?.paidAmount ?? bookingAmount);
-        // If client hasn't provided finalTotal, fallback already handled above
         amountYetToPay = Math.max(0, finalTotal - paidAmount);
 
         firstPayment = {
@@ -594,23 +863,19 @@ exports.adminCreateBooking = async (req, res) => {
 
         finalPayment = {
           status: amountYetToPay > 0 ? "pending" : "paid",
-          amount: Math.max(0, finalTotal - paidAmount),
+          amount: amountYetToPay,
         };
       }
     }
 
     // -----------------------
-    // House painting logic (Option A)
+    // House painting logic
     // -----------------------
     if (serviceType === "house_painting") {
-      // As per Option A: admin passes bookingAmount which we treat as siteVisitCharges
       siteVisitCharges = Number(bookingDetails?.bookingAmount || 0);
 
       if (isEnquiry && siteVisitCharges > 0) {
-        // ADMIN ENQUIRY (Option A): store siteVisitCharges separately,
-        // bookingAmount and payment values should be 0
         bookingAmount = 0;
-        // For house painting enquiries we keep paidAmount 0 as per requirement
         paidAmount = 0;
         originalTotalAmount = 0;
         finalTotal = 0;
@@ -620,10 +885,7 @@ exports.adminCreateBooking = async (req, res) => {
         secondPayment = { status: "pending", amount: 0 };
         finalPayment = { status: "pending", amount: 0 };
       } else {
-        // Normal customer-style booking for site visit: bookingAmount stays 0,
-        // paidAmount equals siteVisitCharges (if your flow collects it)
         bookingAmount = 0;
-        // For house painting non-enquiry admin flow we currently do not accept paid amount here (keep 0)
         paidAmount = 0;
         originalTotalAmount = 0;
         finalTotal = 0;
@@ -636,19 +898,14 @@ exports.adminCreateBooking = async (req, res) => {
     }
 
     // -----------------------
-    // Payment link and bookingId
+    // Booking ID (display)
     // -----------------------
     const bookingId = generateBookingId();
 
-    let paymentLink = { isActive: false };
-    if (bookingAmount > 0) {
-      const paymentLinkUrl = `https://pay.example.com/${bookingId}-${Date.now()}`;
-      paymentLink = {
-        url: paymentLinkUrl,
-        isActive: true,
-        providerRef: "razorpay_order_xyz", // optional
-      };
-    }
+    // -----------------------
+    // Payment link (added after save)
+    // -----------------------
+    let paymentLink = {}; // 🔥 Keep empty until booking is saved
 
     // -----------------------
     // Build bookingDetails config
@@ -679,11 +936,11 @@ exports.adminCreateBooking = async (req, res) => {
       firstPayment,
       secondPayment,
       finalPayment,
-      paymentLink,
+      paymentLink, // initially empty
     };
 
     // -----------------------
-    // Payments array: only add actual payment entries when not an enquiry and there is a paidAmount
+    // Payments array
     // -----------------------
     let payments = [];
     if (!isEnquiry && paidAmount > 0) {
@@ -699,12 +956,6 @@ exports.adminCreateBooking = async (req, res) => {
     // Create booking object
     // -----------------------
     const booking = new UserBooking({
-      // customer: {
-      //   customerId: customer?.customerId,
-      //   name: customer?.name,
-      //   phone: customer?.phone,
-      // },
-
       customer: {
         customerId: checkUser._id,
         name: checkUser.userName,
@@ -722,10 +973,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -747,6 +998,25 @@ exports.adminCreateBooking = async (req, res) => {
       formName: formName || "admin panel",
       createdDate: new Date(),
     });
+
+    // Save booking
+    await booking.save();
+
+    // --------------------------------------------
+    // 🔥 CREATE REAL PAYMENT LINK AFTER SAVE
+    // --------------------------------------------
+    const redirectionUrl = "http://localhost:5173/checkout/payment";
+    const pay_type = "auto-pay";
+
+    const paymentLinkUrl = `${redirectionUrl}/${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
+
+    booking.bookingDetails.paymentLink = {
+      url: paymentLinkUrl,
+      isActive: true,
+      providerRef: "razorpay_order_xyz",
+    };
 
     await booking.save();
 
@@ -2359,9 +2629,11 @@ exports.markPendingHiring = async (req, res) => {
     );
 
     d.finalTotal = approvedTotal > 0 ? approvedTotal : Number(totalAmount || 0);
+   
 
     // Keep mirror in sync
     d.currentTotalAmount = d.finalTotal;
+    // booking.service[0].price = finalTotal;  added by sonali
 
     // ✅ Calculate 40% for first installment
     const firstInstallment = Math.round(d.finalTotal * 0.4);
