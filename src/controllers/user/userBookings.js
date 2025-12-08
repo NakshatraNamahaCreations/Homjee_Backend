@@ -9,9 +9,10 @@ const { unlockRelatedQuotesByHiring } = require("../../helpers/quotes");
 const DeepCleaningPackageModel = require("../../models/products/DeepCleaningPackage");
 const userSchema = require("../../models/user/userAuth");
 
-const redirectionUrl = "http://localhost:5173/checkout/payment/";
+// const redirectionUrl = "http://localhost:5173/checkout/payment/";
+const redirectionUrl = "https://websitehomjee.netlify.app/checkout/payment/";
+const vendorRatingURL = "https://websitehomjee.netlify.app/vendor-ratings";
 
-// 691dbf44b066964735737d4e check this tomorrow
 const citiesObj = {
   Bangalore: "Bengaluru",
   Pune: "Pune",
@@ -3295,6 +3296,11 @@ exports.makePayment = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Booking not found" });
 
+    const customerId = booking.customer?.customerId;
+    const vendorId = booking.assignedProfessional?.professionalId;
+    const vendorName = booking.assignedProfessional?.name;
+    const vendorPhoto = booking.assignedProfessional?.profile
+
     const serviceType = (booking.serviceType || "").toLowerCase();
     const d = booking.bookingDetails || (booking.bookingDetails = {});
 
@@ -3452,7 +3458,7 @@ exports.makePayment = async (req, res) => {
         }
       }
     }
-
+    booking.isEnquiry = false
     await booking.save();
 
     return res.json({
@@ -3466,6 +3472,7 @@ exports.makePayment = async (req, res) => {
       remainingAmount: Math.max(0, finalTotal - d.paidAmount),
       status: d.status,
       paymentStatus: d.paymentStatus,
+      ratingURL: fullyPaid ? `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}` : ""
     });
   } catch (err) {
     console.error("makePayment error:", err);

@@ -242,6 +242,7 @@ const assignedProfessionalSchema = new mongoose.Schema({
   professionalId: String,
   name: String,
   phone: String,
+  profile: String,
   acceptedDate: Date,
   acceptedTime: String,
   startedDate: Date,
