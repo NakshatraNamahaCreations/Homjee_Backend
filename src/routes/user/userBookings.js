@@ -52,7 +52,7 @@ router.post(
 
 router.get(
   "/get-confirm-bookings-by-vendorId/:professionalId",
-  bookingController.getBookingExceptPending
+  bookingController.getBookingExceptPendingAndCancelled
 );
 router.post("/start-job", bookingController.startJob);
 router.post("/complete-survey", bookingController.completeSurvey);
@@ -66,6 +66,7 @@ router.post(
   bookingController.rejectPriceChange
 );
 router.post("/update-status", bookingController.updateStatus);
+router.post("/cancel-booking/customer/website", bookingController.cancelLeadFromWebsite);
 router.post("/mark-pending-hiring", bookingController.markPendingHiring);
 router.post("/make-payment", bookingController.makePayment);
 router.post(

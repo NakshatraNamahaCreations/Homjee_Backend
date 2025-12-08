@@ -133,8 +133,8 @@ function computeFinalTotal(details) {
     (details.priceApprovalStatus
       ? "approved"
       : details.hasPriceUpdated
-      ? "pending"
-      : "approved");
+        ? "pending"
+        : "approved");
 
   if (state === "approved" && Number.isFinite(details.newTotal)) {
     return Number(details.newTotal);
@@ -176,9 +176,9 @@ function ensureFirstMilestone(details) {
     // but in your flow you want ORIGINAL for the 40% hurdle:
     const base = Number(
       details.bookingAmount ||
-        details.finalTotal ||
-        details.currentTotalAmount ||
-        0
+      details.finalTotal ||
+      details.currentTotalAmount ||
+      0
     );
     fm.baseTotal = base;
     fm.requiredAmount = roundMoney(base * 0.4);
@@ -312,6 +312,7 @@ exports.createBooking = async (req, res) => {
         0
       );
       bookingAmount = Math.round(originalTotalAmount * 0.2); //originalTotalAmount    // 20%
+      bookingAmount = Math.round(originalTotalAmount * 0.2); //originalTotalAmount    // 20%
 
       paidAmount = bookingAmount; // Math.round(originalTotalAmount * 0.2); // Or assign from bookingDetails if user paid already
       amountYetToPay = originalTotalAmount - paidAmount;
@@ -358,6 +359,7 @@ exports.createBooking = async (req, res) => {
       siteVisitCharges,
       paymentLink: {
         isActive: false,
+        isActive: false,
       },
       firstPayment,
       finalPayment,
@@ -370,13 +372,14 @@ exports.createBooking = async (req, res) => {
       serviceType === "house_painting"
         ? []
         : [
-            {
-              at: new Date(),
-              method: bookingDetailsConfig.paymentMethod,
-              amount: paidAmount,
-              providerRef: "razorpay_order_xyz",
-            },
-          ];
+          {
+            at: new Date(),
+            method: bookingDetailsConfig.paymentMethod,
+            amount: paidAmount,
+            providerRef: "razorpay_order_xyz",
+          },
+        ];
+
 
     // 📦 Create booking
     const booking = new UserBooking({
@@ -397,10 +400,10 @@ exports.createBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -426,9 +429,8 @@ exports.createBooking = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -973,10 +975,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -1008,9 +1010,8 @@ exports.adminCreateBooking = async (req, res) => {
     const redirectionUrl = "http://localhost:5173/checkout/payment";
     const pay_type = "auto-pay";
 
-    const paymentLinkUrl = `${redirectionUrl}/${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}/${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -2024,7 +2025,7 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
   }
 };
 
-exports.getBookingExceptPending = async (req, res) => {
+exports.getBookingExceptPendingAndCancelled = async (req, res) => {
   try {
     const { professionalId } = req.params;
     if (!professionalId) {
@@ -2033,7 +2034,7 @@ exports.getBookingExceptPending = async (req, res) => {
 
     const q = {
       "assignedProfessional.professionalId": professionalId,
-      "bookingDetails.status": { $ne: "Pending" },
+      "bookingDetails.status": { $ne: "Pending", $ne: "Cancelled" },
     };
 
     // Descending by date (reverse: 29, 28, 27...), then most recent created
@@ -2580,6 +2581,49 @@ exports.updateStatus = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+// cancellling by customer from the website
+// won't count this in Vendor's performance, this lead will vanish from the android app
+exports.cancelLeadFromWebsite = async (req, res) => {
+  try {
+    const { bookingId, status } = req.body;
+
+    if (!bookingId)
+      return res.status(400).json({ message: "bookingId is required" });
+
+    if (!status) return res.status(400).json({ message: "status is required" });
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) return res.status(404).json({ message: "Booking not found" });
+
+    // booking-level fields
+    const updateFields = {
+      "bookingDetails.status": status,
+      "bookingDetails.updatedAt": new Date(), // track when status changed
+    };
+
+    const updated = await UserBooking.findByIdAndUpdate(
+      bookingId,
+      { $set: updateFields },
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!updated)
+      return res
+        .status(404)
+        .json({ message: "Booking not found after update" });
+
+    res.status(200).json({
+      message: "Booking cancelled successfully",
+      booking: updated,
+    });
+  } catch (error) {
+    console.error("Error cancelling booking:", error);
+    res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
 
 exports.markPendingHiring = async (req, res) => {
   try {
@@ -2629,7 +2673,7 @@ exports.markPendingHiring = async (req, res) => {
     );
 
     d.finalTotal = approvedTotal > 0 ? approvedTotal : Number(totalAmount || 0);
-   
+
 
     // Keep mirror in sync
     d.currentTotalAmount = d.finalTotal;
@@ -3675,6 +3719,8 @@ exports.updateSelectedSlot = async (req, res) => {
 //     });
 //   }
 // };
+
+// sonali updates....
 exports.updateUserBooking = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -3684,77 +3730,49 @@ exports.updateUserBooking = async (req, res) => {
       bookingDetails,
       address,
       selectedSlot,
-      isEnquiry,
       formName,
     } = req.body;
 
     const booking = await UserBooking.findById(bookingId);
     if (!booking) {
-      return res.status(404).json({
-        success: false,
-        message: "Booking not found",
-      });
+      return res.status(404).json({ success: false, message: "Booking not found" });
     }
 
-    // -----------------------------------------------------------
-    // DETECT SERVICE TYPE (deep_cleaning / house_painting)
-    // -----------------------------------------------------------
-    const serviceType =
-      booking.serviceType || detectServiceType(formName, booking.service);
-
+    const serviceType = booking.serviceType;
     const isDeepCleaning = serviceType === "deep_cleaning";
     const isHousePainting = serviceType === "house_painting";
 
-    // -----------------------------------------------------------
-    // UPDATE CUSTOMER
-    // -----------------------------------------------------------
+    /* ---------------------------------- */
+    /* UPDATE CUSTOMER                    */
+    /* ---------------------------------- */
     if (customer) {
-      booking.customer.name = customer.name || booking.customer.name;
-      booking.customer.phone = customer.phone || booking.customer.phone;
-      booking.customer.customerId =
-        customer.customerId || booking.customer.customerId;
+      booking.customer.name = customer.name ?? booking.customer.name;
+      booking.customer.phone = customer.phone ?? booking.customer.phone;
+      booking.customer.customerId = customer.customerId ?? booking.customer.customerId;
     }
 
-    // -----------------------------------------------------------
-    // UPDATE ADDRESS
-    // -----------------------------------------------------------
+    /* ---------------------------------- */
+    /* UPDATE ADDRESS                     */
+    /* ---------------------------------- */
     if (address) {
-      booking.address.houseFlatNumber =
-        address.houseFlatNumber || booking.address.houseFlatNumber;
-      booking.address.streetArea =
-        address.streetArea || booking.address.streetArea;
-      booking.address.landMark = address.landMark || booking.address.landMark;
-      booking.address.city = address.city || booking.address.city;
-      booking.address.location = address.location || booking.address.location;
+      booking.address.houseFlatNumber = address.houseFlatNumber ?? booking.address.houseFlatNumber;
+      booking.address.streetArea = address.streetArea ?? booking.address.streetArea;
+      booking.address.landMark = address.landMark ?? booking.address.landMark;
+      booking.address.city = address.city ?? booking.address.city;
+      booking.address.location = address.location ?? booking.address.location;
     }
 
-    // -----------------------------------------------------------
-    // UPDATE SLOT
-    // -----------------------------------------------------------
+    /* ---------------------------------- */
+    /* UPDATE SLOT                        */
+    /* ---------------------------------- */
     if (selectedSlot) {
-      booking.selectedSlot.slotDate =
-        selectedSlot.slotDate || booking.selectedSlot.slotDate;
-      booking.selectedSlot.slotTime =
-        selectedSlot.slotTime || booking.selectedSlot.slotTime;
+      booking.selectedSlot.slotDate = selectedSlot.slotDate ?? booking.selectedSlot.slotDate;
+      booking.selectedSlot.slotTime = selectedSlot.slotTime ?? booking.selectedSlot.slotTime;
     }
 
-    // -----------------------------------------------------------
-    // ❗ HOUSE PAINTING RULE:
-    // DO NOT UPDATE SERVICES OR PAYMENT FOR HOUSE PAINTING
-    // -----------------------------------------------------------
-    if (isHousePainting) {
-      await booking.save();
-      return res.json({
-        success: true,
-        message:
-          "Booking updated (House Painting) — only address and slot were updated.",
-        booking,
-      });
-    }
-
-    // -----------------------------------------------------------
-    // ✔ DEEP CLEANING: UPDATE SERVICES
-    // -----------------------------------------------------------
+    /* ---------------------------------- */
+    /* UPDATE SERVICES (Deep cleaning ONLY) */
+    /* ---------------------------------- */
     if (isDeepCleaning && Array.isArray(service)) {
       booking.service = service.map((s) => ({
         category: s.category,
@@ -3766,58 +3784,67 @@ exports.updateUserBooking = async (req, res) => {
       }));
     }
 
-    // -----------------------------------------------------------
-    // ✔ DEEP CLEANING: PAYMENT UPDATE
-    // -----------------------------------------------------------
-    if (isDeepCleaning && bookingDetails) {
+    /* ---------------------------------- */
+    /* PAYMENT UPDATE (COMMON RULES)      */
+    /* ---------------------------------- */
+    if (bookingDetails) {
       const finalTotal = Number(bookingDetails.finalTotal || 0);
-      const originalTotalAmount = Number(
-        bookingDetails.originalTotalAmount || 0
-      );
-      const paidAmount = Number(bookingDetails.paidAmount || 0);
       const amountYetToPay = Number(bookingDetails.amountYetToPay || 0);
       const refundAmount = Number(bookingDetails.refundAmount || 0);
 
+      // Update ONLY these three
       booking.bookingDetails.finalTotal = finalTotal;
-      booking.bookingDetails.originalTotalAmount = originalTotalAmount;
-
-      // booking.bookingDetails.paidAmount = paidAmount;
-      // booking.bookingDetails.bookingAmount =
-      //   bookingDetails.bookingAmount ??
-      //   booking.bookingDetails.bookingAmount;
-
       booking.bookingDetails.amountYetToPay = amountYetToPay;
       booking.bookingDetails.refundAmount = refundAmount;
 
-      booking.bookingDetails.finalPayment.amount = amountYetToPay;
+      // Set Payment Status
+      if (refundAmount > 0) booking.bookingDetails.paymentStatus = "Refunded";
+      else if (amountYetToPay > 0) booking.bookingDetails.paymentStatus = "Partial Payment";
+      else booking.bookingDetails.paymentStatus = "Paid";
 
-      if (bookingDetails.paymentStatus)
-        booking.bookingDetails.paymentStatus =
-          refundAmount > 0 ? "Refunded" : "Partial Payment";
+      /* ==================================
+         🔥 DEEP CLEANING INSTALLMENT LOGIC
+         ================================== */
+      if (isDeepCleaning) {
+        const firstPaid = booking.bookingDetails.firstPayment.status === "paid";
+
+        if (!firstPaid) {
+          // Update firstPayment.amount only
+          booking.bookingDetails.firstPayment.amount = amountYetToPay;
+        } else {
+          // First is already paid → update finalPayment.amount
+          booking.bookingDetails.finalPayment.amount = amountYetToPay;
+        }
+      }
+
+      /* ==================================
+         🔥 HOUSE PAINTING INSTALLMENT LOGIC
+         ================================== */
+      if (isHousePainting) {
+        const fPaid = booking.bookingDetails.firstPayment.status === "paid";
+        const sPaid = booking.bookingDetails.secondPayment.status === "paid";
+
+        if (!fPaid) {
+          booking.bookingDetails.firstPayment.amount = amountYetToPay;
+        } else if (fPaid && !sPaid) {
+          booking.bookingDetails.secondPayment.amount = amountYetToPay;
+        } else if (fPaid && sPaid) {
+          booking.bookingDetails.finalPayment.amount = amountYetToPay;
+        }
+      }
     }
-
-    // -----------------------------------------------------------
-    // OTHER FIELDS
-    // -----------------------------------------------------------
 
     if (formName) booking.formName = formName;
 
     await booking.save();
 
-    return res.json({
-      success: true,
-      message: "Booking updated successfully",
-      booking,
-    });
-  } catch (error) {
-    console.error("UPDATE BOOKING ERROR:", error);
-    res.status(500).json({
-      success: false,
-      message: "Internal server error",
-    });
+    return res.json({ success: true, message: "Booking updated successfully", booking });
+
+  } catch (err) {
+    console.error("UPDATE BOOKING ERROR:", err);
+    return res.status(500).json({ success: false, message: "Internal server error" });
   }
 };
-
 exports.updateEnquiry = async (req, res) => {
   try {
     const { bookingId } = req.params;

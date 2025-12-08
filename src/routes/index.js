@@ -15,6 +15,7 @@ const minimumOrderRoutes = require("./serviceConfig/minimumOrder.routes");
 const reminderRoutes = require("../routes/user/reminder");
 const manualPaymentRoutes = require("../routes/user/manualPayment");
 const kpiParametersRoutes = require("../routes/perfomance/kpi");
+const vendorRatingsystem = require("../routes/vendor/vendorRating");
 
 // Performance KPI Parameters Routes
 router.use("/kpi-parameters", kpiParametersRoutes);
@@ -33,6 +34,7 @@ router.use("/deeppackage", deepCleaningRoutes);
 router.use("/minimumorder", minimumOrderRoutes);
 router.use("/reminders", reminderRoutes);
 router.use("/manual-payment", manualPaymentRoutes);
+router.use("/ratings", vendorRatingsystem);
 
 router.get("/hello-world/testing", (req, res) => {
   res.json({ message: "Hi Jimmy!" });

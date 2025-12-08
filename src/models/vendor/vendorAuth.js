@@ -135,6 +135,17 @@ const vendorAuthSchema = new mongoose.Schema({
     type: [teamMemberInfo], // Embed team member objects
     default: [],
   },
+  ratings: {
+    average: { type: Number, default: 0, min: 0, max: 5 },
+    totalReviews: { type: Number, default: 0 },
+    ratingsBreakdown: {
+      1: { type: Number, default: 0 },
+      2: { type: Number, default: 0 },
+      3: { type: Number, default: 0 },
+      4: { type: Number, default: 0 },
+      5: { type: Number, default: 0 }
+    }
+  }
 });
 
 module.exports = mongoose.model("vendor", vendorAuthSchema);

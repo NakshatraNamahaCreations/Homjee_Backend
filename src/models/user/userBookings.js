@@ -102,7 +102,8 @@ const bookingDetailsSchema = new mongoose.Schema(
         "Survey Ongoing", //started - house painting
         "Survey Completed", //ended - house painting
         "Job Completed", //ended - deep cleaning
-        "Customer Cancelled",
+        "Customer Cancelled",   // from the vendor app
+        "Cancelled",   // from the website by customer themself
         "Customer Unreachable",
         "Admin Cancelled",
         "Pending Hiring", // mark hiring
@@ -311,6 +312,11 @@ const userBookingSchema = new mongoose.Schema({
   isRead: { type: Boolean, default: false }, //New Field
   isDismmised: { type: Boolean, default: false }, //New Field
   invitedVendors: [invitedVendorSchema],
+  vendorRating: {
+    rating: { type: Number, min: 1, max: 5 },
+    review: String,
+    ratedAt: Date
+  },
   formName: { type: String, required: true }, // Add formName
   createdDate: { type: Date, default: Date.now },
 });
