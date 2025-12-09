@@ -34,12 +34,12 @@ exports.addVendorRating = async (req, res) => {
         }
 
         // --- STEP 3: For 1–3 stars, feedback is required ---
-        if (rating <= 3 && (!feedback || feedback.trim().length === 0)) {
-            return res.status(400).json({
-                success: false,
-                message: "Feedback is required for ratings below 4 stars.",
-            });
-        }
+        // if (rating <= 3 && (!feedback || feedback.trim().length === 0)) {
+        //     return res.status(400).json({
+        //         success: false,
+        //         message: "Feedback is required for ratings below 4 stars.",
+        //     });
+        // }
 
         // Save low rating + feedback
         await VendorRating.create({

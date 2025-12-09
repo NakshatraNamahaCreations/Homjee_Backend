@@ -8,6 +8,7 @@ const mongoose = require("mongoose");
 const { unlockRelatedQuotesByHiring } = require("../../helpers/quotes");
 const DeepCleaningPackageModel = require("../../models/products/DeepCleaningPackage");
 const userSchema = require("../../models/user/userAuth");
+const VendorRating = require("../../models/vendor/vendorRating");
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
 const redirectionUrl = "https://websitehomjee.netlify.app/checkout/payment/";
@@ -1555,6 +1556,54 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     };
     let query = { ...baseQuery };
 
+    // .................Average Rating..........star
+    let ratingMatch = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+
+    // timeframe filter for ratings
+    if (timeframe === "month") {
+      const startOfMonth = moment().startOf("month").toDate();
+      ratingMatch.createdAt = { $gte: startOfMonth };
+    }
+
+    // pipeline for "month" (all ratings in month) or "last" (last 50 ratings)
+    let ratingPipeline = [
+      { $match: ratingMatch },
+      { $sort: { createdAt: -1 } }
+    ];
+
+    if (timeframe === "last") {
+      ratingPipeline.push({ $limit: 50 }); // last 50 ratings
+    }
+
+    // then group to compute average and countx`
+    ratingPipeline.push({
+      $group: {
+        _id: null,
+        totalRatings: { $sum: 1 },
+        sumRatings: { $sum: "$rating" },
+        // NEW: strikes count (1-star or 2-star)
+        strikes: {
+          $sum: {
+            $cond: [{ $lte: ["$rating", 2] }, 1, 0]
+          }
+        }
+      }
+    });
+
+    const ratingStats = await VendorRating.aggregate(ratingPipeline);
+
+    let averageRating = 0;
+    let totalRatings = 0;
+    let strikes = 0;
+
+    if (ratingStats.length > 0 && ratingStats[0].totalRatings > 0) {
+      totalRatings = ratingStats[0].totalRatings;
+      averageRating = ratingStats[0].sumRatings / ratingStats[0].totalRatings;
+      strikes = ratingStats[0].strikes || 0;
+    }
+
+
+    // .................................
     // Month filter
     if (timeframe === "month") {
       const startOfMonth = moment().startOf("month").toDate();
@@ -1582,6 +1631,10 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
         surveyLeads: 0,
         hiredLeads: 0,
         timeframe,
+        // new fields
+        averageRating: 0,
+        totalRatings: 0,
+        strikes: 0
       });
     }
 
@@ -1636,6 +1689,9 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       surveyLeads,
       hiredLeads,
       timeframe,
+      averageRating: parseFloat(averageRating.toFixed(2)),
+      totalRatings,
+      strikes // total 1★ + 2★ ratings in the selected timeframe
     });
   } catch (error) {
     console.error("Error calculating house painters vendor metrics:", error);
