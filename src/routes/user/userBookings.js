@@ -69,6 +69,8 @@ router.post("/update-status", bookingController.updateStatus);
 router.post("/cancel-booking/customer/website", bookingController.cancelLeadFromWebsite);
 router.post("/mark-pending-hiring", bookingController.markPendingHiring);
 router.post("/make-payment", bookingController.makePayment);
+router.post("/created-by-admin/make-payment/admin", bookingController.adminToCustomerPayment);
+
 router.post(
   "/start-project/generating-otp/:bookingId",
   bookingController.requestStartProjectOtp
