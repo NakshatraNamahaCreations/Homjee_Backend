@@ -135,8 +135,8 @@ function computeFinalTotal(details) {
     (details.priceApprovalStatus
       ? "approved"
       : details.hasPriceUpdated
-        ? "pending"
-        : "approved");
+      ? "pending"
+      : "approved");
 
   if (state === "approved" && Number.isFinite(details.newTotal)) {
     return Number(details.newTotal);
@@ -178,9 +178,9 @@ function ensureFirstMilestone(details) {
     // but in your flow you want ORIGINAL for the 40% hurdle:
     const base = Number(
       details.bookingAmount ||
-      details.finalTotal ||
-      details.currentTotalAmount ||
-      0
+        details.finalTotal ||
+        details.currentTotalAmount ||
+        0
     );
     fm.baseTotal = base;
     fm.requiredAmount = roundMoney(base * 0.4);
@@ -373,14 +373,13 @@ exports.createBooking = async (req, res) => {
       serviceType === "house_painting"
         ? []
         : [
-          {
-            at: new Date(),
-            method: bookingDetailsConfig.paymentMethod,
-            amount: paidAmount,
-            providerRef: "razorpay_order_xyz",
-          },
-        ];
-
+            {
+              at: new Date(),
+              method: bookingDetailsConfig.paymentMethod,
+              amount: paidAmount,
+              providerRef: "razorpay_order_xyz",
+            },
+          ];
 
     // 📦 Create booking
     const booking = new UserBooking({
@@ -401,10 +400,10 @@ exports.createBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -430,8 +429,9 @@ exports.createBooking = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -976,10 +976,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -1011,8 +1011,9 @@ exports.adminCreateBooking = async (req, res) => {
     // const redirectionUrl = "http://localhost:5173/checkout/payment";
     const pay_type = "auto-pay";
 
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -1402,7 +1403,6 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     // .................Average Rating..........star
     let ratingMatch = { vendorId: new mongoose.Types.ObjectId(vendorId) };
 
-
     if (timeframe === "month") {
       const startOfMonth = moment().startOf("month").toDate();
       query.createdDate = { $gte: startOfMonth };
@@ -1410,7 +1410,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     // pipeline for "month" (all ratings in month) or "last" (last 50 ratings)
     let ratingPipeline = [
       { $match: ratingMatch },
-      { $sort: { createdAt: -1 } }
+      { $sort: { createdAt: -1 } },
     ];
 
     if (timeframe === "last") {
@@ -1426,10 +1426,10 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
         // NEW: strikes count (1-star or 2-star)
         strikes: {
           $sum: {
-            $cond: [{ $lte: ["$rating", 2] }, 1, 0]
-          }
-        }
-      }
+            $cond: [{ $lte: ["$rating", 2] }, 1, 0],
+          },
+        },
+      },
     });
 
     const ratingStats = await VendorRating.aggregate(ratingPipeline);
@@ -1465,7 +1465,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
         // new fields
         averageRating: 0,
         totalRatings: 0,
-        strikes: 0
+        strikes: 0,
       });
     }
 
@@ -1565,8 +1565,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       // ava.rating..
       averageRating: parseFloat(averageRating.toFixed(2)),
       totalRatings,
-      strikes // total 1★ + 2★ ratings in the selected timeframe
-
+      strikes, // total 1★ + 2★ ratings in the selected timeframe
     });
   } catch (error) {
     console.error("Error calculating vendor performance metrics:", error);
@@ -1616,7 +1615,7 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     // pipeline for "month" (all ratings in month) or "last" (last 50 ratings)
     let ratingPipeline = [
       { $match: ratingMatch },
-      { $sort: { createdAt: -1 } }
+      { $sort: { createdAt: -1 } },
     ];
 
     if (timeframe === "last") {
@@ -1632,10 +1631,10 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
         // NEW: strikes count (1-star or 2-star)
         strikes: {
           $sum: {
-            $cond: [{ $lte: ["$rating", 2] }, 1, 0]
-          }
-        }
-      }
+            $cond: [{ $lte: ["$rating", 2] }, 1, 0],
+          },
+        },
+      },
     });
 
     const ratingStats = await VendorRating.aggregate(ratingPipeline);
@@ -1649,7 +1648,6 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       averageRating = ratingStats[0].sumRatings / ratingStats[0].totalRatings;
       strikes = ratingStats[0].strikes || 0;
     }
-
 
     // .................................
     // Month filter
@@ -1682,7 +1680,7 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
         // new fields
         averageRating: 0,
         totalRatings: 0,
-        strikes: 0
+        strikes: 0,
       });
     }
 
@@ -1740,12 +1738,56 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       // ava.rating..
       averageRating: parseFloat(averageRating.toFixed(2)),
       totalRatings,
-      strikes // total 1★ + 2★ ratings in the selected timeframe
+      strikes, // total 1★ + 2★ ratings in the selected timeframe
     });
   } catch (error) {
     console.error("Error calculating house painters vendor metrics:", error);
     res.status(500).json({ message: "Server error calculating performance" });
   }
+};
+
+// Helper function to calculate ratings for a vendor
+const calculateVendorRatings = async (vendorId, timeframe) => {
+  let ratingMatch = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+
+  // Add timeframe filter for ratings
+  if (timeframe === "month") {
+    const startOfMonth = moment().startOf("month").toDate();
+    ratingMatch.createdAt = { $gte: startOfMonth };
+  }
+
+  let ratingPipeline = [{ $match: ratingMatch }, { $sort: { createdAt: -1 } }];
+
+  if (timeframe === "last") {
+    ratingPipeline.push({ $limit: 50 });
+  }
+
+  ratingPipeline.push({
+    $group: {
+      _id: null,
+      totalRatings: { $sum: 1 },
+      sumRatings: { $sum: "$rating" },
+      strikes: {
+        $sum: {
+          $cond: [{ $lte: ["$rating", 2] }, 1, 0],
+        },
+      },
+    },
+  });
+
+  const ratingStats = await VendorRating.aggregate(ratingPipeline);
+
+  let averageRating = 0;
+  let totalRatings = 0;
+  let strikes = 0;
+
+  if (ratingStats.length > 0 && ratingStats[0].totalRatings > 0) {
+    totalRatings = ratingStats[0].totalRatings;
+    averageRating = ratingStats[0].sumRatings / ratingStats[0].totalRatings;
+    strikes = ratingStats[0].strikes || 0;
+  }
+
+  return { averageRating, totalRatings, strikes };
 };
 
 exports.getOverallPerformance = async (req, res) => {
@@ -1815,10 +1857,12 @@ exports.getOverallPerformance = async (req, res) => {
     let hpResponded = 0;
     let hpSurvey = 0;
     let hpHiring = 0;
+    let hpVendorRatings = new Map(); // Store ratings by vendor for aggregation
 
-    hpLeads.forEach((lead) => {
+    // Process house painting leads
+    for (const lead of hpLeads) {
       const prof = lead.assignedProfessional;
-      if (!prof) return;
+      if (!prof) continue;
 
       if (prof.acceptedDate) hpResponded++;
       if (prof.startedDate) hpSurvey++;
@@ -1831,20 +1875,47 @@ exports.getOverallPerformance = async (req, res) => {
         lead.bookingDetails?.firstPayment?.status === "paid";
 
       if (isHired) hpHiring++;
-    });
+
+      // Collect vendor IDs for rating calculation
+      const vendorId = prof.professionalId;
+      if (vendorId && !hpVendorRatings.has(vendorId)) {
+        // Calculate ratings for this vendor
+        const ratings = await calculateVendorRatings(
+          vendorId,
+          period === "this_month" ? "month" : "last"
+        );
+        hpVendorRatings.set(vendorId, ratings);
+      }
+    }
 
     const hpTotalGsv = calcGSV(hpLeads);
     const hpAvgGsv = hpLeads.length ? hpTotalGsv / hpLeads.length : 0;
 
+    // Calculate overall ratings for house painting category
+    let hpTotalRatingsSum = 0;
+    let hpTotalRatingsCount = 0;
+    let hpTotalStrikes = 0;
+
+    hpVendorRatings.forEach((ratingData) => {
+      hpTotalRatingsSum += ratingData.averageRating * ratingData.totalRatings;
+      hpTotalRatingsCount += ratingData.totalRatings;
+      hpTotalStrikes += ratingData.strikes;
+    });
+
+    const hpAverageRating =
+      hpTotalRatingsCount > 0 ? hpTotalRatingsSum / hpTotalRatingsCount : 0;
+
     /* -----------------------------
-        6. DEEP CLEANING METRICS - FIXED
+        6. DEEP CLEANING METRICS
     ----------------------------- */
     let dcResponded = 0;
     let dcCancelled = 0;
+    let dcVendorRatings = new Map();
 
-    dcLeads.forEach((lead) => {
+    // Process deep cleaning leads
+    for (const lead of dcLeads) {
       const invited = lead.invitedVendors?.[0];
-      if (!invited) return;
+      if (!invited) continue;
 
       if (invited.responseStatus === "accepted") dcResponded++;
 
@@ -1861,47 +1932,87 @@ exports.getOverallPerformance = async (req, res) => {
           dcCancelled++;
         }
       }
-    });
+
+      // Collect vendor ID for rating calculation
+      const vendorId = invited.professionalId;
+      if (vendorId && !dcVendorRatings.has(vendorId)) {
+        const ratings = await calculateVendorRatings(
+          vendorId,
+          period === "this_month" ? "month" : "last"
+        );
+        dcVendorRatings.set(vendorId, ratings);
+      }
+    }
 
     const dcTotalGsv = calcGSV(dcLeads);
     const dcAvgGsv = dcLeads.length ? dcTotalGsv / dcLeads.length : 0;
 
-    /* -----------------------------
-        7. RATINGS & STRIKES (currently forced 0)
-    ----------------------------- */
-    const hpAverageRating = 0;
-    const hpStrikes = 0;
-    const dcAverageRating = 0;
-    const dcStrikes = 0;
+    // Calculate overall ratings for deep cleaning category
+    let dcTotalRatingsSum = 0;
+    let dcTotalRatingsCount = 0;
+    let dcTotalStrikes = 0;
+
+    dcVendorRatings.forEach((ratingData) => {
+      dcTotalRatingsSum += ratingData.averageRating * ratingData.totalRatings;
+      dcTotalRatingsCount += ratingData.totalRatings;
+      dcTotalStrikes += ratingData.strikes;
+    });
+
+    const dcAverageRating =
+      dcTotalRatingsCount > 0 ? dcTotalRatingsSum / dcTotalRatingsCount : 0;
 
     /* -----------------------------
-        8. VENDOR-WISE METRICS
+        7. VENDOR-WISE METRICS
     ----------------------------- */
-    const getVendorStats = (arr, type) => {
+    const getVendorStats = async (arr, type) => {
       const map = {};
 
-      arr.forEach((lead) => {
-        const prof = lead.assignedProfessional;
-        if (!prof) return;
+      for (const lead of arr) {
+        let vendorId;
+        let prof;
 
-        const id = prof.professionalId;
-        if (!map[id]) {
-          map[id] = {
-            vendorId: id,
-            name: prof.name,
+        if (type === "hp") {
+          prof = lead.assignedProfessional;
+          if (!prof) continue;
+          vendorId = prof.professionalId;
+        } else {
+          // For DC, find the vendor in invitedVendors
+          const invited = lead.invitedVendors?.find(
+            (iv) => String(iv.professionalId) === String(vendorId)
+          );
+          if (!invited) continue;
+          prof = invited;
+          vendorId = invited.professionalId;
+        }
+
+        if (!vendorId) continue;
+
+        if (!map[vendorId]) {
+          // Get vendor ratings
+          const ratings = await calculateVendorRatings(
+            vendorId,
+            period === "this_month" ? "month" : "last"
+          );
+
+          map[vendorId] = {
+            vendorId: vendorId,
+            name: prof.name || "Unknown",
             totalLeads: 0,
             responded: 0,
             survey: 0,
             hired: 0,
             cancelled: 0,
             gsv: 0,
-            ratingSum: 0,
-            ratingCount: 0,
-            strikes: 0,
+            ratingSum:
+              ratings.totalRatings > 0
+                ? ratings.averageRating * ratings.totalRatings
+                : 0,
+            ratingCount: ratings.totalRatings,
+            strikes: ratings.strikes,
           };
         }
 
-        const v = map[id];
+        const v = map[vendorId];
 
         v.totalLeads++;
 
@@ -1917,15 +2028,12 @@ exports.getOverallPerformance = async (req, res) => {
         if (isHired) v.hired++;
 
         if (type === "dc") {
-          const invited = lead.invitedVendors?.find(
-            (i) => String(i.professionalId) === String(id)
-          );
-          if (invited?.responseStatus === "customer_cancelled") {
+          if (prof.responseStatus === "customer_cancelled") {
             const slot = moment(
               `${lead.selectedSlot.slotDate} ${lead.selectedSlot.slotTime}`,
               "YYYY-MM-DD hh:mm A"
             );
-            const cancelled = moment(invited.cancelledAt);
+            const cancelled = moment(prof.cancelledAt);
             const diff = slot.diff(cancelled, "hours", true);
 
             if (diff >= 0 && diff <= 3) {
@@ -1937,32 +2045,36 @@ exports.getOverallPerformance = async (req, res) => {
         lead.service?.forEach((s) => {
           v.gsv += (s.price || 0) * (s.quantity || 1);
         });
-      });
+      }
 
+      // Convert map to array and calculate final metrics
       return Object.values(map).map((v) => ({
         ...v,
         responseRate: v.totalLeads
-          ? ((v.responded / v.totalLeads) * 100).toFixed(2)
-          : "0",
+          ? parseFloat(((v.responded / v.totalLeads) * 100).toFixed(2))
+          : 0,
         surveyRate: v.responded
-          ? ((v.survey / v.responded) * 100).toFixed(2)
-          : "0",
+          ? parseFloat(((v.survey / v.responded) * 100).toFixed(2))
+          : 0,
         hiringRate: v.responded
-          ? ((v.hired / v.responded) * 100).toFixed(2)
-          : "0",
+          ? parseFloat(((v.hired / v.responded) * 100).toFixed(2))
+          : 0,
         cancellationRate: v.responded
-          ? ((v.cancelled / v.responded) * 100).toFixed(2)
-          : "0",
-        avgRating: 0,
-        strikes: 0,
+          ? parseFloat(((v.cancelled / v.responded) * 100).toFixed(2))
+          : 0,
+        avgRating:
+          v.ratingCount > 0
+            ? parseFloat((v.ratingSum / v.ratingCount).toFixed(2))
+            : 0,
+        strikes: v.strikes,
       }));
     };
 
-    const hpVendorStats = getVendorStats(hpLeads, "hp");
-    const dcVendorStats = getVendorStats(dcLeads, "dc");
+    const hpVendorStats = await getVendorStats(hpLeads, "hp");
+    const dcVendorStats = await getVendorStats(dcLeads, "dc");
 
     /* -----------------------------
-        9. SEND RESPONSE - WITH FIXED PERCENTAGES
+        8. SEND RESPONSE
     ----------------------------- */
     return res.status(200).json({
       housePainting: {
@@ -1973,9 +2085,10 @@ exports.getOverallPerformance = async (req, res) => {
         hiringPercentage: hpResponded
           ? Math.min((hpHiring / hpResponded) * 100, 100)
           : 0,
-        averageGsv: hpAvgGsv,
-        averageRating: hpAverageRating,
-        strikes: hpStrikes,
+        averageGsv: parseFloat(hpAvgGsv.toFixed(2)),
+        averageRating: parseFloat(hpAverageRating.toFixed(2)),
+        strikes: hpTotalStrikes,
+        totalRatings: hpTotalRatingsCount,
         cancellationPercentage: 0, // House painting doesn't have cancellation in your current logic
       },
 
@@ -1987,9 +2100,10 @@ exports.getOverallPerformance = async (req, res) => {
         cancellationPercentage: dcResponded
           ? Math.min((dcCancelled / dcResponded) * 100, 100)
           : 0,
-        averageGsv: dcAvgGsv,
-        averageRating: dcAverageRating,
-        strikes: dcStrikes,
+        averageGsv: parseFloat(dcAvgGsv.toFixed(2)),
+        averageRating: parseFloat(dcAverageRating.toFixed(2)),
+        strikes: dcTotalStrikes,
+        totalRatings: dcTotalRatingsCount,
       },
 
       vendors: {
@@ -2731,7 +2845,7 @@ exports.cancelLeadFromWebsite = async (req, res) => {
   }
 };
 
-// HOUSE PAINTING - FIRST PAYMENT REQUESTED - LINK SENT 
+// HOUSE PAINTING - FIRST PAYMENT REQUESTED - LINK SENT
 exports.markPendingHiring = async (req, res) => {
   try {
     const { bookingId, startDate, teamMembers, noOfDays, quotationId } =
@@ -2780,7 +2894,6 @@ exports.markPendingHiring = async (req, res) => {
     );
 
     d.finalTotal = approvedTotal > 0 ? approvedTotal : Number(totalAmount || 0);
-
 
     // Keep mirror in sync
     d.currentTotalAmount = d.finalTotal;
@@ -3056,7 +3169,7 @@ exports.verifyStartProjectOtp = async (req, res) => {
   }
 };
 
-// HOUSE PAINTING - SECOND PAYMENT REQUESTED - LINK SENT 
+// HOUSE PAINTING - SECOND PAYMENT REQUESTED - LINK SENT
 exports.requestSecondPayment = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -3142,10 +3255,11 @@ exports.requestSecondPayment = async (req, res) => {
     d.secondPayment.status = "pending";
     d.secondPayment.amount = secondInstallment;
 
-    // 🔗 Generate payment link 
+    // 🔗 Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
     d.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
@@ -3177,7 +3291,7 @@ exports.requestSecondPayment = async (req, res) => {
   }
 };
 
-// HOUSE PAINTING, DEEP CLEANING - FINAL PAYMENT REQUESTED - LINK SENT 
+// HOUSE PAINTING, DEEP CLEANING - FINAL PAYMENT REQUESTED - LINK SENT
 exports.requestingFinalPaymentEndProject = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -3255,8 +3369,9 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     details.paymentLink = {
       url: paymentLinkUrl,
@@ -3330,7 +3445,7 @@ exports.makePayment = async (req, res) => {
     const customerId = booking.customer?.customerId;
     const vendorId = booking.assignedProfessional?.professionalId;
     const vendorName = booking.assignedProfessional?.name;
-    const vendorPhoto = booking.assignedProfessional?.profile
+    const vendorPhoto = booking.assignedProfessional?.profile;
 
     const serviceType = (booking.serviceType || "").toLowerCase();
     const d = booking.bookingDetails || (booking.bookingDetails = {});
@@ -3442,7 +3557,7 @@ exports.makePayment = async (req, res) => {
     const fullyPaid = d.paidAmount >= finalTotal;
     if (fullyPaid) {
       d.paymentStatus = "Paid";
-      booking.vendorRatingUrl = `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}`
+      booking.vendorRatingUrl = `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}`;
       // Mark project as completed if ongoing
       if (
         [
@@ -3489,7 +3604,7 @@ exports.makePayment = async (req, res) => {
         }
       }
     }
-    booking.isEnquiry = false
+    booking.isEnquiry = false;
     await booking.save();
 
     return res.json({
@@ -3503,7 +3618,9 @@ exports.makePayment = async (req, res) => {
       remainingAmount: Math.max(0, finalTotal - d.paidAmount),
       status: d.status,
       paymentStatus: d.paymentStatus,
-      ratingURL: fullyPaid ? `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}` : ""
+      ratingURL: fullyPaid
+        ? `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}`
+        : "",
     });
   } catch (err) {
     console.error("makePayment error:", err);
@@ -3773,7 +3890,9 @@ exports.updateUserBooking = async (req, res) => {
 
     const booking = await UserBooking.findById(bookingId);
     if (!booking) {
-      return res.status(404).json({ success: false, message: "Booking not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     }
 
     const serviceType = booking.serviceType;
@@ -3786,15 +3905,18 @@ exports.updateUserBooking = async (req, res) => {
     if (customer) {
       booking.customer.name = customer.name ?? booking.customer.name;
       booking.customer.phone = customer.phone ?? booking.customer.phone;
-      booking.customer.customerId = customer.customerId ?? booking.customer.customerId;
+      booking.customer.customerId =
+        customer.customerId ?? booking.customer.customerId;
     }
 
     /* ---------------------------------- */
     /* UPDATE ADDRESS                     */
     /* ---------------------------------- */
     if (address) {
-      booking.address.houseFlatNumber = address.houseFlatNumber ?? booking.address.houseFlatNumber;
-      booking.address.streetArea = address.streetArea ?? booking.address.streetArea;
+      booking.address.houseFlatNumber =
+        address.houseFlatNumber ?? booking.address.houseFlatNumber;
+      booking.address.streetArea =
+        address.streetArea ?? booking.address.streetArea;
       booking.address.landMark = address.landMark ?? booking.address.landMark;
       booking.address.city = address.city ?? booking.address.city;
       booking.address.location = address.location ?? booking.address.location;
@@ -3804,8 +3926,10 @@ exports.updateUserBooking = async (req, res) => {
     /* UPDATE SLOT                        */
     /* ---------------------------------- */
     if (selectedSlot) {
-      booking.selectedSlot.slotDate = selectedSlot.slotDate ?? booking.selectedSlot.slotDate;
-      booking.selectedSlot.slotTime = selectedSlot.slotTime ?? booking.selectedSlot.slotTime;
+      booking.selectedSlot.slotDate =
+        selectedSlot.slotDate ?? booking.selectedSlot.slotDate;
+      booking.selectedSlot.slotTime =
+        selectedSlot.slotTime ?? booking.selectedSlot.slotTime;
     }
 
     /* ---------------------------------- */
@@ -3832,12 +3956,14 @@ exports.updateUserBooking = async (req, res) => {
 
       // Update ONLY these three
       booking.bookingDetails.finalTotal = finalTotal;
+      // booking.bookingDetails.originalTotalAmount = finalTotal; // for kiru changes
       booking.bookingDetails.amountYetToPay = amountYetToPay;
       booking.bookingDetails.refundAmount = refundAmount;
 
       // Set Payment Status
       if (refundAmount > 0) booking.bookingDetails.paymentStatus = "Refunded";
-      else if (amountYetToPay > 0) booking.bookingDetails.paymentStatus = "Partial Payment";
+      else if (amountYetToPay > 0)
+        booking.bookingDetails.paymentStatus = "Partial Payment";
       else booking.bookingDetails.paymentStatus = "Paid";
 
       /* ==================================
@@ -3876,13 +4002,19 @@ exports.updateUserBooking = async (req, res) => {
 
     await booking.save();
 
-    return res.json({ success: true, message: "Booking updated successfully", booking });
-
+    return res.json({
+      success: true,
+      message: "Booking updated successfully",
+      booking,
+    });
   } catch (err) {
     console.error("UPDATE BOOKING ERROR:", err);
-    return res.status(500).json({ success: false, message: "Internal server error" });
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal server error" });
   }
 };
+
 exports.updateEnquiry = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -3940,10 +4072,7 @@ exports.updateEnquiry = async (req, res) => {
           selectedSlot.slotTime ?? booking.selectedSlot.slotTime;
       }
 
-      // FORM NAME update allowed
-      if (formName) {
-        booking.formName = formName;
-      }
+      if (formName) booking.formName = formName;
 
       await booking.save();
 
@@ -3955,13 +4084,12 @@ exports.updateEnquiry = async (req, res) => {
     }
 
     //========================================================
-    // 📌 DEEP CLEANING OR OTHER SERVICE TYPES
-    // → Normal full update logic
+    // 📌 DEEP CLEANING — FULL UPDATE LOGIC
     //========================================================
 
     const { bookingDetails = {}, isEnquiry } = data;
 
-    // Ensure nested objects
+    // Ensure nested structures
     booking.bookingDetails = booking.bookingDetails || {};
     booking.bookingDetails.firstPayment =
       booking.bookingDetails.firstPayment || {};
@@ -3983,26 +4111,34 @@ exports.updateEnquiry = async (req, res) => {
     }
 
     //----------------------------
-    // BOOKING DETAILS UPDATE
+    // BACKEND CONTROLLED AMOUNT LOGIC
     //----------------------------
     const bookingAmount = Number(bookingDetails.bookingAmount || 0);
     const finalTotal = Number(bookingDetails.finalTotal || 0);
     const paidAmount = Number(bookingDetails.paidAmount || 0);
 
-    booking.bookingDetails.originalTotalAmount = Number(
-      bookingDetails.originalTotalAmount ?? finalTotal ?? 0
-    );
+    const amountYetToPay = Math.max(0, finalTotal - bookingAmount);
 
     booking.bookingDetails.finalTotal = finalTotal;
     booking.bookingDetails.bookingAmount = bookingAmount;
     booking.bookingDetails.paidAmount = paidAmount;
-    booking.bookingDetails.amountYetToPay = Math.max(
-      0,
-      finalTotal - bookingAmount
-    );
+    booking.bookingDetails.amountYetToPay = amountYetToPay;
 
     //----------------------------
-    // ADDRESS UPDATE (deep cleaning)
+    // PAYMENT MILESTONE LOGIC
+    //----------------------------
+    // FIRST PAYMENT
+    booking.bookingDetails.firstPayment.amount = bookingAmount;
+    booking.bookingDetails.firstPayment.status = "pending";
+    booking.bookingDetails.firstPayment.paidAt = null;
+
+    // FINAL PAYMENT (always reset)
+    booking.bookingDetails.finalPayment.amount = 0;
+    booking.bookingDetails.finalPayment.status = "pending";
+    booking.bookingDetails.finalPayment.paidAt = null;
+
+    //----------------------------
+    // ADDRESS UPDATE
     //----------------------------
     if (address) {
       booking.address = {
@@ -4012,7 +4148,7 @@ exports.updateEnquiry = async (req, res) => {
     }
 
     //----------------------------
-    // SLOT UPDATE (deep cleaning)
+    // SLOT UPDATE
     //----------------------------
     if (selectedSlot) {
       booking.selectedSlot = {
@@ -4022,7 +4158,6 @@ exports.updateEnquiry = async (req, res) => {
     }
 
     if (typeof isEnquiry === "boolean") booking.isEnquiry = isEnquiry;
-
     if (formName) booking.formName = formName;
 
     await booking.save();
@@ -4042,7 +4177,164 @@ exports.updateEnquiry = async (req, res) => {
   }
 };
 
+// 10-12-25 by sonali
+// exports.updateEnquiry = async (req, res) => {
+//   try {
+//     const { bookingId } = req.params;
+//     const data = req.body;
+
+//     if (!bookingId) {
+//       return res.status(400).json({ message: "bookingId is required" });
+//     }
+
+//     const booking = await UserBooking.findById(bookingId);
+//     if (!booking) {
+//       return res.status(404).json({ message: "Booking not found" });
+//     }
+
+//     if (!booking.isEnquiry) {
+//       return res.status(400).json({ message: "Booking is not an enquiry" });
+//     }
+
+//     const { address, selectedSlot, formName, service } = data;
+
+//     //---------------------------------------------
+//     // DETECT SERVICE TYPE
+//     //---------------------------------------------
+//     const serviceType =
+//       booking.serviceType ||
+//       detectServiceType(formName, service || booking.service);
+
+//     //========================================================
+//     // 📌 RULE: HOUSE PAINTING — ONLY UPDATE ADDRESS + SLOT
+//     //========================================================
+//     if (serviceType === "house_painting") {
+//       console.log("Updating ONLY address & slot for house painting enquiry");
+
+//       // Update Address
+//       if (address) {
+//         booking.address.houseFlatNumber =
+//           address.houseFlatNumber ?? booking.address.houseFlatNumber;
+
+//         booking.address.streetArea =
+//           address.streetArea ?? booking.address.streetArea;
+
+//         booking.address.landMark = address.landMark ?? booking.address.landMark;
+
+//         booking.address.city = address.city ?? booking.address.city;
+
+//         booking.address.location = address.location ?? booking.address.location;
+//       }
+
+//       // Update Slot
+//       if (selectedSlot) {
+//         booking.selectedSlot.slotDate =
+//           selectedSlot.slotDate ?? booking.selectedSlot.slotDate;
+
+//         booking.selectedSlot.slotTime =
+//           selectedSlot.slotTime ?? booking.selectedSlot.slotTime;
+//       }
+
+//       // FORM NAME update allowed
+//       if (formName) {
+//         booking.formName = formName;
+//       }
+
+//       await booking.save();
+
+//       return res.status(200).json({
+//         success: true,
+//         message: "House painting enquiry updated (address & slot only)",
+//         booking,
+//       });
+//     }
+
+//     //========================================================
+//     // 📌 DEEP CLEANING OR OTHER SERVICE TYPES
+//     // → Normal full update logic
+//     //========================================================
+
+//     const { bookingDetails = {}, isEnquiry } = data;
+
+//     // Ensure nested objects
+//     booking.bookingDetails = booking.bookingDetails || {};
+//     booking.bookingDetails.firstPayment =
+//       booking.bookingDetails.firstPayment || {};
+//     booking.bookingDetails.finalPayment =
+//       booking.bookingDetails.finalPayment || {};
+
+//     //----------------------------
+//     // SERVICE UPDATE
+//     //----------------------------
+//     if (service?.length) {
+//       booking.service = service.map((s) => ({
+//         category: s.category || "",
+//         subCategory: s.subCategory || "",
+//         serviceName: s.serviceName || "",
+//         price: Number(s.price || 0),
+//         quantity: Number(s.quantity || 1),
+//         teamMembersRequired: Number(s.teamMembersRequired || 1),
+//       }));
+//     }
+
+//     //----------------------------
+//     // BOOKING DETAILS UPDATE
+//     //----------------------------
+//     const bookingAmount = Number(bookingDetails.bookingAmount || 0);
+//     const finalTotal = Number(bookingDetails.finalTotal || 0);
+//     const paidAmount = Number(bookingDetails.paidAmount || 0);
+
+//     booking.bookingDetails.finalTotal = finalTotal;
+//     booking.bookingDetails.bookingAmount = bookingAmount;
+//     booking.bookingDetails.paidAmount = paidAmount;
+//     booking.bookingDetails.amountYetToPay = Math.max(
+//       0,
+//       finalTotal - bookingAmount
+//     );
+
+//     //----------------------------
+//     // ADDRESS UPDATE (deep cleaning)
+//     //----------------------------
+//     if (address) {
+//       booking.address = {
+//         ...booking.address,
+//         ...address,
+//       };
+//     }
+
+//     //----------------------------
+//     // SLOT UPDATE (deep cleaning)
+//     //----------------------------
+//     if (selectedSlot) {
+//       booking.selectedSlot = {
+//         ...booking.selectedSlot,
+//         ...selectedSlot,
+//       };
+//     }
+
+//     if (typeof isEnquiry === "boolean") booking.isEnquiry = isEnquiry;
+
+//     if (formName) booking.formName = formName;
+
+//     await booking.save();
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Enquiry updated successfully",
+//       booking,
+//     });
+//   } catch (error) {
+//     console.error("Error updating enquiry:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
 // controllers/bookingController.js
+
 exports.updateBookingField = async (req, res) => {
   try {
     const { bookingId } = req.params;
