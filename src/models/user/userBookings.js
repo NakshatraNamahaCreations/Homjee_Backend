@@ -313,11 +313,12 @@ const userBookingSchema = new mongoose.Schema({
   isRead: { type: Boolean, default: false }, //New Field
   isDismmised: { type: Boolean, default: false }, //New Field
   invitedVendors: [invitedVendorSchema],
-  vendorRating: {
-    rating: { type: Number, min: 1, max: 5 },
-    review: String,
-    ratedAt: Date
-  },
+  vendorRatingUrl: String,
+  // vendorRating: {
+  //   rating: { type: Number, min: 1, max: 5 },
+  //   review: String,
+  //   ratedAt: Date
+  // },
   formName: { type: String, required: true }, // Add formName
   createdDate: { type: Date, default: Date.now },
 });

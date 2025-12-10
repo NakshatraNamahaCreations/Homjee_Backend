@@ -361,7 +361,6 @@ exports.createBooking = async (req, res) => {
       siteVisitCharges,
       paymentLink: {
         isActive: false,
-        isActive: false,
       },
       firstPayment,
       finalPayment,
@@ -436,7 +435,7 @@ exports.createBooking = async (req, res) => {
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
-      isActive: true,
+      isActive: false, // make it true once payment gateway impl and each makePayment make it false - once payment done
       providerRef: "razorpay_order_xyz",
     };
     const updatedBooking = await UserBooking.findByIdAndUpdate(
@@ -1009,10 +1008,10 @@ exports.adminCreateBooking = async (req, res) => {
     // --------------------------------------------
     // 🔥 CREATE REAL PAYMENT LINK AFTER SAVE
     // --------------------------------------------
-    const redirectionUrl = "http://localhost:5173/checkout/payment";
+    // const redirectionUrl = "http://localhost:5173/checkout/payment";
     const pay_type = "auto-pay";
 
-    const paymentLinkUrl = `${redirectionUrl}/${booking._id
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
       }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
@@ -1400,11 +1399,51 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     // -------------------------------
     let query = { ...baseQuery };
 
+    // .................Average Rating..........star
+    let ratingMatch = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+
+
     if (timeframe === "month") {
       const startOfMonth = moment().startOf("month").toDate();
       query.createdDate = { $gte: startOfMonth };
     }
+    // pipeline for "month" (all ratings in month) or "last" (last 50 ratings)
+    let ratingPipeline = [
+      { $match: ratingMatch },
+      { $sort: { createdAt: -1 } }
+    ];
 
+    if (timeframe === "last") {
+      ratingPipeline.push({ $limit: 50 }); // last 50 ratings
+    }
+
+    // then group to compute average and countx`
+    ratingPipeline.push({
+      $group: {
+        _id: null,
+        totalRatings: { $sum: 1 },
+        sumRatings: { $sum: "$rating" },
+        // NEW: strikes count (1-star or 2-star)
+        strikes: {
+          $sum: {
+            $cond: [{ $lte: ["$rating", 2] }, 1, 0]
+          }
+        }
+      }
+    });
+
+    const ratingStats = await VendorRating.aggregate(ratingPipeline);
+
+    let averageRating = 0;
+    let totalRatings = 0;
+    let strikes = 0;
+
+    if (ratingStats.length > 0 && ratingStats[0].totalRatings > 0) {
+      totalRatings = ratingStats[0].totalRatings;
+      averageRating = ratingStats[0].sumRatings / ratingStats[0].totalRatings;
+      strikes = ratingStats[0].strikes || 0;
+    }
+    // ...........
     let bookingsQuery = UserBooking.find(query);
 
     if (timeframe === "last") {
@@ -1423,6 +1462,10 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
         respondedLeads: 0,
         cancelledLeads: 0,
         timeframe,
+        // new fields
+        averageRating: 0,
+        totalRatings: 0,
+        strikes: 0
       });
     }
 
@@ -1519,6 +1562,11 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       respondedLeads,
       cancelledLeads,
       timeframe,
+      // ava.rating..
+      averageRating: parseFloat(averageRating.toFixed(2)),
+      totalRatings,
+      strikes // total 1★ + 2★ ratings in the selected timeframe
+
     });
   } catch (error) {
     console.error("Error calculating vendor performance metrics:", error);
@@ -1689,6 +1737,7 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       surveyLeads,
       hiredLeads,
       timeframe,
+      // ava.rating..
       averageRating: parseFloat(averageRating.toFixed(2)),
       totalRatings,
       strikes // total 1★ + 2★ ratings in the selected timeframe
@@ -2682,6 +2731,7 @@ exports.cancelLeadFromWebsite = async (req, res) => {
   }
 };
 
+// HOUSE PAINTING - FIRST PAYMENT REQUESTED - LINK SENT 
 exports.markPendingHiring = async (req, res) => {
   try {
     const { bookingId, startDate, teamMembers, noOfDays, quotationId } =
@@ -2839,7 +2889,7 @@ exports.markPendingHiring = async (req, res) => {
       installmentStage: "first",
     };
 
-    console.log("paymentLinkUrl", paymentLinkUrl);
+    // console.log("paymentLinkUrl", paymentLinkUrl);
 
     if (process.env.NODE_ENV !== "production") {
       booking.assignedProfessional.hiring.autoCancelAt = new Date(
@@ -3006,6 +3056,7 @@ exports.verifyStartProjectOtp = async (req, res) => {
   }
 };
 
+// HOUSE PAINTING - SECOND PAYMENT REQUESTED - LINK SENT 
 exports.requestSecondPayment = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -3091,8 +3142,10 @@ exports.requestSecondPayment = async (req, res) => {
     d.secondPayment.status = "pending";
     d.secondPayment.amount = secondInstallment;
 
-    // 🔗 Generate payment link
-    const paymentLinkUrl = `https://pay.example.com/${bookingId}-installment2-${Date.now()}`;
+    // 🔗 Generate payment link 
+    const pay_type = "auto-pay";
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
     d.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
@@ -3124,89 +3177,7 @@ exports.requestSecondPayment = async (req, res) => {
   }
 };
 
-// exports.requestingFinalPaymentEndProject = async (req, res) => {
-//   try {
-//     const { bookingId } = req.params;
-//     const booking = await UserBooking.findById(bookingId);
-//     if (!booking)
-//       return res.status(404).json({ success: false, message: "Booking not found" });
-
-//     const details = booking.bookingDetails;
-
-//     // Only allow ending if job is ongoing
-//     if (details.status !== "Project Ongoing") {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Only 'Project Ongoing' bookings can be requested to end",
-//       });
-//     }
-
-//     // ✅ Ensure both first and second payments are paid
-//     const firstPaid = details.firstPayment?.status === "paid";
-//     const secondPaid = details.secondPayment?.status === "paid";
-
-//     if (!firstPaid || !secondPaid) {
-//       return res.status(400).json({
-//         success: false,
-//         message:
-//           "At least 80% payment (First and Second installments) required before requesting to end job",
-//       });
-//     }
-
-//     // ✅ Compute latest approved total
-//     const approvedPriceChange = details.priceChanges
-//       ?.filter((p) => p.status === "approved")
-//       .slice(-1)[0];
-//     const totalExpected =
-//       approvedPriceChange?.proposedTotal ||
-//       details.finalTotal ||
-//       details.currentTotalAmount ||
-//       details.bookingAmount ||
-//       0;
-
-//     const paidSoFar = details.paidAmount || 0;
-//     const finalAmount = totalExpected - paidSoFar;
-
-//     // Record final payment setup
-//     details.finalPayment.status = "pending";
-//     details.finalPayment.amount = finalAmount;
-//     details.jobEndRequestedAt = new Date();
-
-//     console.log("finalAmount: ", finalAmount)
-
-//     const paymentLinkUrl = `https://pay.example.com/${bookingId}-final-${Date.now()}`;
-//     details.paymentLink = {
-//       url: paymentLinkUrl,
-//       isActive: true,
-//       providerRef: "razorpay_order_xyz",
-//     };
-
-//     details.paymentStatus = "Waiting for final payment";
-//     details.status = "Waiting for final payment";
-
-//     await booking.save();
-
-//     return res.json({
-//       success: true,
-//       message:
-//         "Final payment link generated. Awaiting customer payment to complete job.",
-//       bookingId: booking._id,
-//       status: details.status,
-//       paymentStatus: details.paymentStatus,
-//       paymentLink: paymentLinkUrl,
-//       amountDue: finalAmount,
-//       finalPayment: details.finalPayment.status,
-//     });
-//   } catch (err) {
-//     console.error("Error requesting job end:", err);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Server error",
-//       error: err.message,
-//     });
-//   }
-// };
-
+// HOUSE PAINTING, DEEP CLEANING - FINAL PAYMENT REQUESTED - LINK SENT 
 exports.requestingFinalPaymentEndProject = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -3282,8 +3253,11 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
     console.log("finalAmount", finalAmount);
     details.jobEndRequestedAt = new Date();
 
-    // ✅ Generate a fake payment link (replace later with real Razorpay call)
-    const paymentLinkUrl = `https://pay.example.com/${bookingId}-final-${Date.now()}`;
+    // now generate and store payment link
+    const pay_type = "auto-pay";
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
+
     details.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
@@ -3319,6 +3293,7 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
   }
 };
 
+// THREE INSTALLMENT PAY API
 exports.makePayment = async (req, res) => {
   try {
     const { bookingId, paymentMethod, paidAmount, providerRef } = req.body;
@@ -3467,7 +3442,7 @@ exports.makePayment = async (req, res) => {
     const fullyPaid = d.paidAmount >= finalTotal;
     if (fullyPaid) {
       d.paymentStatus = "Paid";
-
+      booking.vendorRatingUrl = `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}`
       // Mark project as completed if ongoing
       if (
         [
