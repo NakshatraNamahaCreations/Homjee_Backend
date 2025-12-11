@@ -10,6 +10,12 @@ router.get("/get-all-leads", bookingController.getAllLeadsBookings);
 router.get("/get-all-enquiries", bookingController.getAllEnquiries);
 router.get("/get-all-bookings", bookingController.getAllBookings);
 
+// 🔹 NEW — Get only Pending Leads
+router.get("/get-pending-leads", bookingController.getPendingLeads);
+
+// 🔹 NEW — Get all leads except Pending
+router.get("/get-non-pending-leads", bookingController.getNonPendingLeads);
+
 router.get(
   "/get-bookings-by-bookingid/:id",
   bookingController.getBookingsByBookingId
@@ -69,7 +75,7 @@ router.post("/update-status", bookingController.updateStatus);
 router.post("/cancel-booking/customer/website", bookingController.cancelLeadFromWebsite);
 router.post("/mark-pending-hiring", bookingController.markPendingHiring);
 router.post("/make-payment", bookingController.makePayment);
-router.post("/created-by-admin/make-payment/admin", bookingController.adminToCustomerPayment);
+// router.post("/created-by-admin/make-payment/admin", bookingController.adminToCustomerPayment);
 
 router.post(
   "/start-project/generating-otp/:bookingId",
