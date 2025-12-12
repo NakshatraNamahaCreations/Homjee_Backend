@@ -3973,25 +3973,23 @@ exports.updateUserBooking = async (req, res) => {
       if (bookingDetails.paidAmount !== undefined) {
         booking.bookingDetails.paidAmount = paidAmount;
       }
-      if (bookingDetails.status) {
-        booking.bookingDetails.status = bookingDetails.status;
-      }
-      if (bookingDetails.paymentMethod) {
-        booking.bookingDetails.paymentMethod = bookingDetails.paymentMethod;
-      }
-      if (bookingDetails.paymentStatus) {
-        booking.bookingDetails.paymentStatus = bookingDetails.paymentStatus;
-      }
+     
+      // if (bookingDetails.paymentMethod) {
+      //   booking.bookingDetails.paymentMethod = bookingDetails.paymentMethod;
+      // }
+      // if (bookingDetails.paymentStatus) {
+      //   booking.bookingDetails.paymentStatus = bookingDetails.paymentStatus;
+      // }
       if (bookingDetails.siteVisitCharges !== undefined && isHousePainting) {
         booking.bookingDetails.siteVisitCharges =
           bookingDetails.siteVisitCharges;
       }
 
       // Set Payment Status
-      if (refundAmount > 0) booking.bookingDetails.paymentStatus = "Refunded";
-      else if (amountYetToPay > 0)
-        booking.bookingDetails.paymentStatus = "Partial Payment";
-      else booking.bookingDetails.paymentStatus = "Paid";
+      // if (refundAmount > 0) booking.bookingDetails.paymentStatus = "Refunded";
+      // else if (amountYetToPay > 0)
+      //   booking.bookingDetails.paymentStatus = "Partial Payment";
+      // else booking.bookingDetails.paymentStatus = "Paid";
 
       /* ==================================
          🔥 PRICE CHANGES UPDATE
