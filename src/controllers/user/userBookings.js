@@ -232,6 +232,7 @@ function detectServiceType(formName, services) {
   // Default to deep_cleaning if unsure, or throw error
   return "deep_cleaning"; // or "other" if you prefer
 }
+// BOOKED FROM THE WEBSITE
 exports.createBooking = async (req, res) => {
   try {
     const {
@@ -298,8 +299,6 @@ exports.createBooking = async (req, res) => {
       finalPayment = {},
       secondPayment = {};
 
-    const packageMaster = await DeepCleaningPackageModel.find({});
-
     if (serviceType === "deep_cleaning") {
       // Find package booking amounts by cart item name
       // const result = service.map((cartItem) => {
@@ -314,7 +313,7 @@ exports.createBooking = async (req, res) => {
         0
       );
       bookingAmount = Math.round(originalTotalAmount * 0.2); //originalTotalAmount    // 20%
-      bookingAmount = Math.round(originalTotalAmount * 0.2); //originalTotalAmount    // 20%
+      // bookingAmount = Math.round(originalTotalAmount * 0.2); //originalTotalAmount    // 20%
 
       paidAmount = bookingAmount; // Math.round(originalTotalAmount * 0.2); // Or assign from bookingDetails if user paid already
       amountYetToPay = originalTotalAmount - paidAmount;
@@ -3465,7 +3464,7 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
   }
 };
 
-// THREE INSTALLMENT PAY API
+// THREE INSTALLMENT PAY API - FROM VENDOR APP REQUESTED TO WESBITE 
 exports.makePayment = async (req, res) => {
   try {
     const { bookingId, paymentMethod, paidAmount, providerRef } = req.body;
@@ -3681,6 +3680,101 @@ exports.makePayment = async (req, res) => {
     });
   } catch (err) {
     console.error("makePayment error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while processing payment",
+      error: err.message,
+    });
+  }
+};
+
+// **FIRST TIME PAYMENT CREAETED BY ADMIN AND CHANING isEnquiry FLAG TO FALSE - ADMIN REQUESTED
+exports.adminToCustomerPayment = async (req, res) => {
+  try {
+    const { bookingId, paymentMethod, paidAmount, providerRef } = req.body;
+
+    if (!bookingId || !paymentMethod || paidAmount == null) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId, paymentMethod, and paidAmount are required",
+      });
+    }
+
+    const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
+    if (!validPaymentMethods.includes(paymentMethod)) {
+      return res.status(400).json({ success: false, message: "Invalid payment method" });
+    }
+
+    const amount = Number(paidAmount);
+    if (amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Paid amount must be greater than zero",
+      });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking)
+      return res.status(404).json({ success: false, message: "Booking not found" });
+
+    const d = booking.bookingDetails || (booking.bookingDetails = {});
+    const serviceType = (booking.serviceType || "").toLowerCase();
+
+    // ======================================================
+    // 🟢 1. UPDATE FIRST PAYMENT
+    // ======================================================
+    if (!d.firstPayment) d.firstPayment = {};
+
+    d.firstPayment.status = "paid";
+    d.firstPayment.amount = amount;
+    d.firstPayment.paidAt = new Date();
+    d.firstPayment.method = paymentMethod;
+
+    // ======================================================
+    // 🟢 2. UPDATE TOTALS
+    // ======================================================
+    // const finalTotal = d.finalTotal || d.originalTotalAmount || 0;
+
+    // Update paid amount
+    d.paidAmount = (d.paidAmount || 0) + amount;
+
+    // Remaining amount
+    // d.amountYetToPay = finalTotal - d.paidAmount;
+
+    // ======================================================
+    // 🟢 3. DISABLE PAYMENT LINKS
+    // ======================================================
+    if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
+
+    // ======================================================
+    // 🟢 4. IF ENQUIRY → CONVERT TO LEAD
+    // ======================================================
+    if (booking.isEnquiry) booking.isEnquiry = false;
+
+    // ======================================================
+    // 🟢 5. PUSH PAYMENT ENTRY INTO payments[] HISTORY
+    // ======================================================
+    if (!booking.payments) booking.payments = [];
+
+    booking.payments.push({
+      at: new Date(),
+      method: paymentMethod,
+      amount,
+      providerRef: providerRef || undefined,
+    });
+
+    await booking.save();
+
+    return res.json({
+      success: true,
+      message: "Payment recorded successfully",
+      bookingId: booking._id,
+      paidAmount: d.paidAmount,
+      amountYetToPay: d.amountYetToPay,
+    });
+
+  } catch (err) {
+    console.error("making Payment error:", err);
     return res.status(500).json({
       success: false,
       message: "Server error while processing payment",
