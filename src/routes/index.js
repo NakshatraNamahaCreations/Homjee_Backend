@@ -16,6 +16,8 @@ const reminderRoutes = require("../routes/user/reminder");
 const manualPaymentRoutes = require("../routes/user/manualPayment");
 const kpiParametersRoutes = require("../routes/perfomance/kpi");
 const vendorRatingsystem = require("../routes/vendor/vendorRating");
+const InAppNotification = require("../routes/notification/Notification");
+const slotForVendorReschedule = require("./vendor/slot");
 
 // Performance KPI Parameters Routes
 router.use("/kpi-parameters", kpiParametersRoutes);
@@ -35,6 +37,8 @@ router.use("/minimumorder", minimumOrderRoutes);
 router.use("/reminders", reminderRoutes);
 router.use("/manual-payment", manualPaymentRoutes);
 router.use("/ratings", vendorRatingsystem);
+router.use("/in-app-notify", InAppNotification);
+router.use("/slot", slotForVendorReschedule);
 
 router.get("/hello-world/testing", (req, res) => {
   res.json({ message: "Hi Jimmy!" });

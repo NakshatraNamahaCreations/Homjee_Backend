@@ -6,7 +6,7 @@ const bcrypt = require("bcrypt");
 const dayjs = require("dayjs");
 const mongoose = require("mongoose");
 const { unlockRelatedQuotesByHiring } = require("../../helpers/quotes");
-const DeepCleaningPackageModel = require("../../models/products/DeepCleaningPackage");
+const notificationSchema = require("../../models/notification/Notification");
 const userSchema = require("../../models/user/userAuth");
 const VendorRating = require("../../models/vendor/vendorRating");
 
@@ -135,8 +135,8 @@ function computeFinalTotal(details) {
     (details.priceApprovalStatus
       ? "approved"
       : details.hasPriceUpdated
-      ? "pending"
-      : "approved");
+        ? "pending"
+        : "approved");
 
   if (state === "approved" && Number.isFinite(details.newTotal)) {
     return Number(details.newTotal);
@@ -178,9 +178,9 @@ function ensureFirstMilestone(details) {
     // but in your flow you want ORIGINAL for the 40% hurdle:
     const base = Number(
       details.bookingAmount ||
-        details.finalTotal ||
-        details.currentTotalAmount ||
-        0
+      details.finalTotal ||
+      details.currentTotalAmount ||
+      0
     );
     fm.baseTotal = base;
     fm.requiredAmount = roundMoney(base * 0.4);
@@ -367,20 +367,31 @@ exports.createBooking = async (req, res) => {
       ...(serviceType === "house_painting" ? { secondPayment } : {}),
     };
 
-    // Track payment line-item
+    // Track payment line-item for all service
     const payments =
-      serviceType === "house_painting"
-        ? []
-        : [
-            {
-              at: new Date(),
-              method: bookingDetailsConfig.paymentMethod,
-              amount: paidAmount,
-              providerRef: "razorpay_order_xyz",
-            },
-          ];
+      [
+        {
+          at: new Date(),
+          method: bookingDetailsConfig.paymentMethod,
+          amount: serviceType === "house_painting" ? siteVisitCharges : paidAmount,
+          providerRef: "razorpay_order_xyz",
+        },
+      ];
+    // untrack of hp site amt
+    // const payments =
+    //   serviceType === "house_painting"
+    //     ? []
+    //     : [
+    //       {
+    //         at: new Date(),
+    //         method: bookingDetailsConfig.paymentMethod,
+    //         amount: paidAmount,
+    //         providerRef: "razorpay_order_xyz",
+    //       },
+    //     ];
 
     // 📦 Create booking
+
     const booking = new UserBooking({
       customer: {
         customerId: customer?.customerId,
@@ -394,15 +405,16 @@ exports.createBooking = async (req, res) => {
         price: Number(s.price),
         quantity: Number(s.quantity) || 1,
         teamMembersRequired: Number(s.teamMembersRequired) || 0,
+        duration: Number(s.duration) || 0,
       })),
       serviceType,
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -428,9 +440,8 @@ exports.createBooking = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -443,13 +454,26 @@ exports.createBooking = async (req, res) => {
         $set: {
           "bookingDetails.paymentLink": {
             url: paymentLinkUrl,
-            isActive: true,
+            isActive: false,
             providerRef: "razorpay_order_xyz",
           },
         },
       },
       { new: true }
     );
+
+    const newBookingNotification = {
+      bookingId: booking._id,
+      notificationType: "NEW_LEAD_CREATED",
+      thumbnailTitle: "New Booking Scheduled",
+      notifyTo: "admin",
+      message: `New ${service[0]?.category} booking scheduled for ${moment(selectedSlot?.slotDate).format("DD-MM-YYYY")} at ${selectedSlot?.slotTime}`,
+      // metadata: { user_id, order_status },
+      status: "unread",
+      created_at: new Date(),
+    };
+    await notificationSchema.create(newBookingNotification);
+
     res.status(201).json({
       message: "Booking created successfully",
       bookingId: updatedBooking._id,
@@ -975,10 +999,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -1010,9 +1034,8 @@ exports.adminCreateBooking = async (req, res) => {
     // const redirectionUrl = "http://localhost:5173/checkout/payment";
     const pay_type = "auto-pay";
 
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -2800,6 +2823,7 @@ exports.updateStatus = async (req, res) => {
         message: "vendorId is required (or assign a professional first)",
       });
 
+    // "Customer Cancelled"
     // booking-level fields
     const updateFields = {};
     if (status) updateFields["bookingDetails.status"] = status;
@@ -2851,12 +2875,76 @@ exports.updateStatus = async (req, res) => {
       return res
         .status(404)
         .json({ message: "Booking not found after update" });
+
+    const vendorName = booking?.assignedProfessional?.name;
+    const ID = booking?.bookingDetails.booking_id
+
+    await notificationSchema.create({
+      bookingId: booking._id,
+      notificationType: "VENDOR_CANCEL_REQUESTED",
+      thumbnailTitle: "Vendor Cancel Requested",
+      message: `Vendor ${vendorName} marked Lead #${ID} as cancelled.`,
+      status: "unread",
+      created_at: new Date(),
+      notifyTo: "admin",
+    });
+
     res.status(200).json({ message: "Status Updated", booking: updated });
   } catch (error) {
     console.error("Error updating booking:", error);
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
+
+// reschedule booking by vendor 
+exports.rescheduleBooking = async (req, res) => {
+  try {
+    const { bookingId, vendorId, slotDate, slotTime } = req.body;
+
+    if (!bookingId || !slotDate || !slotTime) {
+      return res.status(400).json({
+        message: "bookingId, slotDate and slotTime are required",
+      });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({ message: "Booking not found" });
+    }
+
+    const actingVendorId =
+      vendorId || booking.assignedProfessional?.professionalId;
+
+    if (!actingVendorId) {
+      return res.status(400).json({ message: "vendorId is required" });
+    }
+
+    // ✅ Update booking safely
+    const updatedBooking = await UserBooking.findByIdAndUpdate(
+      bookingId,
+      {
+        $set: {
+          "bookingDetails.status": "Rescheduled",
+          "selectedSlot.slotDate": slotDate,
+          "selectedSlot.slotTime": slotTime,
+        },
+      },
+      { new: true }
+    );
+
+    return res.status(200).json({
+      message: "Booking rescheduled successfully",
+      booking: updatedBooking,
+    });
+  } catch (error) {
+    console.error("Error rescheduling booking:", error);
+    return res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
+  }
+};
+
 // cancellling by customer from the website
 // won't count this in Vendor's performance, this lead will vanish from the android app
 exports.cancelLeadFromWebsite = async (req, res) => {
@@ -2891,6 +2979,21 @@ exports.cancelLeadFromWebsite = async (req, res) => {
         .status(404)
         .json({ message: "Booking not found after update" });
 
+    const customerName = booking?.customer.name
+    const customer_id = booking?.customer.customerId
+    const ID = booking?.bookingDetails.booking_id
+    const newBookingNotification = {
+      bookingId: booking._id,
+      notificationType: "CUSTOMER_CANCEL_REQUESTED",
+      thumbnailTitle: "Lead Cancel Requested",
+      message: `Customer ${customerName} has requested cancellation for Lead #${ID}.`,
+      metaData: { customer_id, customerMsg: `Your booking #${ID} has been cancelled.` },
+      status: "unread",
+      created_at: new Date(),
+      notifyTo: "admin",
+    };
+    await notificationSchema.create(newBookingNotification);
+
     res.status(200).json({
       message: "Booking cancelled successfully",
       booking: updated,
@@ -2898,6 +3001,86 @@ exports.cancelLeadFromWebsite = async (req, res) => {
   } catch (error) {
     console.error("Error cancelling booking:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.approveCancelRequestAndRefund = async (req, res) => {
+  try {
+    const { bookingId, refundAmount = 0 } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId is required",
+      });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    const cancelledStatuses = ["Cancelled", "Customer Cancelled"];
+
+    // Booking must already be cancelled 
+    if (!cancelledStatuses.includes(booking.bookingDetails?.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking is not in cancelled state",
+      });
+    }
+
+    const d = booking.bookingDetails;
+    const cancelRequestedBy = booking.bookingDetails?.status === "Cancelled" ? "customer" : "vendor"
+
+    // ===============================
+    // REFUND LOGIC
+    // ===============================
+    if (refundAmount > 0) {
+      d.refundAmount = refundAmount;
+      d.paymentStatus = "Refunded";
+      d.refundedAt = new Date();
+    }
+    d.hasLeadLocked = cancelRequestedBy === 'vendor' ? true : false
+    d.cancelApprovedAt = new Date();
+    // d.cancelApprovedBy = "admin";
+
+    await booking.save();
+
+    // ===============================
+    // NOTIFICATION
+    // ===============================
+    const message =
+      refundAmount > 0
+        ? `A refund of Rs.${refundAmount} has been initiated.`
+        : "Your cancellation request has been approved.";
+
+    await notificationSchema.create({
+      bookingId: booking._id,
+      notificationType: "CANCEL_REQUEST_ACCEPTED",
+      thumbnailTitle: "Cancel Request Approved",
+      message,
+      status: "unread",
+      created_at: new Date(),
+      notifyTo: "customer",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Cancellation approved successfully",
+      refundAmount,
+    });
+
+  } catch (error) {
+    console.error("Error while approving cancellation request:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 
@@ -3313,9 +3496,8 @@ exports.requestSecondPayment = async (req, res) => {
 
     // 🔗 Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
     d.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
@@ -3425,9 +3607,8 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     details.paymentLink = {
       url: paymentLinkUrl,
@@ -3725,10 +3906,14 @@ exports.adminToCustomerPayment = async (req, res) => {
     // ======================================================
     if (!d.firstPayment) d.firstPayment = {};
 
-    d.firstPayment.status = "paid";
-    d.firstPayment.amount = amount;
-    d.firstPayment.paidAt = new Date();
-    d.firstPayment.method = paymentMethod;
+    if (serviceType === "house_painting") {
+      d.firstPayment = {};
+    } else {
+      d.firstPayment.status = "paid";
+      d.firstPayment.amount = amount;
+      d.firstPayment.paidAt = new Date();
+      d.firstPayment.method = paymentMethod;
+    }
 
     // ======================================================
     // 🟢 2. UPDATE TOTALS
@@ -3755,6 +3940,11 @@ exports.adminToCustomerPayment = async (req, res) => {
     // 🟢 5. PUSH PAYMENT ENTRY INTO payments[] HISTORY
     // ======================================================
     if (!booking.payments) booking.payments = [];
+    // ======================================================
+    // 🟢 6. UPDATE STATUS
+    // ======================================================
+    if (d.paymentStatus) d.paymentStatus = "Partial Payment";
+    if (d.paymentMethod) d.paymentMethod = "UPI";
 
     booking.payments.push({
       at: new Date(),

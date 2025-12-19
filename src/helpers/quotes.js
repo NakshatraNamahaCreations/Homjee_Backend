@@ -76,7 +76,7 @@ async function unlockRelatedQuotesByHiring(booking, reason = "auto") {
       }
     }
 
-    console.log("[quotes] nothing to unlock (no quotationId/leadId match)");
+    // console.log("[quotes] nothing to unlock (no quotationId/leadId match)");
   } catch (e) {
     console.error("unlockRelatedQuotesByHiring error:", e);
   }

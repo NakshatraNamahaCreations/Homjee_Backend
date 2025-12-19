@@ -42,20 +42,20 @@ async function cancelHiringBooking(booking, reason = "auto-unpaid") {
     if (hiring.status === "cancelled") return;
 
     // ✅ GUARD 2: Skip if ANY payment received (even partial)
-    if (details.paidAmount > 0) {
-      console.log(
-        `[auto-cancel] Skipping booking ${booking._id} — payment received: ₹${details.paidAmount}`
-      );
-      return;
-    }
+    // if (details.paidAmount > 0) {
+    //   console.log(
+    //     `[auto-cancel] Skipping booking ${booking._id} — payment received: ₹${details.paidAmount}`
+    //   );
+    //   return;
+    // }
 
     // ✅ GUARD 3: Skip if paymentStatus is "Paid" (redundant but safe)
     if (details.paymentStatus === "Paid") return;
 
     // ✅ Proceed to cancel only if truly unpaid
-    console.log(
-      `[auto-cancel] Cancelling booking ${booking._id} — no payment received`
-    );
+    // console.log(
+    //   `[auto-cancel] Cancelling booking ${booking._id} — no payment received`
+    // );
 
     // Invalidate link
     if (details.paymentLink) {

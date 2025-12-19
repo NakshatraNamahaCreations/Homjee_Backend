@@ -13,6 +13,7 @@ const serviceSchema = new mongoose.Schema({
   price: Number,
   quantity: Number,
   teamMembersRequired: Number,
+  duration: Number
 });
 const PriceChangeSchema = new mongoose.Schema(
   {
@@ -105,6 +106,7 @@ const bookingDetailsSchema = new mongoose.Schema(
         "Customer Cancelled",   // from the vendor app
         "Cancelled",   // from the website by customer themself
         "Customer Unreachable",
+        "Rescheduled", // rescheduled by vendor from vendor app
         "Admin Cancelled",
         "Pending Hiring", // mark hiring
         "Hired", // first payment done
@@ -155,6 +157,8 @@ const bookingDetailsSchema = new mongoose.Schema(
     amountYetToPay: { type: Number, default: 0 },
     bookingAmount: Number, // initial payment from website
     refundAmount: Number, // New field
+    cancelApprovedAt: Date,
+    hasLeadLocked: Boolean,
     // 💳 Payment method (last used)
     paymentMethod: {
       type: String,
