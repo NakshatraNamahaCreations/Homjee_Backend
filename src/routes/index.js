@@ -22,7 +22,7 @@ const InAppNotification = require("../routes/notification/Notification");
 const slotForVendorReschedule = require("./vendor/slot");
 
 router.use("/slots", slotRoutes);
-console.log("abc")
+
 // Performance KPI Parameters Routes
 router.use("/kpi-parameters", kpiParametersRoutes);
 

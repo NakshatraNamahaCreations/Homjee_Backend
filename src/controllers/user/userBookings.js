@@ -135,8 +135,8 @@ function computeFinalTotal(details) {
     (details.priceApprovalStatus
       ? "approved"
       : details.hasPriceUpdated
-        ? "pending"
-        : "approved");
+      ? "pending"
+      : "approved");
 
   if (state === "approved" && Number.isFinite(details.newTotal)) {
     return Number(details.newTotal);
@@ -178,9 +178,9 @@ function ensureFirstMilestone(details) {
     // but in your flow you want ORIGINAL for the 40% hurdle:
     const base = Number(
       details.bookingAmount ||
-      details.finalTotal ||
-      details.currentTotalAmount ||
-      0
+        details.finalTotal ||
+        details.currentTotalAmount ||
+        0
     );
     fm.baseTotal = base;
     fm.requiredAmount = roundMoney(base * 0.4);
@@ -238,7 +238,6 @@ const CANCELLED_STATUSES = Object.freeze([
   "Admin Cancelled",
   "Cancelled",
 ]);
-
 
 // BOOKED FROM THE WEBSITE
 exports.createBooking = async (req, res) => {
@@ -376,15 +375,15 @@ exports.createBooking = async (req, res) => {
     };
 
     // Track payment line-item for all service
-    const payments =
-      [
-        {
-          at: new Date(),
-          method: bookingDetailsConfig.paymentMethod,
-          amount: serviceType === "house_painting" ? siteVisitCharges : paidAmount,
-          providerRef: "razorpay_order_xyz",
-        },
-      ];
+    const payments = [
+      {
+        at: new Date(),
+        method: bookingDetailsConfig.paymentMethod,
+        amount:
+          serviceType === "house_painting" ? siteVisitCharges : paidAmount,
+        providerRef: "razorpay_order_xyz",
+      },
+    ];
     // untrack of hp site amt
     // const payments =
     //   serviceType === "house_painting"
@@ -419,10 +418,10 @@ exports.createBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -448,8 +447,9 @@ exports.createBooking = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -475,7 +475,9 @@ exports.createBooking = async (req, res) => {
       notificationType: "NEW_LEAD_CREATED",
       thumbnailTitle: "New Booking Scheduled",
       notifyTo: "admin",
-      message: `New ${service[0]?.category} booking scheduled for ${moment(selectedSlot?.slotDate).format("DD-MM-YYYY")} at ${selectedSlot?.slotTime}`,
+      message: `New ${service[0]?.category} booking scheduled for ${moment(
+        selectedSlot?.slotDate
+      ).format("DD-MM-YYYY")} at ${selectedSlot?.slotTime}`,
       // metadata: { user_id, order_status },
       status: "unread",
       created_at: new Date(),
@@ -493,7 +495,6 @@ exports.createBooking = async (req, res) => {
     res.status(500).json({ message: "Server error", error: error.message });
   }
 };
-
 
 exports.adminCreateBooking = async (req, res) => {
   try {
@@ -715,10 +716,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -750,8 +751,9 @@ exports.adminCreateBooking = async (req, res) => {
     // const redirectionUrl = "http://localhost:5173/checkout/payment";
     const pay_type = "auto-pay";
 
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -835,8 +837,7 @@ exports.getAllBookings = async (req, res) => {
   try {
     const filter = buildFilter(req.query);
 
-    const bookings = await UserBooking
-      .find(filter)
+    const bookings = await UserBooking.find(filter)
       .sort({ createdAt: -1 })
       .lean(); // 🚀 performance boost for large datasets
 
@@ -854,8 +855,7 @@ exports.getAllLeadsBookings = async (req, res) => {
       isEnquiry: false,
     });
 
-    const bookings = await UserBooking
-      .find(filter)
+    const bookings = await UserBooking.find(filter)
       .sort({ createdAt: -1 })
       .lean();
 
@@ -873,8 +873,7 @@ exports.getAllEnquiries = async (req, res) => {
       isEnquiry: true,
     });
 
-    const bookings = await UserBooking
-      .find(filter)
+    const bookings = await UserBooking.find(filter)
       .sort({ createdAt: -1 })
       .lean();
 
@@ -884,7 +883,6 @@ exports.getAllEnquiries = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
 
 exports.getPendingLeads = async (req, res) => {
   try {
@@ -912,35 +910,6 @@ exports.getPendingLeads = async (req, res) => {
   }
 };
 
-// exports.getNonPendingLeads = async (req, res) => {
-//   try {
-//     const { service, city, timePeriod, startDate, endDate } = req.query;
-
-//     const filter = buildFilter({
-//       service,
-//       city,
-//       timePeriod,
-//       startDate,
-//       endDate,
-//       isEnquiry: false,
-//     });
-
-//     // Exclude Pending status
-//     filter["bookingDetails.status"] = { $ne: "Pending" };
-
-//     const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
-
-//     // IMPORTANT → Return same key as /get-all-leads
-//     res.status(200).json({ allLeads: bookings });
-//   } catch (error) {
-//     console.error("Error fetching non-pending leads:", error);
-//     res.status(500).json({ message: "Server error" });
-//   }
-// };
-
-// ---------------------------------------
-// 🔧 Shared Helper Function: buildFilter()
-// ---------------------------------------
 exports.getNonPendingLeads = async (req, res) => {
   try {
     const { service, city, timePeriod, startDate, endDate } = req.query;
@@ -954,17 +923,12 @@ exports.getNonPendingLeads = async (req, res) => {
       isEnquiry: false,
     });
 
-    /* ------------------ STATUS FILTER ------------------ */
-    filter["bookingDetails.status"] = {
-      $nin: ["Pending", ...CANCELLED_STATUSES],
-    };
+    // Exclude Pending status
+    filter["bookingDetails.status"] = { $ne: "Pending" };
 
-    const bookings = await UserBooking
-      .find(filter)
-      .sort({ createdAt: -1 })
-      .lean(); // 🚀 large DB optimization
+    const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
 
-    // IMPORTANT → keep same response key
+    // IMPORTANT → Return same key as /get-all-leads
     res.status(200).json({ allLeads: bookings });
   } catch (error) {
     console.error("Error fetching non-pending leads:", error);
@@ -972,6 +936,39 @@ exports.getNonPendingLeads = async (req, res) => {
   }
 };
 
+// ---------------------------------------
+// 🔧 Shared Helper Function: buildFilter()
+// ---------------------------------------
+// exports.getNonPendingLeads = async (req, res) => {
+//   try {
+//     const { service, city, timePeriod, startDate, endDate } = req.query;
+
+//     const filter = buildFilter({
+//       service,
+//       city,
+//       timePeriod,
+//       startDate,
+//       endDate,
+//       isEnquiry: false,
+//     });
+
+//     /* ------------------ STATUS FILTER ------------------ */
+//     filter["bookingDetails.status"] = {
+//       $nin: ["Pending", ...CANCELLED_STATUSES],
+//     };
+
+//     const bookings = await UserBooking
+//       .find(filter)
+//       .sort({ createdAt: -1 })
+//       .lean(); // 🚀 large DB optimization
+
+//     // IMPORTANT → keep same response key
+//     res.status(200).json({ allLeads: bookings });
+//   } catch (error) {
+//     console.error("Error fetching non-pending leads:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
 
 function buildFilter({ service, city, startDate, endDate, isEnquiry }) {
   const filter = {};
@@ -2674,7 +2671,7 @@ exports.updateStatus = async (req, res) => {
         .json({ message: "Booking not found after update" });
 
     const vendorName = booking?.assignedProfessional?.name;
-    const ID = booking?.bookingDetails.booking_id
+    const ID = booking?.bookingDetails.booking_id;
 
     await notificationSchema.create({
       bookingId: booking._id,
@@ -2693,7 +2690,7 @@ exports.updateStatus = async (req, res) => {
   }
 };
 
-// reschedule booking by vendor 
+// reschedule booking by vendor
 exports.rescheduleBooking = async (req, res) => {
   try {
     const { bookingId, vendorId, slotDate, slotTime } = req.body;
@@ -2776,15 +2773,18 @@ exports.cancelLeadFromWebsite = async (req, res) => {
         .status(404)
         .json({ message: "Booking not found after update" });
 
-    const customerName = booking?.customer.name
-    const customer_id = booking?.customer.customerId
-    const ID = booking?.bookingDetails.booking_id
+    const customerName = booking?.customer.name;
+    const customer_id = booking?.customer.customerId;
+    const ID = booking?.bookingDetails.booking_id;
     const newBookingNotification = {
       bookingId: booking._id,
       notificationType: "CUSTOMER_CANCEL_REQUESTED",
       thumbnailTitle: "Lead Cancel Requested",
       message: `Customer ${customerName} has requested cancellation for Lead #${ID}.`,
-      metaData: { customer_id, customerMsg: `Your booking #${ID} has been cancelled.` },
+      metaData: {
+        customer_id,
+        customerMsg: `Your booking #${ID} has been cancelled.`,
+      },
       status: "unread",
       created_at: new Date(),
       notifyTo: "admin",
@@ -2798,6 +2798,74 @@ exports.cancelLeadFromWebsite = async (req, res) => {
   } catch (error) {
     console.error("Error cancelling booking:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.bookingCancelledbyAdmin = async (req, res) => {
+  try {
+    const { bookingId, refundAmount = 0 } = req.body;
+
+    if (!bookingId) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId is required",
+      });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    const d = booking.bookingDetails;
+    d.status = "Admin Cancelled";
+    // ===============================
+    // REFUND LOGIC
+    // ===============================
+    if (refundAmount > 0) {
+      d.refundAmount = refundAmount;
+      d.paymentStatus = "Refunded";
+      d.refundedAt = new Date();
+    }
+
+    d.cancelApprovedAt = new Date();
+   
+
+    await booking.save();
+
+    // ===============================
+    // NOTIFICATION
+    // ===============================
+    const message =
+      refundAmount > 0
+        ? `A refund of Rs.${refundAmount} has been initiated.`
+        : "Your cancellation request has been approved.";
+
+    await notificationSchema.create({
+      bookingId: booking._id,
+      notificationType: "CANCEL_REQUEST_ACCEPTED",
+      thumbnailTitle: "Cancel Request Approved",
+      message,
+      status: "unread",
+      created_at: new Date(),
+      notifyTo: "customer",
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Booking cancelled by admin successfully",
+      refundAmount,
+    });
+  } catch (error) {
+    console.error("Error while approving cancellation request:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 
@@ -2822,7 +2890,7 @@ exports.approveCancelRequestAndRefund = async (req, res) => {
 
     const cancelledStatuses = ["Cancelled", "Customer Cancelled"];
 
-    // Booking must already be cancelled 
+    // Booking must already be cancelled
     if (!cancelledStatuses.includes(booking.bookingDetails?.status)) {
       return res.status(400).json({
         success: false,
@@ -2831,7 +2899,8 @@ exports.approveCancelRequestAndRefund = async (req, res) => {
     }
 
     const d = booking.bookingDetails;
-    const cancelRequestedBy = booking.bookingDetails?.status === "Cancelled" ? "customer" : "vendor"
+    const cancelRequestedBy =
+      booking.bookingDetails?.status === "Cancelled" ? "customer" : "vendor";
 
     // ===============================
     // REFUND LOGIC
@@ -2841,7 +2910,7 @@ exports.approveCancelRequestAndRefund = async (req, res) => {
       d.paymentStatus = "Refunded";
       d.refundedAt = new Date();
     }
-    d.hasLeadLocked = cancelRequestedBy === 'vendor' ? true : false
+    d.hasLeadLocked = cancelRequestedBy === "vendor" ? true : false;
     d.cancelApprovedAt = new Date();
     // d.cancelApprovedBy = "admin";
 
@@ -2870,7 +2939,6 @@ exports.approveCancelRequestAndRefund = async (req, res) => {
       message: "Cancellation approved successfully",
       refundAmount,
     });
-
   } catch (error) {
     console.error("Error while approving cancellation request:", error);
     return res.status(500).json({
@@ -3293,8 +3361,9 @@ exports.requestSecondPayment = async (req, res) => {
 
     // 🔗 Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
     d.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
@@ -3404,8 +3473,9 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     details.paymentLink = {
       url: paymentLinkUrl,
