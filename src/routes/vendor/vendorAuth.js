@@ -37,6 +37,8 @@ const express = require("express");
 const router = express.Router();
 const vendorAuthController = require("../../controllers/vendor/vendorAuth");
 const parser = require("../../middleware/cloudinaryStorage");
+const multer = require("multer");
+const upload = multer({ storage: multer.memoryStorage() });
 
 const multerErrorHandler = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
@@ -130,4 +132,11 @@ router.get(
   "/get-teams-by-vendor/:vendorId",
   vendorAuthController.getTeamByVendorID
 );
+
+router.post(
+  "/bulk-upload",
+  upload.single("file"),
+  vendorAuthController.bulkUploadVendors
+);
+
 module.exports = router;

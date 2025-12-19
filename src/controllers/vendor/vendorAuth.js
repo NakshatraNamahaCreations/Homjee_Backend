@@ -4,6 +4,9 @@ const userBooking = require("../../models/user/userBookings");
 const crypto = require("crypto");
 const moment = require("moment");
 const mongoose = require("mongoose");
+const XLSX = require("xlsx");
+const Vendor = require("../../models/vendor/vendorAuth"); // adjust path
+
 
 function generateOTP() {
   return crypto.randomInt(1000, 10000);
@@ -702,5 +705,120 @@ exports.reduceCoin = async (req, res) => {
   } catch (error) {
     console.error("ReduceCoin error:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+
+
+exports.bulkUploadVendors = async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ message: "Excel file is required" });
+    }
+
+    // 1️⃣ Read Excel
+    const workbook = XLSX.read(req.file.buffer);
+    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(sheet);
+
+    if (!rows.length) {
+      return res.status(400).json({ message: "Excel is empty" });
+    }
+
+    // 2️⃣ Group by vendor mobile
+    const vendorMap = {};
+
+    for (const row of rows) {
+      const vendorKey = row.vendorMobile;
+
+      if (!vendorKey) continue;
+
+      // Create vendor entry if not exists
+      if (!vendorMap[vendorKey]) {
+        vendorMap[vendorKey] = {
+          vendor: {
+            vendorName: row.vendorName,
+            mobileNumber: row.vendorMobile,
+            dateOfBirth: row.vendorDOB,
+            yearOfWorking: row.vendorExperience,
+            city: row.city,
+            serviceType: row.serviceType,
+            capacity: row.capacity || 1,
+            serviceArea: row.serviceArea
+          },
+          documents: {
+            aadhaarNumber: row.vendorAadhaar,
+            panNumber: row.vendorPAN
+          },
+          bankDetails: {
+            accountNumber: row.accountNumber,
+            ifscCode: row.ifscCode,
+            bankName: row.bankName,
+            holderName: row.vendorName,
+            accountType: row.accountType || "Savings"
+          },
+          address: {
+            location: row.serviceArea,
+            latitude: Number(row.vendorLat),
+            longitude: Number(row.vendorLng)
+          },
+          team: []
+        };
+      }
+
+      // 3️⃣ Add team member (if exists)
+      if (row.memberName) {
+        vendorMap[vendorKey].team.push({
+          name: row.memberName,
+          mobileNumber: row.memberMobile,
+          dateOfBirth: row.memberDOB,
+          city: row.city,
+          serviceType: row.serviceType,
+          serviceArea: row.serviceArea,
+          documents: {
+            aadhaarNumber: row.memberAadhaar,
+            panNumber: row.memberPAN
+          },
+          bankDetails: {
+            accountNumber: row.memberAccountNumber,
+            ifscCode: row.ifscCode,
+            bankName: row.bankName,
+            holderName: row.memberName,
+            accountType: "Savings"
+          },
+          address: {
+            location: row.serviceArea,
+            latitude: Number(row.memberLat),
+            longitude: Number(row.memberLng)
+          },
+          markedLeaves: []
+        });
+      }
+    }
+
+    // 4️⃣ Save vendors + team
+    const createdVendors = [];
+
+    for (const data of Object.values(vendorMap)) {
+      const vendor = await Vendor.create({
+        vendor: data.vendor,
+        documents: data.documents,
+        bankDetails: data.bankDetails,
+        address: data.address,
+        team: data.team,
+        wallet: { coins: 0 }
+      });
+
+      createdVendors.push(vendor._id);
+    }
+
+    return res.status(201).json({
+      message: "Bulk vendors uploaded successfully",
+      totalVendors: createdVendors.length
+    });
+
+  } catch (error) {
+    console.error("Bulk upload error:", error);
+    res.status(500).json({ message: error.message });
   }
 };

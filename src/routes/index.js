@@ -16,9 +16,13 @@ const reminderRoutes = require("../routes/user/reminder");
 const manualPaymentRoutes = require("../routes/user/manualPayment");
 const kpiParametersRoutes = require("../routes/perfomance/kpi");
 const vendorRatingsystem = require("../routes/vendor/vendorRating");
+const slotRoutes = require("../routes/slot");
+
 const InAppNotification = require("../routes/notification/Notification");
 const slotForVendorReschedule = require("./vendor/slot");
 
+router.use("/slots", slotRoutes);
+console.log("abc")
 // Performance KPI Parameters Routes
 router.use("/kpi-parameters", kpiParametersRoutes);
 

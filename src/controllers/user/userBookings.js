@@ -232,6 +232,14 @@ function detectServiceType(formName, services) {
   // Default to deep_cleaning if unsure, or throw error
   return "deep_cleaning"; // or "other" if you prefer
 }
+
+const CANCELLED_STATUSES = Object.freeze([
+  "Customer Cancelled",
+  "Admin Cancelled",
+  "Cancelled",
+]);
+
+
 // BOOKED FROM THE WEBSITE
 exports.createBooking = async (req, res) => {
   try {
@@ -486,301 +494,7 @@ exports.createBooking = async (req, res) => {
   }
 };
 
-// exports.adminCreateBooking = async (req, res) => {
-//   try {
-//     const {
-//       customer,
-//       service,
-//       bookingDetails = {},
-//       assignedProfessional,
-//       address,
-//       selectedSlot,
-//       formName,
-//       isEnquiry,
-//     } = req.body;
 
-//     // ***************************************
-//     // 🟢 CHECK USER EXISTS OR CREATE NEW USER
-//     // ***************************************
-//     let checkUser = await userSchema.findOne({
-//       mobileNumber: customer.phone,
-//     });
-
-//     if (!checkUser) {
-//       // Create new user
-//       checkUser = new userSchema({
-//         userName: customer.name,
-//         mobileNumber: customer.phone,
-//         savedAddress: {
-//           uniqueCode: `ADDR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-//           address: address.streetArea,
-//           houseNumber: address.houseFlatNumber,
-//           landmark: address.landMark,
-//           latitude: address.location.coordinates[1],
-//           longitude: address.location.coordinates[0],
-//           city: address.city,
-//         },
-//       });
-
-//       await checkUser.save();
-//     }
-
-//     // -----------------------
-//     // Basic validations
-//     // -----------------------
-//     if (!service || !Array.isArray(service) || service.length === 0) {
-//       return res.status(400).json({ message: "Service list cannot be empty." });
-//     }
-
-//     if (
-//       !address ||
-//       !address.location ||
-//       !Array.isArray(address.location.coordinates) ||
-//       address.location.coordinates.length !== 2
-//     ) {
-//       return res.status(400).json({ message: "Invalid address coordinates." });
-//     }
-
-//     // detect service type
-//     const serviceType = detectServiceType(formName, service);
-
-//     // bookingAmount coming from admin UI (Option A expects siteVisitCharges separate)
-//     // Use let because we may adjust bookingAmount for house painting case
-//     // Use client-provided values whenever present (admin decides these)
-//     let bookingAmount = Number(bookingDetails?.bookingAmount ?? 0);
-//     // Accept paidAmount from payload — admin may pass 0 or existing paid values
-//     let paidAmount = Number(bookingDetails?.paidAmount ?? 0);
-//     // originalTotalAmount must come from client/frontend. Do NOT compute it server-side.
-//     // Fall back to finalTotal or 0 if client didn't provide it explicitly.
-//     let originalTotalAmount = Number(
-//       bookingDetails?.originalTotalAmount ?? bookingDetails?.finalTotal ?? 0
-//     );
-//     let finalTotal =
-//       Number(bookingDetails?.finalTotal ?? 0) || originalTotalAmount;
-//     let amountYetToPay = 0;
-//     let siteVisitCharges = 0;
-//     // When true, skip any updates to pricing/payment fields for this request
-//     let skipPriceUpdate = false;
-
-//     let firstPayment = {};
-//     let secondPayment = {};
-//     let finalPayment = {};
-
-//     // -----------------------
-//     // Deep cleaning logic
-//     // -----------------------
-//     if (serviceType === "deep_cleaning") {
-//       if (isEnquiry && bookingAmount > 0) {
-//         // ADMIN ENQUIRY rules (Deep Cleaning)
-//         // Use bookingAmount/finalTotal/paidAmount provided by client — do not overwrite
-//         amountYetToPay = Math.max(0, finalTotal - bookingAmount);
-
-//         firstPayment = {
-//           status: paidAmount > 0 ? "paid" : "pending",
-//           amount: bookingAmount,
-//           paidAt: paidAmount > 0 ? new Date() : null,
-//           method:
-//             paidAmount > 0
-//               ? bookingDetails?.paymentMethod || "None"
-//               : undefined,
-//         };
-
-//         finalPayment = {
-//           status: amountYetToPay > 0 ? "pending" : "paid",
-//           amount: Math.max(0, finalTotal - bookingAmount),
-//         };
-//       } else {
-//         // Normal (customer-like) behavior: derive booking amount from package master
-//         // const packageMaster = await DeepCleaningPackageModel.find({}).lean();
-//         // const result = service.map((cartItem) => {
-//         //   const pkg = packageMaster.find((p) => p.name === cartItem.serviceName);
-//         //   return pkg ? Number(pkg.bookingAmount || 0) : 0;
-//         // });
-
-//         // bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
-//         // Non-enquiry path: use provided paidAmount (if any) — otherwise treat bookingAmount as paid
-//         paidAmount = Number(bookingDetails?.paidAmount ?? bookingAmount);
-//         // If client hasn't provided finalTotal, fallback already handled above
-//         amountYetToPay = Math.max(0, finalTotal - paidAmount);
-
-//         firstPayment = {
-//           status: paidAmount > 0 ? "paid" : "No Payment",
-//           amount: paidAmount,
-//           paidAt: paidAmount > 0 ? new Date() : null,
-//           method:
-//             paidAmount > 0 ? bookingDetails?.paymentMethod || "None" : "None",
-//         };
-
-//         finalPayment = {
-//           status: amountYetToPay > 0 ? "pending" : "paid",
-//           amount: Math.max(0, finalTotal - paidAmount),
-//         };
-//       }
-//     }
-
-//     // -----------------------
-//     // House painting logic (Option A)
-//     // -----------------------
-//     if (serviceType === "house_painting") {
-//       // As per Option A: admin passes bookingAmount which we treat as siteVisitCharges
-//       siteVisitCharges = Number(bookingDetails?.bookingAmount || 0);
-
-//       if (isEnquiry && siteVisitCharges > 0) {
-//         // ADMIN ENQUIRY (Option A): store siteVisitCharges separately,
-//         // bookingAmount and payment values should be 0
-//         bookingAmount = 0;
-//         // For house painting enquiries we keep paidAmount 0 as per requirement
-//         paidAmount = 0;
-//         originalTotalAmount = 0;
-//         finalTotal = 0;
-//         amountYetToPay = 0;
-
-//         firstPayment = { status: "pending", amount: 0 };
-//         secondPayment = { status: "pending", amount: 0 };
-//         finalPayment = { status: "pending", amount: 0 };
-//       } else {
-//         // Normal customer-style booking for site visit: bookingAmount stays 0,
-//         // paidAmount equals siteVisitCharges (if your flow collects it)
-//         bookingAmount = 0;
-//         // For house painting non-enquiry admin flow we currently do not accept paid amount here (keep 0)
-//         paidAmount = 0;
-//         originalTotalAmount = 0;
-//         finalTotal = 0;
-//         amountYetToPay = 0;
-
-//         firstPayment = { status: "No Payment", amount: 0 };
-//         secondPayment = { status: "pending", amount: 0 };
-//         finalPayment = { status: "pending", amount: 0 };
-//       }
-//     }
-
-//     // -----------------------
-//     // Payment link and bookingId
-//     // -----------------------
-//     const bookingId = generateBookingId();
-
-//     let paymentLink = { isActive: false };
-//     if (bookingAmount > 0) {
-//       const paymentLinkUrl = `https://pay.example.com/${bookingId}-${Date.now()}`;
-//       paymentLink = {
-//         url: paymentLinkUrl,
-//         isActive: true,
-//         providerRef: "razorpay_order_xyz", // optional
-//       };
-//     }
-
-//     // -----------------------
-//     // Build bookingDetails config
-//     // -----------------------
-//     const bookingDetailsConfig = {
-//       booking_id: bookingId,
-//       bookingDate: bookingDetails?.bookingDate
-//         ? new Date(bookingDetails.bookingDate)
-//         : new Date(),
-//       bookingTime: new Date().toLocaleTimeString([], {
-//         hour: "2-digit",
-//         minute: "2-digit",
-//         hour12: true,
-//       }),
-//       status: "Pending",
-//       bookingAmount,
-//       originalTotalAmount,
-//       finalTotal:
-//         finalTotal === 0 && serviceType === "deep_cleaning"
-//           ? originalTotalAmount
-//           : finalTotal,
-//       paidAmount,
-//       amountYetToPay,
-//       paymentMethod: bookingDetails?.paymentMethod || "Cash",
-//       paymentStatus: "Unpaid",
-//       otp: generateOTP(),
-//       siteVisitCharges,
-//       firstPayment,
-//       secondPayment,
-//       finalPayment,
-//       paymentLink,
-//     };
-
-//     // -----------------------
-//     // Payments array: only add actual payment entries when not an enquiry and there is a paidAmount
-//     // -----------------------
-//     let payments = [];
-//     if (!isEnquiry && paidAmount > 0) {
-//       payments.push({
-//         at: new Date(),
-//         method: bookingDetailsConfig.paymentMethod,
-//         amount: paidAmount,
-//         providerRef: "razorpay_order_xyz",
-//       });
-//     }
-
-//     // -----------------------
-//     // Create booking object
-//     // -----------------------
-//     const booking = new UserBooking({
-//       // customer: {
-//       //   customerId: customer?.customerId,
-//       //   name: customer?.name,
-//       //   phone: customer?.phone,
-//       // },
-
-//       customer: {
-//         customerId: checkUser._id,
-//         name: checkUser.userName,
-//         phone: checkUser.mobileNumber,
-//       },
-//       service: service.map((s) => ({
-//         category: s.category,
-//         subCategory: s.subCategory,
-//         serviceName: s.serviceName,
-//         price: Number(s.price || 0),
-//         quantity: Number(s.quantity || 1),
-//         teamMembersRequired: Number(s.teamMembersRequired || 0),
-//       })),
-//       serviceType,
-//       bookingDetails: bookingDetailsConfig,
-//       assignedProfessional: assignedProfessional
-//         ? {
-//           professionalId: assignedProfessional.professionalId,
-//           name: assignedProfessional.name,
-//           phone: assignedProfessional.phone,
-//         }
-//         : undefined,
-//       address: {
-//         houseFlatNumber: address?.houseFlatNumber || "",
-//         streetArea: address?.streetArea || "",
-//         landMark: address?.landMark || "",
-//         city: address?.city || "",
-//         location: {
-//           type: "Point",
-//           coordinates: address.location.coordinates,
-//         },
-//       },
-//       selectedSlot: {
-//         slotDate:
-//           selectedSlot?.slotDate || new Date().toISOString().slice(0, 10),
-//         slotTime: selectedSlot?.slotTime || "10:00 AM",
-//       },
-//       payments,
-//       isEnquiry: Boolean(isEnquiry),
-//       formName: formName || "admin panel",
-//       createdDate: new Date(),
-//     });
-
-//     await booking.save();
-
-//     return res.status(201).json({
-//       message: "Admin booking created successfully",
-//       bookingId: booking._id,
-//       booking,
-//     });
-//   } catch (error) {
-//     console.error("Admin Create Booking Error:", error);
-//     return res
-//       .status(500)
-//       .json({ message: "Server error", error: error.message });
-//   }
-// };
 exports.adminCreateBooking = async (req, res) => {
   try {
     const {
@@ -994,6 +708,8 @@ exports.adminCreateBooking = async (req, res) => {
         price: Number(s.price || 0),
         quantity: Number(s.quantity || 1),
         teamMembersRequired: Number(s.teamMembersRequired || 0),
+        duration: s.duration,
+        packageId: s.packageId,
       })),
       serviceType,
       bookingDetails: bookingDetailsConfig,
@@ -1058,13 +774,71 @@ exports.adminCreateBooking = async (req, res) => {
   }
 };
 
+// exports.getAllBookings = async (req, res) => {
+//   try {
+//     const { service, city, timePeriod, startDate, endDate } = req.query;
+//     console.log({ service, city, timePeriod, startDate, endDate });
+
+//     const filter = buildFilter({ service, city, startDate, endDate });
+//     const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
+
+//     res.status(200).json({ bookings });
+//   } catch (error) {
+//     console.error("Error fetching bookings:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+// exports.getAllLeadsBookings = async (req, res) => {
+//   try {
+//     const { service, city, timePeriod, startDate, endDate } = req.query;
+//     console.log({ service, city, timePeriod, startDate, endDate });
+
+//     const filter = buildFilter({
+//       service,
+//       city,
+//       startDate,
+//       endDate,
+//       isEnquiry: false,
+//     });
+
+//     const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
+//     res.status(200).json({ allLeads: bookings });
+//   } catch (error) {
+//     console.error("Error fetching all leads:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+// exports.getAllEnquiries = async (req, res) => {
+//   try {
+//     const { service, city, timePeriod, startDate, endDate } = req.query;
+//     console.log({ service, city, timePeriod, startDate, endDate });
+
+//     const filter = buildFilter({
+//       service,
+//       city,
+//       startDate,
+//       endDate,
+//       isEnquiry: true,
+//     });
+
+//     const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
+//     res.status(200).json({ allEnquies: bookings });
+//   } catch (error) {
+//     console.error("Error fetching all enquiries:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
 exports.getAllBookings = async (req, res) => {
   try {
-    const { service, city, timePeriod, startDate, endDate } = req.query;
-    console.log({ service, city, timePeriod, startDate, endDate });
+    const filter = buildFilter(req.query);
 
-    const filter = buildFilter({ service, city, startDate, endDate });
-    const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
+    const bookings = await UserBooking
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .lean(); // 🚀 performance boost for large datasets
 
     res.status(200).json({ bookings });
   } catch (error) {
@@ -1075,18 +849,16 @@ exports.getAllBookings = async (req, res) => {
 
 exports.getAllLeadsBookings = async (req, res) => {
   try {
-    const { service, city, timePeriod, startDate, endDate } = req.query;
-    console.log({ service, city, timePeriod, startDate, endDate });
-
     const filter = buildFilter({
-      service,
-      city,
-      startDate,
-      endDate,
+      ...req.query,
       isEnquiry: false,
     });
 
-    const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
+    const bookings = await UserBooking
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .lean();
+
     res.status(200).json({ allLeads: bookings });
   } catch (error) {
     console.error("Error fetching all leads:", error);
@@ -1096,18 +868,16 @@ exports.getAllLeadsBookings = async (req, res) => {
 
 exports.getAllEnquiries = async (req, res) => {
   try {
-    const { service, city, timePeriod, startDate, endDate } = req.query;
-    console.log({ service, city, timePeriod, startDate, endDate });
-
     const filter = buildFilter({
-      service,
-      city,
-      startDate,
-      endDate,
+      ...req.query,
       isEnquiry: true,
     });
 
-    const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
+    const bookings = await UserBooking
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .lean();
+
     res.status(200).json({ allEnquies: bookings });
   } catch (error) {
     console.error("Error fetching all enquiries:", error);
@@ -1136,13 +906,41 @@ exports.getPendingLeads = async (req, res) => {
 
     // IMPORTANT → Return same key as old API so frontend works
     res.status(200).json({ allLeads: bookings });
-
   } catch (error) {
     console.error("Error fetching pending leads:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
+// exports.getNonPendingLeads = async (req, res) => {
+//   try {
+//     const { service, city, timePeriod, startDate, endDate } = req.query;
+
+//     const filter = buildFilter({
+//       service,
+//       city,
+//       timePeriod,
+//       startDate,
+//       endDate,
+//       isEnquiry: false,
+//     });
+
+//     // Exclude Pending status
+//     filter["bookingDetails.status"] = { $ne: "Pending" };
+
+//     const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
+
+//     // IMPORTANT → Return same key as /get-all-leads
+//     res.status(200).json({ allLeads: bookings });
+//   } catch (error) {
+//     console.error("Error fetching non-pending leads:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
+// ---------------------------------------
+// 🔧 Shared Helper Function: buildFilter()
+// ---------------------------------------
 exports.getNonPendingLeads = async (req, res) => {
   try {
     const { service, city, timePeriod, startDate, endDate } = req.query;
@@ -1156,25 +954,24 @@ exports.getNonPendingLeads = async (req, res) => {
       isEnquiry: false,
     });
 
-    // Exclude Pending status
-    filter["bookingDetails.status"] = { $ne: "Pending" };
+    /* ------------------ STATUS FILTER ------------------ */
+    filter["bookingDetails.status"] = {
+      $nin: ["Pending", ...CANCELLED_STATUSES],
+    };
 
-    const bookings = await UserBooking.find(filter).sort({ createdAt: -1 });
+    const bookings = await UserBooking
+      .find(filter)
+      .sort({ createdAt: -1 })
+      .lean(); // 🚀 large DB optimization
 
-    // IMPORTANT → Return same key as /get-all-leads
+    // IMPORTANT → keep same response key
     res.status(200).json({ allLeads: bookings });
-
   } catch (error) {
     console.error("Error fetching non-pending leads:", error);
     res.status(500).json({ message: "Server error" });
   }
 };
 
-
-
-// ---------------------------------------
-// 🔧 Shared Helper Function: buildFilter()
-// ---------------------------------------
 
 function buildFilter({ service, city, startDate, endDate, isEnquiry }) {
   const filter = {};
@@ -3645,7 +3442,7 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
   }
 };
 
-// THREE INSTALLMENT PAY API - FROM VENDOR APP REQUESTED TO WESBITE 
+// THREE INSTALLMENT PAY API - FROM VENDOR APP REQUESTED TO WESBITE
 exports.makePayment = async (req, res) => {
   try {
     const { bookingId, paymentMethod, paidAmount, providerRef } = req.body;
@@ -3883,7 +3680,9 @@ exports.adminToCustomerPayment = async (req, res) => {
 
     const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
     if (!validPaymentMethods.includes(paymentMethod)) {
-      return res.status(400).json({ success: false, message: "Invalid payment method" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid payment method" });
     }
 
     const amount = Number(paidAmount);
@@ -3896,7 +3695,9 @@ exports.adminToCustomerPayment = async (req, res) => {
 
     const booking = await UserBooking.findById(bookingId);
     if (!booking)
-      return res.status(404).json({ success: false, message: "Booking not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
 
     const d = booking.bookingDetails || (booking.bookingDetails = {});
     const serviceType = (booking.serviceType || "").toLowerCase();
@@ -3962,7 +3763,6 @@ exports.adminToCustomerPayment = async (req, res) => {
       paidAmount: d.paidAmount,
       amountYetToPay: d.amountYetToPay,
     });
-
   } catch (err) {
     console.error("making Payment error:", err);
     return res.status(500).json({
@@ -4069,7 +3869,6 @@ exports.updateSelectedSlot = async (req, res) => {
   }
 };
 
-
 // sonali updates....
 exports.updateUserBooking = async (req, res) => {
   try {
@@ -4138,6 +3937,8 @@ exports.updateUserBooking = async (req, res) => {
         price: s.price,
         quantity: s.quantity || 1,
         teamMembersRequired: s.teamMembersRequired || 0,
+        duration: s.duration || 0,
+        packageId: s.packageId,
       }));
     }
 
@@ -4163,7 +3964,7 @@ exports.updateUserBooking = async (req, res) => {
       if (bookingDetails.paidAmount !== undefined) {
         booking.bookingDetails.paidAmount = paidAmount;
       }
-     
+
       // if (bookingDetails.paymentMethod) {
       //   booking.bookingDetails.paymentMethod = bookingDetails.paymentMethod;
       // }
@@ -4334,8 +4135,10 @@ exports.updateEnquiry = async (req, res) => {
         subCategory: s.subCategory || "",
         serviceName: s.serviceName || "",
         price: Number(s.price || 0),
-        quantity: Number(s.quantity || 1),
-        teamMembersRequired: Number(s.teamMembersRequired || 1),
+        quantity: Number(s.quantity || 0),
+        teamMembersRequired: Number(s.teamMembersRequired || 0),
+        duration: s.duration || 0,
+        packageId: s.packageId,
       }));
     }
 
