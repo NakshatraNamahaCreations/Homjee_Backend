@@ -7,7 +7,6 @@ const mongoose = require("mongoose");
 const XLSX = require("xlsx");
 const Vendor = require("../../models/vendor/vendorAuth"); // adjust path
 
-
 function generateOTP() {
   return crypto.randomInt(1000, 10000);
 }
@@ -708,8 +707,6 @@ exports.reduceCoin = async (req, res) => {
   }
 };
 
-
-
 exports.bulkUploadVendors = async (req, res) => {
   try {
     if (!req.file) {
@@ -744,25 +741,25 @@ exports.bulkUploadVendors = async (req, res) => {
             city: row.city,
             serviceType: row.serviceType,
             capacity: row.capacity || 1,
-            serviceArea: row.serviceArea
+            serviceArea: row.serviceArea,
           },
           documents: {
             aadhaarNumber: row.vendorAadhaar,
-            panNumber: row.vendorPAN
+            panNumber: row.vendorPAN,
           },
           bankDetails: {
             accountNumber: row.accountNumber,
             ifscCode: row.ifscCode,
             bankName: row.bankName,
             holderName: row.vendorName,
-            accountType: row.accountType || "Savings"
+            accountType: row.accountType || "Savings",
           },
           address: {
             location: row.serviceArea,
             latitude: Number(row.vendorLat),
-            longitude: Number(row.vendorLng)
+            longitude: Number(row.vendorLng),
           },
-          team: []
+          team: [],
         };
       }
 
@@ -777,21 +774,21 @@ exports.bulkUploadVendors = async (req, res) => {
           serviceArea: row.serviceArea,
           documents: {
             aadhaarNumber: row.memberAadhaar,
-            panNumber: row.memberPAN
+            panNumber: row.memberPAN,
           },
           bankDetails: {
             accountNumber: row.memberAccountNumber,
             ifscCode: row.ifscCode,
             bankName: row.bankName,
             holderName: row.memberName,
-            accountType: "Savings"
+            accountType: "Savings",
           },
           address: {
             location: row.serviceArea,
             latitude: Number(row.memberLat),
-            longitude: Number(row.memberLng)
+            longitude: Number(row.memberLng),
           },
-          markedLeaves: []
+          markedLeaves: [],
         });
       }
     }
@@ -806,7 +803,7 @@ exports.bulkUploadVendors = async (req, res) => {
         bankDetails: data.bankDetails,
         address: data.address,
         team: data.team,
-        wallet: { coins: 0 }
+        wallet: { coins: 0 },
       });
 
       createdVendors.push(vendor._id);
@@ -814,11 +811,162 @@ exports.bulkUploadVendors = async (req, res) => {
 
     return res.status(201).json({
       message: "Bulk vendors uploaded successfully",
-      totalVendors: createdVendors.length
+      totalVendors: createdVendors.length,
     });
-
   } catch (error) {
     console.error("Bulk upload error:", error);
     res.status(500).json({ message: error.message });
+  }
+};
+
+
+
+/* ---------------------------------------
+   Utils
+--------------------------------------- */
+function timeToMinutes(timeStr) {
+  const [time, period] = timeStr.split(" ");
+  let [h, m] = time.split(":").map(Number);
+
+  if (period === "PM" && h !== 12) h += 12;
+  if (period === "AM" && h === 12) h = 0;
+
+  return h * 60 + m;
+}
+
+function getDistanceInMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371000;
+  const toRad = d => (d * Math.PI) / 180;
+
+  const dLat = toRad(lat2 - lat1);
+  const dLon = toRad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) ** 2;
+
+  return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
+}
+exports.getAvailableVendors = async (req, res) => {
+  try {
+    const {
+      lat,
+      lng,
+      slotDate,
+      slotTime,
+      serviceType,
+      requiredTeamMembers = 1,
+    } = req.body;
+
+    if (!lat || !lng || !slotDate || !slotTime || !serviceType) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required fields",
+      });
+    }
+
+    if (!["deep_cleaning", "house_painting"].includes(serviceType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid serviceType",
+      });
+    }
+
+    const normalizedDate = slotDate.split("T")[0];
+    const slotMinutes = timeToMinutes(slotTime);
+
+    /* ================= SERVICE TYPE SAFE MATCH ================= */
+    const serviceRegex =
+      serviceType === "deep_cleaning"
+        ? /deep\s*cleaning/i
+        : /house\s*painting/i;
+
+    /* ================= FETCH VENDORS ================= */
+    const vendors = await Vendor.find({
+      // activeStatus: true,
+      "vendor.serviceType": serviceRegex,
+    }).lean();
+
+    /* ================= LOCATION FILTER ================= */
+    const locationFiltered = vendors.filter(v => {
+      if (!v.address?.latitude || !v.address?.longitude) return false;
+
+      return (
+        getDistanceInMeters(
+          lat,
+          lng,
+          v.address.latitude,
+          v.address.longitude
+        ) <= 5000
+      );
+    });
+
+    if (!locationFiltered.length) {
+      return res.json({ success: true, count: 0, data: [] });
+    }
+
+    const vendorIds = locationFiltered.map(v => v._id.toString());
+
+    /* ================= SLOT CONFLICT ================= */
+    const bookings = await userBooking.find({
+      isEnquiry: false,
+      "assignedProfessional.professionalId": { $in: vendorIds },
+      "selectedSlot.slotDate": normalizedDate,
+      "bookingDetails.status": {
+        $nin: ["Cancelled", "Admin Cancelled", "Customer Cancelled"],
+      },
+    }).lean();
+
+    const blockedVendors = new Set();
+
+    for (const booking of bookings) {
+      if (!booking.selectedSlot?.slotTime) continue;
+
+      const start = timeToMinutes(booking.selectedSlot.slotTime);
+      const duration = Array.isArray(booking.service)
+        ? booking.service.reduce((s, x) => s + (x.duration || 120), 0)
+        : 120;
+
+      if (slotMinutes >= start && slotMinutes < start + duration) {
+        blockedVendors.add(booking.assignedProfessional.professionalId);
+      }
+    }
+
+    const slotAvailable = locationFiltered.filter(
+      v => !blockedVendors.has(v._id.toString())
+    );
+
+    /* ================= TEAM VALIDATION ================= */
+    const finalAvailable = [];
+
+    for (const vendor of slotAvailable) {
+      if (serviceType === "house_painting") {
+        finalAvailable.push(vendor);
+        continue;
+      }
+
+      const team = vendor.team || [];
+      const availableCount = team.filter(
+        m => !m.markedLeaves?.includes(normalizedDate)
+      ).length;
+
+      if (availableCount >= requiredTeamMembers) {
+        finalAvailable.push(vendor);
+      }
+    }
+
+    return res.json({
+      success: true,
+      count: finalAvailable.length,
+      data: finalAvailable,
+    });
+  } catch (err) {
+    console.error("Available vendor error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
   }
 };

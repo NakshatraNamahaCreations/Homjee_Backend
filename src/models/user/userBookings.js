@@ -13,8 +13,11 @@ const serviceSchema = new mongoose.Schema({
   price: Number,
   quantity: Number,
   teamMembersRequired: Number,
-  packageId: { type: mongoose.Schema.Types.ObjectId, ref: "DeepCleaningPackage" },
-  duration: Number
+  packageId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "DeepCleaningPackage",
+  },
+  duration: Number,
 });
 const PriceChangeSchema = new mongoose.Schema(
   {
@@ -104,9 +107,9 @@ const bookingDetailsSchema = new mongoose.Schema(
         "Survey Ongoing", //started - house painting
         "Survey Completed", //ended - house painting
         "Job Completed", //ended - deep cleaning
-        "Customer Cancelled",   // from the vendor app
-        "Admin Cancelled",   // from the vendor app
-        "Cancelled",   // from the website by customer themself
+        "Customer Cancelled", // from the vendor app
+        "Admin Cancelled", // from the vendor app
+        "Cancelled", // from the website by customer themself
         "Customer Unreachable",
         "Rescheduled", // rescheduled by vendor from vendor app
         "Admin Cancelled",
@@ -330,5 +333,11 @@ const userBookingSchema = new mongoose.Schema({
 });
 
 userBookingSchema.index({ "address.location": "2dsphere" });
+// ✅ Vendor booking conflict lookup
+userBookingSchema.index({
+  "assignedProfessional.professionalId": 1,
+  "selectedSlot.slotDate": 1,
+  "bookingDetails.status": 1,
+});
 
 module.exports = mongoose.model("UserBookings", userBookingSchema);

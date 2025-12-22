@@ -139,4 +139,5 @@ router.post(
   vendorAuthController.bulkUploadVendors
 );
 
+router.post("/get-available-vendor", vendorAuthController.getAvailableVendors)
 module.exports = router;

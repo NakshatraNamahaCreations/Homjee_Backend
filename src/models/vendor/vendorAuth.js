@@ -58,7 +58,9 @@
 
 // module.exports = mongoose.model("vendor", vendorAuthSchema);
 
+
 const mongoose = require("mongoose");
+
 
 const vendorInfo = new mongoose.Schema({
   vendorName: String,
@@ -147,5 +149,11 @@ const vendorAuthSchema = new mongoose.Schema({
     }
   }
 });
+
+// ✅ GEO index for location search (5km radius)
+vendorAuthSchema.index({ "address.geo": "2dsphere" });
+
+// ✅ Service type + active filter
+vendorAuthSchema.index({ "vendor.serviceType": 1, activeStatus: 1 });
 
 module.exports = mongoose.model("vendor", vendorAuthSchema);
