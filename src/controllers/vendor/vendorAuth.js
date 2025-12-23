@@ -11,6 +11,30 @@ function generateOTP() {
   return crypto.randomInt(1000, 10000);
 }
 
+const safeJson = (val) => {
+  try {
+    if (!val) return {};
+    if (typeof val === "object") return val;
+    return JSON.parse(val);
+  } catch (e) {
+    return {};
+  }
+};
+
+const hasOwn = (obj, key) =>
+  obj && Object.prototype.hasOwnProperty.call(obj, key);
+
+// Your rule: "" means IGNORE (keep existing)
+const isIgnorable = (v) => v === "" || v === undefined || v === null;
+
+const setIfPresent = (update, obj, key, path, castFn) => {
+  if (!hasOwn(obj, key)) return; // key not sent -> ignore
+  const val = obj[key];
+  if (isIgnorable(val)) return;  // empty string -> ignore
+  update[path] = castFn ? castFn(val) : val;
+};
+
+
 exports.createVendor = async (req, res) => {
   try {
     const vendor = JSON.parse(req.body.vendor || "{}");
@@ -78,6 +102,101 @@ exports.createVendor = async (req, res) => {
   }
 };
 
+exports.updateVendor = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    const existing = await vendorAuthSchema.findById(vendorId);
+    if (!existing) {
+      return res.status(404).json({ status: "fail", message: "Vendor not found" });
+    }
+
+    // JSON blocks coming from multipart/form-data
+    const vendor = safeJson(req.body.vendor);
+    const documents = safeJson(req.body.documents);
+    const bankDetails = safeJson(req.body.bankDetails);
+    const address = safeJson(req.body.address);
+
+    const update = {};
+
+    // ---------------- Vendor fields ----------------
+    setIfPresent(update, vendor, "vendorName", "vendor.vendorName");
+    setIfPresent(update, vendor, "mobileNumber", "vendor.mobileNumber");
+    setIfPresent(update, vendor, "dateOfBirth", "vendor.dateOfBirth");
+    setIfPresent(update, vendor, "yearOfWorking", "vendor.yearOfWorking");
+    setIfPresent(update, vendor, "city", "vendor.city");
+    setIfPresent(update, vendor, "serviceType", "vendor.serviceType");
+    setIfPresent(update, vendor, "capacity", "vendor.capacity");
+    setIfPresent(update, vendor, "serviceArea", "vendor.serviceArea");
+
+    // ---------------- Documents fields ----------------
+    setIfPresent(update, documents, "aadhaarNumber", "documents.aadhaarNumber");
+    setIfPresent(update, documents, "panNumber", "documents.panNumber");
+
+    // ---------------- Bank fields ----------------
+    setIfPresent(update, bankDetails, "accountNumber", "bankDetails.accountNumber");
+    setIfPresent(update, bankDetails, "ifscCode", "bankDetails.ifscCode");
+    setIfPresent(update, bankDetails, "bankName", "bankDetails.bankName");
+    setIfPresent(update, bankDetails, "holderName", "bankDetails.holderName");
+    setIfPresent(update, bankDetails, "accountType", "bankDetails.accountType");
+    setIfPresent(update, bankDetails, "gstNumber", "bankDetails.gstNumber");
+
+    // ---------------- Address fields ----------------
+    setIfPresent(update, address, "location", "address.location");
+    setIfPresent(update, address, "latitude", "address.latitude", Number);
+    setIfPresent(update, address, "longitude", "address.longitude", Number);
+
+    // ---------------- Files (only if uploaded) ----------------
+    // Multer field names must match your frontend: profileImage, aadhaarfrontImage, ...
+    const files = req.files || {};
+
+    if (files.profileImage?.[0]) {
+      update["vendor.profileImage"] = files.profileImage[0].path;
+    }
+    if (files.aadhaarfrontImage?.[0]) {
+      update["documents.aadhaarfrontImage"] = files.aadhaarfrontImage[0].path;
+    }
+    if (files.aadhaarbackImage?.[0]) {
+      update["documents.aadhaarbackImage"] = files.aadhaarbackImage[0].path;
+    }
+    if (files.panImage?.[0]) {
+      update["documents.panImage"] = files.panImage[0].path;
+    }
+    if (files.otherPolicy?.[0]) {
+      update["documents.otherPolicy"] = files.otherPolicy[0].path;
+    }
+
+    // If nothing to update, return existing safely
+    if (Object.keys(update).length === 0) {
+      return res.status(200).json({
+        status: "success",
+        message: "No changes detected",
+        vendor: existing,
+      });
+    }
+
+    const updated = await vendorAuthSchema.findByIdAndUpdate(
+      vendorId,
+      { $set: update },
+      { new: true, runValidators: true }
+    );
+
+    return res.status(200).json({
+      status: "success",
+      message: "Vendor updated successfully",
+      vendor: updated,
+    });
+  } catch (err) {
+    console.error("updateVendor error:", err);
+    return res.status(500).json({
+      status: "fail",
+      message: "Server error",
+      error: err.message,
+    });
+  }
+};
+
+
 exports.addTeamMember = async (req, res) => {
   try {
     const vendorId = req.body.vendorId;
@@ -86,16 +205,27 @@ exports.addTeamMember = async (req, res) => {
       return res.status(400).json({ message: "Valid vendorId is required" });
     }
 
-    const member = JSON.parse(req.body.member || "{}");
-    const documents = JSON.parse(req.body.documents || "{}");
-    const bankDetails = JSON.parse(req.body.bankDetails || "{}");
-    const addressDetails = JSON.parse(req.body.address || "{}");
+    // ✅ safer parse (won't crash)
+    const member = safeJson(req.body.member);
+    const documents = safeJson(req.body.documents);
+    const bankDetails = safeJson(req.body.bankDetails);
+    const addressDetails = safeJson(req.body.address);
 
     const profileImageUrl = req.files?.profileImage?.[0]?.path || "";
+
     const aadhaarfrontImageUrl = req.files?.aadhaarfrontImage?.[0]?.path || "";
     const aadhaarbackImageUrl = req.files?.aadhaarbackImage?.[0]?.path || "";
+
+    // ✅ backward compatibility: if FE sends "aadhaarImage" only
+    const aadhaarSingleUrl = req.files?.aadhaarImage?.[0]?.path || "";
+    const finalAadhaarFront = aadhaarfrontImageUrl || aadhaarSingleUrl || "";
+    const finalAadhaarBack = aadhaarbackImageUrl || aadhaarSingleUrl || "";
+
     const panImageUrl = req.files?.panImage?.[0]?.path || "";
     const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path || "";
+
+    const lat = parseFloat(addressDetails.latitude);
+    const lng = parseFloat(addressDetails.longitude);
 
     const teamMember = {
       name: member.name || "",
@@ -105,14 +235,16 @@ exports.addTeamMember = async (req, res) => {
       city: member.city || "",
       serviceType: member.serviceType || "",
       serviceArea: member.serviceArea || "",
+
       documents: {
         aadhaarNumber: documents.aadhaarNumber || "",
         panNumber: documents.panNumber || "",
-        aadhaarfrontImage: aadhaarfrontImageUrl,
-        aadhaarbackImage: aadhaarbackImageUrl,
+        aadhaarfrontImage: finalAadhaarFront,
+        aadhaarbackImage: finalAadhaarBack,
         panImage: panImageUrl,
         otherPolicy: otherPolicyUrl,
       },
+
       bankDetails: {
         accountNumber: bankDetails.accountNumber || "",
         ifscCode: bankDetails.ifscCode || "",
@@ -122,11 +254,15 @@ exports.addTeamMember = async (req, res) => {
         accountType: bankDetails.accountType || "",
         gstNumber: bankDetails.gstNumber || "",
       },
+
       address: {
         location: addressDetails.location || "",
-        latitude: parseFloat(addressDetails.latitude) || 0,
-        longitude: parseFloat(addressDetails.longitude) || 0,
+        latitude: Number.isNaN(lat) ? 0 : lat,
+        longitude: Number.isNaN(lng) ? 0 : lng,
       },
+
+      // ✅ IMPORTANT: always empty at creation
+      markedLeaves: [],
     };
 
     const vendor = await vendorAuthSchema.findByIdAndUpdate(
@@ -145,9 +281,118 @@ exports.addTeamMember = async (req, res) => {
     });
   } catch (err) {
     console.error("addTeamMember error:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+    return res.status(500).json({ message: "Server error", error: err.message });
   }
 };
+
+
+exports.updateTeamMember = async (req, res) => {
+  try {
+    const { vendorId, memberId } = req.body;
+
+    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ message: "Valid vendorId is required" });
+    }
+    if (!memberId || !mongoose.Types.ObjectId.isValid(memberId)) {
+      return res.status(400).json({ message: "Valid memberId is required" });
+    }
+
+    // ✅ safer parse
+    const member = safeJson(req.body.member);
+    const documents = safeJson(req.body.documents);
+    const bankDetails = safeJson(req.body.bankDetails);
+    const addressDetails = safeJson(req.body.address);
+
+    const vendor = await vendorAuthSchema.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+
+    const teamMember = vendor.team.id(memberId);
+    if (!teamMember) {
+      return res.status(404).json({ message: "Team member not found" });
+    }
+
+    // Ensure nested objects exist
+    teamMember.documents = teamMember.documents || {};
+    teamMember.bankDetails = teamMember.bankDetails || {};
+    teamMember.address = teamMember.address || {};
+
+    // ✅ Update member fields only if key was sent AND not empty string
+    if (hasOwn(member, "name") && !isIgnorable(member.name)) teamMember.name = member.name;
+    if (hasOwn(member, "mobileNumber") && !isIgnorable(member.mobileNumber)) teamMember.mobileNumber = member.mobileNumber;
+    if (hasOwn(member, "dateOfBirth") && !isIgnorable(member.dateOfBirth)) teamMember.dateOfBirth = member.dateOfBirth;
+    if (hasOwn(member, "city") && !isIgnorable(member.city)) teamMember.city = member.city;
+    if (hasOwn(member, "serviceType") && !isIgnorable(member.serviceType)) teamMember.serviceType = member.serviceType;
+    if (hasOwn(member, "serviceArea") && !isIgnorable(member.serviceArea)) teamMember.serviceArea = member.serviceArea;
+
+    // ✅ Images: only if uploaded
+    const profileImageUrl = req.files?.profileImage?.[0]?.path;
+    if (profileImageUrl) teamMember.profileImage = profileImageUrl;
+
+    // ✅ Documents text fields (ignore "")
+    if (hasOwn(documents, "aadhaarNumber") && !isIgnorable(documents.aadhaarNumber)) {
+      teamMember.documents.aadhaarNumber = documents.aadhaarNumber;
+    }
+    if (hasOwn(documents, "panNumber") && !isIgnorable(documents.panNumber)) {
+      teamMember.documents.panNumber = documents.panNumber;
+    }
+
+    // ✅ Documents images (only if uploaded)
+    const aadhaarfrontImageUrl = req.files?.aadhaarfrontImage?.[0]?.path;
+    const aadhaarbackImageUrl = req.files?.aadhaarbackImage?.[0]?.path;
+    const panImageUrl = req.files?.panImage?.[0]?.path;
+    const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path;
+
+    if (aadhaarfrontImageUrl) teamMember.documents.aadhaarfrontImage = aadhaarfrontImageUrl;
+    if (aadhaarbackImageUrl) teamMember.documents.aadhaarbackImage = aadhaarbackImageUrl;
+
+    // ✅ backward compat: if FE sends "aadhaarImage" only
+    const aadhaarSingleUrl = req.files?.aadhaarImage?.[0]?.path;
+    if (aadhaarSingleUrl && !aadhaarfrontImageUrl && !aadhaarbackImageUrl) {
+      teamMember.documents.aadhaarfrontImage = aadhaarSingleUrl;
+      teamMember.documents.aadhaarbackImage = aadhaarSingleUrl;
+    }
+
+    if (panImageUrl) teamMember.documents.panImage = panImageUrl;
+    if (otherPolicyUrl) teamMember.documents.otherPolicy = otherPolicyUrl;
+
+    // ✅ Bank details (ignore "")
+    if (hasOwn(bankDetails, "accountNumber") && !isIgnorable(bankDetails.accountNumber)) teamMember.bankDetails.accountNumber = bankDetails.accountNumber;
+    if (hasOwn(bankDetails, "ifscCode") && !isIgnorable(bankDetails.ifscCode)) teamMember.bankDetails.ifscCode = bankDetails.ifscCode;
+    if (hasOwn(bankDetails, "bankName") && !isIgnorable(bankDetails.bankName)) teamMember.bankDetails.bankName = bankDetails.bankName;
+    if (hasOwn(bankDetails, "branchName") && !isIgnorable(bankDetails.branchName)) teamMember.bankDetails.branchName = bankDetails.branchName;
+    if (hasOwn(bankDetails, "holderName") && !isIgnorable(bankDetails.holderName)) teamMember.bankDetails.holderName = bankDetails.holderName;
+    if (hasOwn(bankDetails, "accountType") && !isIgnorable(bankDetails.accountType)) teamMember.bankDetails.accountType = bankDetails.accountType;
+    if (hasOwn(bankDetails, "gstNumber") && !isIgnorable(bankDetails.gstNumber)) teamMember.bankDetails.gstNumber = bankDetails.gstNumber;
+
+    // ✅ Address (ignore "" and don't force 0)
+    if (hasOwn(addressDetails, "location") && !isIgnorable(addressDetails.location)) {
+      teamMember.address.location = addressDetails.location;
+    }
+    if (hasOwn(addressDetails, "latitude") && !isIgnorable(addressDetails.latitude)) {
+      const lat = parseFloat(addressDetails.latitude);
+      if (!Number.isNaN(lat)) teamMember.address.latitude = lat;
+    }
+    if (hasOwn(addressDetails, "longitude") && !isIgnorable(addressDetails.longitude)) {
+      const lng = parseFloat(addressDetails.longitude);
+      if (!Number.isNaN(lng)) teamMember.address.longitude = lng;
+    }
+
+    // ✅ IMPORTANT: do NOT touch markedLeaves here (so it stays as-is)
+
+    vendor.markModified("team");
+    await vendor.save();
+
+    return res.status(200).json({
+      message: "Team member updated",
+      team: vendor.team,
+    });
+  } catch (err) {
+    console.error("updateTeamMember error:", err);
+    return res.status(500).json({ message: "Server error", error: err.message });
+  }
+};
+;
+
 
 // seperate.......quick....................
 exports.addSmallTeamMember = async (req, res) => {

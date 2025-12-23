@@ -70,6 +70,27 @@ router.post(
   vendorAuthController.createVendor
 );
 
+router.put(
+  "/update-vendor/:vendorId",
+  (req, res, next) => {
+    try {
+      req.folder = "vendorDocs";
+      next();
+    } catch (err) {
+      next(err);
+    }
+  },
+  parser.fields([
+    { name: "profileImage", maxCount: 1 },
+    { name: "aadhaarfrontImage", maxCount: 1 },
+    { name: "aadhaarbackImage", maxCount: 1 },
+    { name: "panImage", maxCount: 1 },
+    { name: "otherPolicy", maxCount: 1 },
+  ]),
+  vendorAuthController.updateVendor
+);
+
+
 router.post(
   "/team/add",
   (req, res, next) => {
@@ -80,11 +101,31 @@ router.post(
     { name: "profileImage", maxCount: 1 },
     { name: "aadhaarfrontImage", maxCount: 1 },
     { name: "aadhaarbackImage", maxCount: 1 },
+    { name: "aadhaarImage", maxCount: 1 }, // ✅ add this
     { name: "panImage", maxCount: 1 },
     { name: "otherPolicy", maxCount: 1 },
   ]),
   vendorAuthController.addTeamMember
 );
+
+router.put(
+  "/team/update",
+  (req, res, next) => {
+    req.folder = "teamDocs";
+    next();
+  },
+  parser.fields([
+    { name: "profileImage", maxCount: 1 },
+    { name: "aadhaarfrontImage", maxCount: 1 },
+    { name: "aadhaarbackImage", maxCount: 1 },
+    { name: "aadhaarImage", maxCount: 1 }, // ✅ add this
+    { name: "panImage", maxCount: 1 },
+    { name: "otherPolicy", maxCount: 1 },
+  ]),
+  vendorAuthController.updateTeamMember
+);
+
+
 
 router.post("/login-with-mobile", vendorAuthController.loginWithMobile);
 router.post("/verify-otp", vendorAuthController.verifyOTP);
