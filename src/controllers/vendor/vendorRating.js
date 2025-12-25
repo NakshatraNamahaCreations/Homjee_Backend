@@ -1,6 +1,7 @@
 // controllers/vendorRatingController.js
 
 const VendorRating = require("../../models/vendor/vendorRating");
+const mongoose = require("mongoose");
 
 exports.addVendorRating = async (req, res) => {
     try {
@@ -108,4 +109,75 @@ exports.getVendorRating = async (req, res) => {
             message: "Something went wrong while fetching the rating",
         });
     }
+};
+
+
+exports.getLatestRatingsByVendorId = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit || "50", 10), 100);
+
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ status: "fail", message: "Invalid vendorId" });
+    }
+
+    const data = await VendorRating.aggregate([
+      { $match: { vendorId: new mongoose.Types.ObjectId(vendorId) } },
+      { $sort: { createdAt: -1, _id: -1 } },
+      { $limit: limit },
+
+      // join customer from "users" collection (because model is mongoose.model("user", ...))
+      {
+        $lookup: {
+          from: "users",
+          localField: "customerId",
+          foreignField: "_id",
+          as: "customerDoc",
+        },
+      },
+      { $unwind: { path: "$customerDoc", preserveNullAndEmptyArrays: true } },
+
+      // join booking from UserBookings collection
+      {
+        $lookup: {
+          from: "userbookings",
+          localField: "bookingId",
+          foreignField: "_id",
+          as: "bookingDoc",
+        },
+      },
+      { $unwind: { path: "$bookingDoc", preserveNullAndEmptyArrays: true } },
+
+      // final shape: only what you asked
+      {
+        $project: {
+          _id: 1,
+          rating: 1,
+          feedback: 1,
+          createdAt: 1,
+
+          customerName: {
+            $ifNull: ["$customerDoc.userName", "-"],
+          },
+
+          serviceType: {
+            $ifNull: ["$bookingDoc.serviceType", "-"],
+          },
+
+          bookingId: {
+            $ifNull: ["$bookingDoc.bookingDetails.booking_id", "-"],
+          },
+        },
+      },
+    ]);
+
+    return res.status(200).json({
+      status: "success",
+      count: data.length,
+      data,
+    });
+  } catch (err) {
+    console.error("getLatestRatingsByVendorId error:", err);
+    return res.status(500).json({ status: "error", message: "Server error" });
+  }
 };
