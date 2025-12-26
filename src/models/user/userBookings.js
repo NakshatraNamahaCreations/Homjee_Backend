@@ -110,6 +110,7 @@ const bookingDetailsSchema = new mongoose.Schema(
         "Customer Cancelled", // from the vendor app
         "Admin Cancelled", // from the vendor app
         "Cancelled", // from the website by customer themself
+        "Cancelled Rescheduled", // old booking canelled created new booking for reschedule by customer/admin
         "Customer Unreachable",
         "Rescheduled", // rescheduled by vendor from vendor app
         "Pending Hiring", // mark hiring
