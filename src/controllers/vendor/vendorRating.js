@@ -111,7 +111,6 @@ exports.getVendorRating = async (req, res) => {
     }
 };
 
-
 exports.getLatestRatingsByVendorId = async (req, res) => {
   try {
     const { vendorId } = req.params;
