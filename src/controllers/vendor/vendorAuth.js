@@ -30,10 +30,9 @@ const isIgnorable = (v) => v === "" || v === undefined || v === null;
 const setIfPresent = (update, obj, key, path, castFn) => {
   if (!hasOwn(obj, key)) return; // key not sent -> ignore
   const val = obj[key];
-  if (isIgnorable(val)) return;  // empty string -> ignore
+  if (isIgnorable(val)) return; // empty string -> ignore
   update[path] = castFn ? castFn(val) : val;
 };
-
 
 exports.createVendor = async (req, res) => {
   try {
@@ -108,7 +107,9 @@ exports.updateVendor = async (req, res) => {
 
     const existing = await vendorAuthSchema.findById(vendorId);
     if (!existing) {
-      return res.status(404).json({ status: "fail", message: "Vendor not found" });
+      return res
+        .status(404)
+        .json({ status: "fail", message: "Vendor not found" });
     }
 
     // JSON blocks coming from multipart/form-data
@@ -134,7 +135,12 @@ exports.updateVendor = async (req, res) => {
     setIfPresent(update, documents, "panNumber", "documents.panNumber");
 
     // ---------------- Bank fields ----------------
-    setIfPresent(update, bankDetails, "accountNumber", "bankDetails.accountNumber");
+    setIfPresent(
+      update,
+      bankDetails,
+      "accountNumber",
+      "bankDetails.accountNumber"
+    );
     setIfPresent(update, bankDetails, "ifscCode", "bankDetails.ifscCode");
     setIfPresent(update, bankDetails, "bankName", "bankDetails.bankName");
     setIfPresent(update, bankDetails, "holderName", "bankDetails.holderName");
@@ -195,7 +201,6 @@ exports.updateVendor = async (req, res) => {
     });
   }
 };
-
 
 exports.addTeamMember = async (req, res) => {
   try {
@@ -281,10 +286,11 @@ exports.addTeamMember = async (req, res) => {
     });
   } catch (err) {
     console.error("addTeamMember error:", err);
-    return res.status(500).json({ message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: err.message });
   }
 };
-
 
 exports.updateTeamMember = async (req, res) => {
   try {
@@ -317,19 +323,28 @@ exports.updateTeamMember = async (req, res) => {
     teamMember.address = teamMember.address || {};
 
     // ✅ Update member fields only if key was sent AND not empty string
-    if (hasOwn(member, "name") && !isIgnorable(member.name)) teamMember.name = member.name;
-    if (hasOwn(member, "mobileNumber") && !isIgnorable(member.mobileNumber)) teamMember.mobileNumber = member.mobileNumber;
-    if (hasOwn(member, "dateOfBirth") && !isIgnorable(member.dateOfBirth)) teamMember.dateOfBirth = member.dateOfBirth;
-    if (hasOwn(member, "city") && !isIgnorable(member.city)) teamMember.city = member.city;
-    if (hasOwn(member, "serviceType") && !isIgnorable(member.serviceType)) teamMember.serviceType = member.serviceType;
-    if (hasOwn(member, "serviceArea") && !isIgnorable(member.serviceArea)) teamMember.serviceArea = member.serviceArea;
+    if (hasOwn(member, "name") && !isIgnorable(member.name))
+      teamMember.name = member.name;
+    if (hasOwn(member, "mobileNumber") && !isIgnorable(member.mobileNumber))
+      teamMember.mobileNumber = member.mobileNumber;
+    if (hasOwn(member, "dateOfBirth") && !isIgnorable(member.dateOfBirth))
+      teamMember.dateOfBirth = member.dateOfBirth;
+    if (hasOwn(member, "city") && !isIgnorable(member.city))
+      teamMember.city = member.city;
+    if (hasOwn(member, "serviceType") && !isIgnorable(member.serviceType))
+      teamMember.serviceType = member.serviceType;
+    if (hasOwn(member, "serviceArea") && !isIgnorable(member.serviceArea))
+      teamMember.serviceArea = member.serviceArea;
 
     // ✅ Images: only if uploaded
     const profileImageUrl = req.files?.profileImage?.[0]?.path;
     if (profileImageUrl) teamMember.profileImage = profileImageUrl;
 
     // ✅ Documents text fields (ignore "")
-    if (hasOwn(documents, "aadhaarNumber") && !isIgnorable(documents.aadhaarNumber)) {
+    if (
+      hasOwn(documents, "aadhaarNumber") &&
+      !isIgnorable(documents.aadhaarNumber)
+    ) {
       teamMember.documents.aadhaarNumber = documents.aadhaarNumber;
     }
     if (hasOwn(documents, "panNumber") && !isIgnorable(documents.panNumber)) {
@@ -342,8 +357,10 @@ exports.updateTeamMember = async (req, res) => {
     const panImageUrl = req.files?.panImage?.[0]?.path;
     const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path;
 
-    if (aadhaarfrontImageUrl) teamMember.documents.aadhaarfrontImage = aadhaarfrontImageUrl;
-    if (aadhaarbackImageUrl) teamMember.documents.aadhaarbackImage = aadhaarbackImageUrl;
+    if (aadhaarfrontImageUrl)
+      teamMember.documents.aadhaarfrontImage = aadhaarfrontImageUrl;
+    if (aadhaarbackImageUrl)
+      teamMember.documents.aadhaarbackImage = aadhaarbackImageUrl;
 
     // ✅ backward compat: if FE sends "aadhaarImage" only
     const aadhaarSingleUrl = req.files?.aadhaarImage?.[0]?.path;
@@ -356,23 +373,51 @@ exports.updateTeamMember = async (req, res) => {
     if (otherPolicyUrl) teamMember.documents.otherPolicy = otherPolicyUrl;
 
     // ✅ Bank details (ignore "")
-    if (hasOwn(bankDetails, "accountNumber") && !isIgnorable(bankDetails.accountNumber)) teamMember.bankDetails.accountNumber = bankDetails.accountNumber;
-    if (hasOwn(bankDetails, "ifscCode") && !isIgnorable(bankDetails.ifscCode)) teamMember.bankDetails.ifscCode = bankDetails.ifscCode;
-    if (hasOwn(bankDetails, "bankName") && !isIgnorable(bankDetails.bankName)) teamMember.bankDetails.bankName = bankDetails.bankName;
-    if (hasOwn(bankDetails, "branchName") && !isIgnorable(bankDetails.branchName)) teamMember.bankDetails.branchName = bankDetails.branchName;
-    if (hasOwn(bankDetails, "holderName") && !isIgnorable(bankDetails.holderName)) teamMember.bankDetails.holderName = bankDetails.holderName;
-    if (hasOwn(bankDetails, "accountType") && !isIgnorable(bankDetails.accountType)) teamMember.bankDetails.accountType = bankDetails.accountType;
-    if (hasOwn(bankDetails, "gstNumber") && !isIgnorable(bankDetails.gstNumber)) teamMember.bankDetails.gstNumber = bankDetails.gstNumber;
+    if (
+      hasOwn(bankDetails, "accountNumber") &&
+      !isIgnorable(bankDetails.accountNumber)
+    )
+      teamMember.bankDetails.accountNumber = bankDetails.accountNumber;
+    if (hasOwn(bankDetails, "ifscCode") && !isIgnorable(bankDetails.ifscCode))
+      teamMember.bankDetails.ifscCode = bankDetails.ifscCode;
+    if (hasOwn(bankDetails, "bankName") && !isIgnorable(bankDetails.bankName))
+      teamMember.bankDetails.bankName = bankDetails.bankName;
+    if (
+      hasOwn(bankDetails, "branchName") &&
+      !isIgnorable(bankDetails.branchName)
+    )
+      teamMember.bankDetails.branchName = bankDetails.branchName;
+    if (
+      hasOwn(bankDetails, "holderName") &&
+      !isIgnorable(bankDetails.holderName)
+    )
+      teamMember.bankDetails.holderName = bankDetails.holderName;
+    if (
+      hasOwn(bankDetails, "accountType") &&
+      !isIgnorable(bankDetails.accountType)
+    )
+      teamMember.bankDetails.accountType = bankDetails.accountType;
+    if (hasOwn(bankDetails, "gstNumber") && !isIgnorable(bankDetails.gstNumber))
+      teamMember.bankDetails.gstNumber = bankDetails.gstNumber;
 
     // ✅ Address (ignore "" and don't force 0)
-    if (hasOwn(addressDetails, "location") && !isIgnorable(addressDetails.location)) {
+    if (
+      hasOwn(addressDetails, "location") &&
+      !isIgnorable(addressDetails.location)
+    ) {
       teamMember.address.location = addressDetails.location;
     }
-    if (hasOwn(addressDetails, "latitude") && !isIgnorable(addressDetails.latitude)) {
+    if (
+      hasOwn(addressDetails, "latitude") &&
+      !isIgnorable(addressDetails.latitude)
+    ) {
       const lat = parseFloat(addressDetails.latitude);
       if (!Number.isNaN(lat)) teamMember.address.latitude = lat;
     }
-    if (hasOwn(addressDetails, "longitude") && !isIgnorable(addressDetails.longitude)) {
+    if (
+      hasOwn(addressDetails, "longitude") &&
+      !isIgnorable(addressDetails.longitude)
+    ) {
       const lng = parseFloat(addressDetails.longitude);
       if (!Number.isNaN(lng)) teamMember.address.longitude = lng;
     }
@@ -388,12 +433,11 @@ exports.updateTeamMember = async (req, res) => {
     });
   } catch (err) {
     console.error("updateTeamMember error:", err);
-    return res.status(500).json({ message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ message: "Server error", error: err.message });
   }
 };
-;
-
-
 // seperate.......quick....................
 exports.addSmallTeamMember = async (req, res) => {
   try {
@@ -865,8 +909,8 @@ exports.resendOTP = async (req, res) => {
 
 exports.getVendorByVendorId = async (req, res) => {
   try {
-    const vendor = await vendorAuthSchema.findOne({
-      "vendor._id": req.params.id,
+    const vendor = await vendorAuthSchema.findById({
+      _id: req.params.id,
     });
     if (!vendor) {
       // console.log("Vendor Not Found");
@@ -885,18 +929,54 @@ exports.getVendorByVendorId = async (req, res) => {
 
 exports.getAllVendors = async (req, res) => {
   try {
-    const vendor = await vendorAuthSchema.find();
-    if (vendor.length === 0) {
+    const page = parseInt(req.query.page);
+    const limit = parseInt(req.query.limit);
+
+    // ✅ No pagination → old behavior
+    if (!page || !limit) {
+      const vendor = await vendorAuthSchema.find();
+
+      if (!vendor.length) {
+        return res.status(400).json({ message: "Vendor Not Found" });
+      }
+
+      return res.status(200).json({
+        status: true,
+        message: "Vendor Found",
+        vendor,
+        pagination: null,
+      });
+    }
+
+    // ✅ Pagination enabled
+    const skip = (page - 1) * limit;
+
+    const [vendor, total] = await Promise.all([
+      vendorAuthSchema.find().skip(skip).limit(limit),
+      vendorAuthSchema.countDocuments(),
+    ]);
+
+    if (!vendor.length) {
       return res.status(400).json({ message: "Vendor Not Found" });
     }
+
     res.status(200).json({
       status: true,
       message: "Vendor Found",
       vendor,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
     });
   } catch (error) {
-    console.log(error);
-    res.status(500).json({ message: "Server error", error: error });
+    console.error(error);
+    res.status(500).json({
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 
@@ -1064,8 +1144,6 @@ exports.bulkUploadVendors = async (req, res) => {
   }
 };
 
-
-
 /* ---------------------------------------
    Utils
 --------------------------------------- */
@@ -1081,19 +1159,18 @@ function timeToMinutes(timeStr) {
 
 function getDistanceInMeters(lat1, lon1, lat2, lon2) {
   const R = 6371000;
-  const toRad = d => (d * Math.PI) / 180;
+  const toRad = (d) => (d * Math.PI) / 180;
 
   const dLat = toRad(lat2 - lat1);
   const dLon = toRad(lon2 - lon1);
 
   const a =
     Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) *
-      Math.cos(toRad(lat2)) *
-      Math.sin(dLon / 2) ** 2;
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
 
   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
+
 exports.getAvailableVendors = async (req, res) => {
   try {
     const {
@@ -1135,7 +1212,7 @@ exports.getAvailableVendors = async (req, res) => {
     }).lean();
 
     /* ================= LOCATION FILTER ================= */
-    const locationFiltered = vendors.filter(v => {
+    const locationFiltered = vendors.filter((v) => {
       if (!v.address?.latitude || !v.address?.longitude) return false;
 
       return (
@@ -1152,17 +1229,19 @@ exports.getAvailableVendors = async (req, res) => {
       return res.json({ success: true, count: 0, data: [] });
     }
 
-    const vendorIds = locationFiltered.map(v => v._id.toString());
+    const vendorIds = locationFiltered.map((v) => v._id.toString());
 
     /* ================= SLOT CONFLICT ================= */
-    const bookings = await userBooking.find({
-      isEnquiry: false,
-      "assignedProfessional.professionalId": { $in: vendorIds },
-      "selectedSlot.slotDate": normalizedDate,
-      "bookingDetails.status": {
-        $nin: ["Cancelled", "Admin Cancelled", "Customer Cancelled"],
-      },
-    }).lean();
+    const bookings = await userBooking
+      .find({
+        isEnquiry: false,
+        "assignedProfessional.professionalId": { $in: vendorIds },
+        "selectedSlot.slotDate": normalizedDate,
+        "bookingDetails.status": {
+          $nin: ["Cancelled", "Admin Cancelled", "Customer Cancelled"],
+        },
+      })
+      .lean();
 
     const blockedVendors = new Set();
 
@@ -1180,7 +1259,7 @@ exports.getAvailableVendors = async (req, res) => {
     }
 
     const slotAvailable = locationFiltered.filter(
-      v => !blockedVendors.has(v._id.toString())
+      (v) => !blockedVendors.has(v._id.toString())
     );
 
     /* ================= TEAM VALIDATION ================= */
@@ -1194,7 +1273,7 @@ exports.getAvailableVendors = async (req, res) => {
 
       const team = vendor.team || [];
       const availableCount = team.filter(
-        m => !m.markedLeaves?.includes(normalizedDate)
+        (m) => !m.markedLeaves?.includes(normalizedDate)
       ).length;
 
       if (availableCount >= requiredTeamMembers) {
