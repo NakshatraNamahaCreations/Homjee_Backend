@@ -78,6 +78,8 @@ router.post("/approve-cancel-booking/refund/admin", bookingController.approveCan
 router.post("/cancel-booking-by-admin", bookingController.bookingCancelledbyAdmin);
 router.post("/mark-pending-hiring", bookingController.markPendingHiring);
 router.post("/make-payment", bookingController.makePayment);
+router.post("/update-manual-payment/cash/admin", bookingController.updateManualPayment);
+
 router.post("/created-by-admin/make-payment/admin", bookingController.adminToCustomerPayment);
 router.post(
   "/start-project/generating-otp/:bookingId",
@@ -114,7 +116,6 @@ router.put('/update-user-enquiry/:bookingId', bookingController.updateEnquiry);
 
 
 router.patch("/:bookingId/status", bookingController.updateBookingField);
-
 
 // router.put(
 //   "/update-assigned-professional/:bookingId",

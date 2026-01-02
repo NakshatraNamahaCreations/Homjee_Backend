@@ -135,8 +135,8 @@ function computeFinalTotal(details) {
     (details.priceApprovalStatus
       ? "approved"
       : details.hasPriceUpdated
-      ? "pending"
-      : "approved");
+        ? "pending"
+        : "approved");
 
   if (state === "approved" && Number.isFinite(details.newTotal)) {
     return Number(details.newTotal);
@@ -178,9 +178,9 @@ function ensureFirstMilestone(details) {
     // but in your flow you want ORIGINAL for the 40% hurdle:
     const base = Number(
       details.bookingAmount ||
-        details.finalTotal ||
-        details.currentTotalAmount ||
-        0
+      details.finalTotal ||
+      details.currentTotalAmount ||
+      0
     );
     fm.baseTotal = base;
     fm.requiredAmount = roundMoney(base * 0.4);
@@ -418,10 +418,10 @@ exports.createBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -447,9 +447,8 @@ exports.createBooking = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -716,10 +715,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -751,9 +750,8 @@ exports.adminCreateBooking = async (req, res) => {
     // const redirectionUrl = "http://localhost:5173/checkout/payment";
     const pay_type = "auto-pay";
 
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -2832,7 +2830,6 @@ exports.bookingCancelledbyAdmin = async (req, res) => {
     }
 
     d.cancelApprovedAt = new Date();
-   
 
     await booking.save();
 
@@ -3011,6 +3008,9 @@ exports.markPendingHiring = async (req, res) => {
     booking.bookingDetails.amountYetToPay = firstInstallment;
     booking.bookingDetails.firstPayment.amount =
       firstInstallment || Math.round(finalTotal * 0.4);
+
+    // presever installment amt
+    booking.bookingDetails.firstPayment.requestedAmount = firstInstallment
 
     const updatedQuote = await Quote.updateOne(
       { _id: quotationObjectId, status: "finalized" }, // Make sure you're selecting the finalized quote
@@ -3359,11 +3359,13 @@ exports.requestSecondPayment = async (req, res) => {
     d.secondPayment.status = "pending";
     d.secondPayment.amount = secondInstallment;
 
+    // presever installment amt
+    d.secondPayment.requestedAmount = secondInstallment
+
     // 🔗 Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
     d.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
@@ -3460,22 +3462,22 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
       0;
 
     const paidSoFar = details.paidAmount || 0;
-    const finalAmount = totalExpected - paidSoFar;
+    const finalAmount = totalExpected - paidSoFar; // final 20% installment
 
     // ✅ Record final payment setup
     details.finalPayment = {
       status: "pending",
       amount: finalAmount,
+      requestedAmount: finalAmount  // presever installment amt 
     };
-
     console.log("finalAmount", finalAmount);
+
     details.jobEndRequestedAt = new Date();
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     details.paymentLink = {
       url: paymentLinkUrl,
@@ -3736,7 +3738,444 @@ exports.makePayment = async (req, res) => {
   }
 };
 
-// **FIRST TIME PAYMENT CREAETED BY ADMIN AND CHANING isEnquiry FLAG TO FALSE - ADMIN REQUESTED
+// MANUAL PAYMENT - UPDATED BY ADMIN
+// exports.updateManualPayment = async (req, res) => {
+//   try {
+//     const { bookingId, paymentMethod, paidAmount, providerRef } = req.body;
+
+//     if (!bookingId || !paymentMethod || paidAmount == null) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "bookingId, paymentMethod, and paidAmount are required",
+//       });
+//     }
+
+//     const booking = await UserBooking.findById(bookingId);
+//     if (!booking) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Booking not found",
+//       });
+//     }
+
+//     const d = booking.bookingDetails || (booking.bookingDetails = {});
+//     const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
+
+//     if (!validPaymentMethods.includes(paymentMethod)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid payment method",
+//       });
+//     }
+
+//     const currentPaid = Number(paidAmount || 0);
+//     if (currentPaid <= 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "paidAmount must be greater than 0",
+//       });
+//     }
+
+//     // ---------- BOOKING-LEVEL NUMBERS (BEFORE THIS PAYMENT) ----------
+//     const existingPaid = Number(d.paidAmount || 0);
+//     const prevAmountYetToPay = Number(d.amountYetToPay || 0);
+
+//     // ✅ Prevent paying more than total pending amount
+//     if (currentPaid > prevAmountYetToPay) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `Amount exceeds total pending amount (${prevAmountYetToPay})`,
+//       });
+//     }
+
+//     // ---------- ENSURE PAYMENT OBJECTS ----------
+//     d.firstPayment = d.firstPayment || { amount: 0 };
+//     d.secondPayment = d.secondPayment || {
+//       amount: 0,
+//       paid: undefined, // keep undefined if not used earlier
+//       remaining: 0,
+//       status: "pending",
+//       method: "None",
+//     };
+//     d.finalPayment = d.finalPayment || {
+//       amount: 0,
+//       paid: undefined,
+//       remaining: 0,
+//       status: "pending",
+//       method: "None",
+//     };
+
+//     const firstPaidAmt = Number(d.firstPayment?.amount || 0);
+//     const secondInstallmentAmt = Number(d.secondPayment.amount || 0);
+
+//     // If finalPayment.amount is not stored, derive it once and store (optional but helpful)
+//     const totalBookingAmt = Number(d.bookingAmount || d.finalTotal || (existingPaid + prevAmountYetToPay) || 0);
+//     const derivedFinalAmt = Math.max(0, totalBookingAmt - firstPaidAmt - secondInstallmentAmt);
+//     if (!Number(d.finalPayment.amount || 0)) d.finalPayment.amount = derivedFinalAmt;
+
+//     // ---------- Derive paidSoFar for SECOND (before this call) ----------
+//     let secondPaidSoFar;
+//     if (d.secondPayment.paid != null) {
+//       secondPaidSoFar = Number(d.secondPayment.paid || 0);
+//     } else {
+//       // paid towards second = totalPaid - first - finalPaid(derived if exists)
+//       const finalPaidSoFar = Number(d.finalPayment.paid || 0);
+//       const roughSecondPaid = existingPaid - firstPaidAmt - finalPaidSoFar;
+//       secondPaidSoFar = Math.max(0, Math.min(secondInstallmentAmt, roughSecondPaid));
+//     }
+
+//     // ---------- ✅ APPLY PAYMENT WITH OVERFLOW HANDLING ----------
+//     const pendingSecond = Math.max(0, secondInstallmentAmt - secondPaidSoFar);
+
+//     const appliedToSecond = Math.min(currentPaid, pendingSecond);
+//     const overflowToFinal = currentPaid - appliedToSecond; // ✅ overpayment goes here
+
+//     // ----- Update SECOND -----
+//     const newSecondPaid = secondPaidSoFar + appliedToSecond;
+//     d.secondPayment.paid = newSecondPaid;
+//     d.secondPayment.remaining = Math.max(0, secondInstallmentAmt - newSecondPaid);
+
+//     if (d.secondPayment.remaining === 0) {
+//       d.secondPayment.status = "paid";
+//     } else if (newSecondPaid > 0) {
+//       d.secondPayment.status = "partial";
+//     } else {
+//       d.secondPayment.status = "pending";
+//     }
+
+//     if (appliedToSecond > 0 && (d.secondPayment.method === "None" || !d.secondPayment.method)) {
+//       d.secondPayment.method = paymentMethod;
+//     }
+
+//     // ----- Update FINAL (only if overflow exists) -----
+//     if (overflowToFinal > 0) {
+//       const finalAmt = Number(d.finalPayment.amount || derivedFinalAmt || 0);
+
+//       let finalPaidSoFar;
+//       if (d.finalPayment.paid != null) {
+//         finalPaidSoFar = Number(d.finalPayment.paid || 0);
+//       } else {
+//         // derive finalPaid: totalPaid - first - secondPaidSoFar (before this call)
+//         const roughFinalPaid = existingPaid - firstPaidAmt - secondPaidSoFar;
+//         finalPaidSoFar = Math.max(0, Math.min(finalAmt, roughFinalPaid));
+//       }
+
+//       const newFinalPaid = finalPaidSoFar + overflowToFinal;
+//       d.finalPayment.paid = newFinalPaid;
+//       d.finalPayment.remaining = Math.max(0, finalAmt - newFinalPaid);
+
+//       if (d.finalPayment.remaining === 0 && finalAmt > 0) {
+//         d.finalPayment.status = "paid";
+//       } else if (newFinalPaid > 0) {
+//         d.finalPayment.status = "partial";
+//       } else {
+//         d.finalPayment.status = "pending";
+//       }
+
+//       if (d.finalPayment.method === "None" || !d.finalPayment.method) {
+//         d.finalPayment.method = paymentMethod;
+//       }
+//     }
+
+//     // ---------- UPDATE BOOKING-LEVEL NUMBERS ----------
+//     d.paidAmount = existingPaid + currentPaid;
+//     d.paymentMethod = paymentMethod;
+
+//     const remainingBookingAmount = Math.max(0, prevAmountYetToPay - currentPaid);
+//     d.amountYetToPay = remainingBookingAmount;
+
+//     if (remainingBookingAmount === 0) {
+//       d.paymentStatus = "Paid";
+//       if (d.paymentLink?.isActive != null) d.paymentLink.isActive = false;
+//     } else {
+//       d.paymentStatus = "Partial Payment";
+//       // Optional: if second is fully paid, move stage to final
+//       if (d.paymentLink?.installmentStage && d.secondPayment.remaining === 0) {
+//         d.paymentLink.installmentStage = "final";
+//       }
+//     }
+
+//     // ---------- LOG PAYMENT ----------
+//     booking.payments = booking.payments || [];
+//     booking.payments.push({
+//       at: new Date(),
+//       method: paymentMethod,
+//       amount: currentPaid,
+//       providerRef: providerRef || undefined,
+//     });
+//     // 🧩 Disable any active payment link
+
+//     if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
+//     await booking.save();
+
+//     return res.status(200).json({
+//       success: true,
+//       message: "Payment updated successfully",
+//       paidAmount: d.paidAmount,
+//       amountYetToPay: d.amountYetToPay,
+//       secondPayment: d.secondPayment,
+//       finalPayment: d.finalPayment,
+//       overflowAppliedToFinal: overflowToFinal, // helpful for UI/debug
+//     });
+//   } catch (error) {
+//     console.log(error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Server error",
+//     });
+//   }
+// };
+
+exports.updateManualPayment = async (req, res) => {
+  // update final payment amount.... 2-1-2026
+  try {
+    const { bookingId, paymentMethod, paidAmount, providerRef } = req.body;
+
+    if (!bookingId || !paymentMethod || paidAmount == null) {
+      return res.status(400).json({
+        success: false,
+        message: "bookingId, paymentMethod, and paidAmount are required",
+      });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found",
+      });
+    }
+
+    const d = booking.bookingDetails || (booking.bookingDetails = {});
+    const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
+
+    if (!validPaymentMethods.includes(paymentMethod)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment method",
+      });
+    }
+
+    const currentPaid = Number(paidAmount || 0);
+    if (currentPaid <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "paidAmount must be greater than 0",
+      });
+    }
+
+    // ---------- BOOKING-LEVEL NUMBERS (BEFORE THIS PAYMENT) ----------
+    const existingPaid = Number(d.paidAmount || 0);
+    const prevAmountYetToPay = Number(d.amountYetToPay || 0);
+
+    if (currentPaid > prevAmountYetToPay) {
+      return res.status(400).json({
+        success: false,
+        message: `Amount exceeds total pending amount (${prevAmountYetToPay})`,
+      });
+    }
+
+    // ---------- ENSURE PAYMENT OBJECTS ----------
+    d.firstPayment = d.firstPayment || { amount: 0 };
+
+    // ✅ secondPayment now supports requestedAmount + running paid amount
+    d.secondPayment = d.secondPayment || {
+      requestedAmount: undefined, // fixed target (ex: 4080)
+      amount: 0,                 // running paid total (ex: 0 -> 4000 -> 4050)
+      remaining: 0,
+      status: "pending",
+      method: "None",
+      paid: undefined, // keep for backward-compat
+    };
+
+    d.finalPayment = d.finalPayment || {
+      amount: 0, // final requested amount (your existing meaning)
+      paid: undefined,
+      remaining: 0,
+      status: "pending",
+      method: "None",
+    };
+
+    const firstPaidAmt = Number(d.firstPayment?.amount || 0);
+
+    // ---------- ✅ NORMALIZE SECOND INSTALLMENT FOR LEGACY DATA ----------
+    // If old records stored "requested installment" in secondPayment.amount,
+    // we move it into requestedAmount and reset amount to "paid so far"
+    const normalizeSecondPayment = () => {
+      // If requestedAmount missing, assume old `amount` was the requested installment
+      if (d.secondPayment.requestedAmount == null) {
+        const oldRequested = Number(d.secondPayment.amount || 0);
+        d.secondPayment.requestedAmount = oldRequested;
+
+        // paid so far: prefer explicit `paid` if it existed, else 0 for pending, else keep amount
+        const paidSoFar =
+          d.secondPayment.paid != null
+            ? Number(d.secondPayment.paid || 0)
+            : d.secondPayment.status === "pending"
+              ? 0
+              : 0;
+
+        d.secondPayment.amount = paidSoFar;
+      }
+
+      // Edge-case: some records might be like:
+      // amount=4080, requestedAmount=4080, status=pending, remaining=0 (looks like not yet paid)
+      // We only reset to 0 if booking-level existingPaid suggests no second payment happened.
+      const requested = Number(d.secondPayment.requestedAmount || 0);
+      const amt = Number(d.secondPayment.amount || 0);
+
+      if (
+        requested > 0 &&
+        d.secondPayment.status === "pending" &&
+        amt === requested &&
+        Number(d.secondPayment.remaining || 0) === 0
+      ) {
+        // Heuristic: if existingPaid is basically only first payment (or less),
+        // then second wasn't paid yet and amount is still "requested".
+        const finalPaidSoFar = Number(d.finalPayment.paid || 0);
+        const roughSecondPaid = existingPaid - firstPaidAmt - finalPaidSoFar;
+
+        if (roughSecondPaid <= 0) {
+          d.secondPayment.amount = 0;
+        }
+      }
+
+      // Always keep remaining consistent with requested - paid
+      const requested2 = Number(d.secondPayment.requestedAmount || 0);
+      const paid2 = Number(d.secondPayment.amount || 0);
+
+      d.secondPayment.remaining = Math.max(0, requested2 - paid2);
+
+      if (paid2 === 0) d.secondPayment.status = "pending";
+      else if (paid2 >= requested2 && requested2 > 0) d.secondPayment.status = "paid";
+      else d.secondPayment.status = "partial";
+    };
+
+    normalizeSecondPayment();
+
+    const requestedSecondAmt = Number(d.secondPayment.requestedAmount || 0);
+
+    // ---------- FINAL AMOUNT DERIVATION (unchanged conceptually, but use requestedSecondAmt) ----------
+    const totalBookingAmt = Number(d.finalTotal || (existingPaid + prevAmountYetToPay) || 0);
+    const derivedFinalAmt = Math.max(0, totalBookingAmt - firstPaidAmt - requestedSecondAmt);
+    if (!Number(d.finalPayment.amount || 0)) d.finalPayment.amount = derivedFinalAmt;
+
+    // ---------- ✅ APPLY PAYMENT WITH YOUR REQUIRED SCENARIO + OVERFLOW ----------
+    // paid so far in second installment (running)
+    let secondPaidSoFar = Number(d.secondPayment.amount || 0);
+
+    // pending in second installment
+    const pendingSecond = Math.max(0, requestedSecondAmt - secondPaidSoFar);
+
+    // apply only till requestedAmount
+    const appliedToSecond = Math.min(currentPaid, pendingSecond);
+
+    // overflow remains SAME as your current logic
+    const overflowToFinal = currentPaid - appliedToSecond;
+
+    // ----- Update SECOND (matches your example exactly) -----
+    if (appliedToSecond > 0) {
+      const newSecondPaid = secondPaidSoFar + appliedToSecond;
+
+      d.secondPayment.amount = newSecondPaid; // ✅ running paid amount
+      d.secondPayment.remaining = Math.max(0, requestedSecondAmt - newSecondPaid);
+
+      if (newSecondPaid >= requestedSecondAmt && requestedSecondAmt > 0) {
+        d.secondPayment.status = "paid";
+        d.secondPayment.remaining = 0;
+      } else if (newSecondPaid > 0) {
+        d.secondPayment.status = "partial";
+      } else {
+        d.secondPayment.status = "pending";
+      }
+
+      // optional: keep `paid` synced for backward compatibility
+      d.secondPayment.paid = newSecondPaid;
+
+      if (d.secondPayment.method === "None" || !d.secondPayment.method) {
+        d.secondPayment.method = paymentMethod;
+      }
+    }
+
+    // ----- Update FINAL (only if overflow exists) -----
+    // ✅ this stays basically your existing logic
+    if (overflowToFinal > 0) {
+      const finalAmt = Number(d.finalPayment.amount || derivedFinalAmt || 0);
+
+      let finalPaidSoFar;
+      if (d.finalPayment.paid != null) {
+        finalPaidSoFar = Number(d.finalPayment.paid || 0);
+      } else {
+        // derive finalPaid: totalPaid - first - secondPaidSoFar (before this call)
+        const roughFinalPaid = existingPaid - firstPaidAmt - secondPaidSoFar;
+        finalPaidSoFar = Math.max(0, Math.min(finalAmt, roughFinalPaid));
+      }
+
+      const newFinalPaid = finalPaidSoFar + overflowToFinal;
+      d.finalPayment.paid = newFinalPaid;
+      d.finalPayment.remaining = Math.max(0, finalAmt - newFinalPaid);
+
+      if (d.finalPayment.remaining === 0 && finalAmt > 0) {
+        d.finalPayment.status = "paid";
+      } else if (newFinalPaid > 0) {
+        d.finalPayment.status = "partial";
+      } else {
+        d.finalPayment.status = "pending";
+      }
+
+      if (d.finalPayment.method === "None" || !d.finalPayment.method) {
+        d.finalPayment.method = paymentMethod;
+      }
+    }
+
+    // ---------- UPDATE BOOKING-LEVEL NUMBERS ----------
+    d.paidAmount = existingPaid + currentPaid;
+    d.paymentMethod = paymentMethod;
+
+    const remainingBookingAmount = Math.max(0, prevAmountYetToPay - currentPaid);
+    d.amountYetToPay = remainingBookingAmount;
+
+    if (remainingBookingAmount === 0) {
+      d.paymentStatus = "Paid";
+      if (d.paymentLink?.isActive != null) d.paymentLink.isActive = false;
+    } else {
+      d.paymentStatus = "Partial Payment";
+      if (d.paymentLink?.installmentStage && d.secondPayment.remaining === 0) {
+        d.paymentLink.installmentStage = "final";
+      }
+    }
+
+    // ---------- LOG PAYMENT ----------
+    booking.payments = booking.payments || [];
+    booking.payments.push({
+      at: new Date(),
+      method: paymentMethod,
+      amount: currentPaid,
+      providerRef: providerRef || undefined,
+    });
+
+    if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
+
+    await booking.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Payment updated successfully",
+      paidAmount: d.paidAmount,
+      amountYetToPay: d.amountYetToPay,
+      secondPayment: d.secondPayment,
+      finalPayment: d.finalPayment,
+      overflowAppliedToFinal: overflowToFinal,
+    });
+  } catch (error) {
+    console.log(error);
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+    });
+  }
+};
+
 exports.adminToCustomerPayment = async (req, res) => {
   try {
     const { bookingId, paymentMethod, paidAmount, providerRef } = req.body;

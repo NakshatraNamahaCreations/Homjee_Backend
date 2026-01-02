@@ -76,7 +76,7 @@ const PaymentMilestoneSchema = new mongoose.Schema(
   {
     status: {
       type: String,
-      enum: ["pending", "paid", "failed", "No Payment"],
+      enum: ["pending", 'partial', "paid", "failed", "No Payment"],
       default: "pending",
     },
     amount: {
@@ -89,6 +89,11 @@ const PaymentMilestoneSchema = new mongoose.Schema(
       enum: ["None", "Cash", "Card", "UPI", "Wallet"],
       default: "None",
     },
+    requestedAmount: { type: Number, default: 0 }, // preserver installment amt for each request
+    remaining: {
+      type: Number,
+      default: 0
+    }
   },
   { _id: false }
 );
