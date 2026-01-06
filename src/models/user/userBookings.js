@@ -93,6 +93,10 @@ const PaymentMilestoneSchema = new mongoose.Schema(
     remaining: {
       type: Number,
       default: 0
+    },
+    prePayment: {
+      type: Number,
+      default: 0
     }
   },
   { _id: false }
