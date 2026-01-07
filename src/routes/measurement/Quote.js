@@ -10,6 +10,8 @@ router.get(
 );
 router.post("/create-duplicate/:id/duplicate", quoteController.cloneQuoteFrom);
 router.patch("/quote/:id/finalize", quoteController.finalizeQuote);
+router.get("/get-finalized-quote/leadId/:id", quoteController.getFinalizedQuoteByLeadId);
+
 router.post(
   "/quotes-room-price/:quoteId/rooms/:roomName/pricing",
   quoteController.upsertQuoteRoomPricing

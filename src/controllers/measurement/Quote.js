@@ -1073,6 +1073,35 @@ exports.finalizeQuote = async (req, res) => {
   }
 };
 
+exports.getFinalizedQuoteByLeadId = async (req, res) => {
+  try {
+    const { id: leadId } = req.params;
+
+    if (!leadId) {
+      return res.status(400).json({ message: "LeadId is required" });
+    }
+
+    const quote = await Quote.findOne({
+      leadId,
+      status: "finalized",
+    }).lean();
+
+    if (!quote) {
+      return res.status(404).json({
+        message: "Finalized quote not found for this lead",
+      });
+    }
+
+    return res.status(200).json({
+      message: "OK",
+      data: quote,
+    });
+  } catch (err) {
+    console.error("getFinalizedQuoteByLeadId error:", err);
+    return res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.getQuoteById = async (req, res) => {
   try {
     const { id } = req.params;

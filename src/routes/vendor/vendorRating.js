@@ -9,5 +9,6 @@ router.get("/vendor-ratings/get", vendorRatingController.getVendorRating);
 
 // GET /api/ratings/vendor/:vendorId/latest?limit=50
 router.get("/vendor-ratings/:vendorId/latest", vendorRatingController.getLatestRatingsByVendorId);
+router.get("/overall-ratings/vendor/:vendorId", vendorRatingController.getVendorOverallRatings);
 
 module.exports = router;
