@@ -29,6 +29,47 @@ exports.saveUser = async (req, res) => {
   }
 };
 
+// exports.verifyOTP = async (req, res) => {
+//   const { mobileNumber, otp, userName } = req.body;
+
+//   try {
+//     const record = await otpSchema.findOne({ mobileNumber, otp });
+
+//     if (!record) {
+//       return res.status(400).json({ message: "Invalid OTP" });
+//     }
+
+//     if (record.expiry < new Date()) {
+//       return res.status(400).json({ message: "OTP expired" });
+//     }
+
+//     await otpSchema.deleteMany({ mobileNumber });
+
+//     let user = await userSchema.findOne({ mobileNumber });
+
+//     // If user does not exist, create after successful OTP
+//     let isNewUser = false;
+//     if (!user) {
+//       isNewUser = true;
+//       user = new userSchema({
+//         mobileNumber,
+//         userName: userName || "",
+//       });
+//       await user.save();
+//     }
+
+//     res.status(200).json({
+//       message: "OTP verified successfully",
+//       data: user,
+//       status: "Online",
+//       isNewUser: isNewUser,
+//     });
+//   } catch (error) {
+//     console.error("OTP verification error:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
 exports.verifyOTP = async (req, res) => {
   const { mobileNumber, otp, userName } = req.body;
 
@@ -47,14 +88,20 @@ exports.verifyOTP = async (req, res) => {
 
     let user = await userSchema.findOne({ mobileNumber });
 
-    // If user does not exist, create after successful OTP
     let isNewUser = false;
+
+    // ➤ USER DOES NOT EXIST → CREATE
     if (!user) {
       isNewUser = true;
-      user = new userSchema({
+      user = await userSchema.create({
         mobileNumber,
         userName: userName || "",
       });
+    }
+
+    // ➤ USER EXISTS → UPDATE NAME IF SENT
+    else if (userName && userName.trim() !== "" && user.userName !== userName) {
+      user.userName = userName;
       await user.save();
     }
 
@@ -62,7 +109,7 @@ exports.verifyOTP = async (req, res) => {
       message: "OTP verified successfully",
       data: user,
       status: "Online",
-      isNewUser: isNewUser,
+      isNewUser,
     });
   } catch (error) {
     console.error("OTP verification error:", error);

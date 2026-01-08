@@ -128,6 +128,107 @@ exports.getAvailableSlots = async (req, res) => {
 };
 
 
+exports.getWebsiteAvailableSlots = async (req, res) => {
+  try {
+    const { serviceType, services, date, lat, lng } = req.body;
+
+    console.log("\n================ WEBSITE SLOT API HIT ================");
+    console.log("REQUEST:", req.body);
+
+    if (!serviceType || !date || lat == null || lng == null) {
+      return res.status(400).json({
+        success: false,
+        message: "serviceType, date, lat, lng are required",
+      });
+    }
+
+    if (!["deep_cleaning", "house_painting"].includes(serviceType)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid serviceType",
+      });
+    }
+
+    let serviceDuration = 30;   // default → SAME AS ADMIN
+    let minTeamMembers = 1;
+
+    /* ================= WEBSITE DEEP CLEANING ================= */
+    if (serviceType === "deep_cleaning") {
+      if (!Array.isArray(services) || !services.length) {
+        return res.status(400).json({
+          success: false,
+          message: "services array is required for deep cleaning",
+        });
+      }
+
+      // durations are already in MINUTES
+      serviceDuration = services.reduce(
+        (sum, s) => sum + Number(s.duration || 0),
+        0
+      );
+
+      minTeamMembers = Math.max(
+        ...services.map(s => Number(s.teamMembers || 1))
+      );
+
+      console.log("DEEP CLEANING DURATION:", serviceDuration);
+      console.log("DEEP CLEANING TEAM:", minTeamMembers);
+    }
+
+    /* ================= WEBSITE HOUSE PAINTING ================= */
+    else if (serviceType === "house_painting") {
+      // 🔥 EXACT SAME LOGIC AS ADMIN
+      serviceDuration = 30;
+      minTeamMembers = 1;
+
+      console.log("HOUSE PAINTING SLOT CHECK (ADMIN LOGIC)");
+    }
+
+    /* ================= FETCH DATA ================= */
+
+    const vendors = await Vendor.find({}).lean();
+    console.log("FETCHED VENDORS:", vendors.length);
+
+    const bookings = await Booking.find({
+      isEnquiry: false,
+      assignedProfessional: { $exists: true },
+      "selectedSlot.slotDate": date,
+      "bookingDetails.status": {
+        $nin: ["Customer Cancelled", "Admin Cancelled", "Cancelled"],
+      },
+    }).lean();
+
+    console.log("FETCHED BOOKINGS:", bookings.length);
+
+    /* ================= SLOT ENGINE ================= */
+
+    const result = calculateAvailableSlots({
+      vendors,
+      bookings,
+      serviceType,
+      serviceDuration,
+      minTeamMembers,
+      date,
+      lat,
+      lng,
+    });
+
+    return res.json({
+      success: true,
+      slots: result.slots,
+      availableVendorsCount: result.availableVendorsCount,
+      reason: result.slots.length ? null : result.reasons,
+    });
+  } catch (err) {
+    console.error("❌ WEBSITE SLOT ERROR:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Website slot calculation failed",
+    });
+  }
+};
+
+
 
 // old code 
 // const Vendor = require("../models/vendor/vendorAuth");

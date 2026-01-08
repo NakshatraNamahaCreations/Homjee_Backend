@@ -76,7 +76,7 @@ const PaymentMilestoneSchema = new mongoose.Schema(
   {
     status: {
       type: String,
-      enum: ["pending", 'partial', "paid", "failed", "No Payment"],
+      enum: ["pending", "partial", "paid", "failed", "No Payment"],
       default: "pending",
     },
     amount: {
@@ -96,8 +96,8 @@ const PaymentMilestoneSchema = new mongoose.Schema(
     },
     prePayment: {
       type: Number,
-      default: 0
-    }
+      default: 0,
+    },
   },
   { _id: false }
 );
@@ -323,7 +323,12 @@ const userBookingSchema = new mongoose.Schema({
   ],
   serviceType: {
     type: String,
-    enum: ["deep_cleaning", "house_painting"],
+    enum: [
+      "deep_cleaning",
+      "house_painting",
+      "packers_&_movers",
+      "home_interior",
+    ],
     required: true,
   },
   selectedSlot: selectedSlot,
