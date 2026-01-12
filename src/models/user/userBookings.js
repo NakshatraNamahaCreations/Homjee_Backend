@@ -319,6 +319,7 @@ const userBookingSchema = new mongoose.Schema({
       amount: { type: Number, required: true },
       providerRef: String,
       installment: { type: String, enum: ["first", "second", "final"] }, // helpful for reporting
+      purpose:String
     },
   ],
   serviceType: {

@@ -700,15 +700,29 @@ exports.createBooking = async (req, res) => {
     };
 
     // Track payment line-item for all service
+
     const payments = [
       {
         at: new Date(),
-        method: bookingDetailsConfig.paymentMethod,
+        method: bookingDetailsConfig.paymentMethod, // "UPI" / "Cash" etc
         amount:
           serviceType === "house_painting" ? siteVisitCharges : paidAmount,
         providerRef: "razorpay_order_xyz",
+        ...(serviceType === "house_painting" ? { purpose: "site_visit" } : {}),
+
+        ...(serviceType === "deep_cleaning" ? { installment: "first" } : {}), // ✅ only deep_cleaning
       },
     ];
+
+    // const payments = [
+    //   {
+    //     at: new Date(),
+    //     method: bookingDetailsConfig.paymentMethod,
+    //     amount:
+    //       serviceType === "house_painting" ? siteVisitCharges : paidAmount,
+    //     providerRef: "razorpay_order_xyz",
+    //   },
+    // ];
     // untrack of hp site amt
     // const payments =
     //   serviceType === "house_painting"
@@ -822,6 +836,291 @@ exports.createBooking = async (req, res) => {
 };
 
 // add requestedAmount = amount, remaining = amount, prePayment=0 in the firstPayment obj
+// exports.adminCreateBooking = async (req, res) => {
+//   try {
+//     const {
+//       customer,
+//       service,
+//       bookingDetails = {},
+//       assignedProfessional,
+//       address,
+//       selectedSlot,
+//       formName,
+//       isEnquiry,
+//     } = req.body;
+
+//     // ***************************************
+//     // 🟢 CHECK USER EXISTS OR CREATE NEW USER
+//     // ***************************************
+//     let checkUser = await userSchema.findOne({
+//       mobileNumber: customer.phone,
+//     });
+
+//     if (!checkUser) {
+//       checkUser = new userSchema({
+//         userName: customer.name,
+//         mobileNumber: customer.phone,
+//         savedAddress: {
+//           uniqueCode: `ADDR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+//           address: address.streetArea,
+//           houseNumber: address.houseFlatNumber,
+//           landmark: address.landMark,
+//           latitude: address.location.coordinates[1],
+//           longitude: address.location.coordinates[0],
+//           city: address.city,
+//         },
+//       });
+
+//       await checkUser.save();
+//     }
+
+//     // -----------------------
+//     // Basic validations
+//     // -----------------------
+//     if (!service || !Array.isArray(service) || service.length === 0) {
+//       return res.status(400).json({ message: "Service list cannot be empty." });
+//     }
+
+//     if (
+//       !address ||
+//       !address.location ||
+//       !Array.isArray(address.location.coordinates) ||
+//       address.location.coordinates.length !== 2
+//     ) {
+//       return res.status(400).json({ message: "Invalid address coordinates." });
+//     }
+
+//     // detect service type
+//     const serviceType = detectServiceType(formName, service);
+
+//     // Extract fields & default values
+//     let bookingAmount = Number(bookingDetails?.bookingAmount ?? 0);
+//     let paidAmount = Number(bookingDetails?.paidAmount ?? 0);
+//     let originalTotalAmount = Number(
+//       bookingDetails?.originalTotalAmount ?? bookingDetails?.finalTotal ?? 0
+//     );
+//     let finalTotal =
+//       Number(bookingDetails?.finalTotal ?? 0) || originalTotalAmount;
+
+//     let amountYetToPay = 0;
+//     let siteVisitCharges = 0;
+
+//     let firstPayment = {};
+//     let secondPayment = {};
+//     let finalPayment = {};
+
+//     // -----------------------
+//     // Deep cleaning logic
+//     // -----------------------
+//     if (serviceType === "deep_cleaning") {
+//       if (isEnquiry && bookingAmount > 0) {
+//         amountYetToPay = Math.max(0, finalTotal - bookingAmount);
+
+//         firstPayment = {
+//           status: paidAmount > 0 ? "paid" : "pending",
+//           amount: bookingAmount,
+//           paidAt: paidAmount > 0 ? new Date() : null,
+//           method:
+//             paidAmount > 0
+//               ? bookingDetails?.paymentMethod || "None"
+//               : undefined,
+//           //below added by kir
+//           requestedAmount: bookingAmount,
+//           remaining: bookingAmount,
+//           prePayment: 0,
+//         };
+
+//         finalPayment = {
+//           status: amountYetToPay > 0 ? "pending" : "paid",
+//           amount: amountYetToPay,
+//         };
+//       } else {
+//         paidAmount = Number(bookingDetails?.paidAmount ?? bookingAmount);
+//         amountYetToPay = Math.max(0, finalTotal - paidAmount);
+
+//         firstPayment = {
+//           status: paidAmount > 0 ? "paid" : "No Payment",
+//           amount: paidAmount,
+//           paidAt: paidAmount > 0 ? new Date() : null,
+//           method:
+//             paidAmount > 0 ? bookingDetails?.paymentMethod || "None" : "None",
+//         };
+
+//         finalPayment = {
+//           status: amountYetToPay > 0 ? "pending" : "paid",
+//           amount: amountYetToPay,
+//         };
+//       }
+//     }
+
+//     // -----------------------
+//     // House painting logic
+//     // -----------------------
+//     if (serviceType === "house_painting") {
+//       siteVisitCharges = Number(bookingDetails?.bookingAmount || 0);
+
+//       if (isEnquiry && siteVisitCharges > 0) {
+//         bookingAmount = 0;
+//         paidAmount = 0;
+//         originalTotalAmount = 0;
+//         finalTotal = 0;
+//         amountYetToPay = 0;
+
+//         firstPayment = { status: "pending", amount: 0 };
+//         secondPayment = { status: "pending", amount: 0 };
+//         finalPayment = { status: "pending", amount: 0 };
+//       } else {
+//         bookingAmount = 0;
+//         paidAmount = 0;
+//         originalTotalAmount = 0;
+//         finalTotal = 0;
+//         amountYetToPay = 0;
+
+//         firstPayment = { status: "No Payment", amount: 0 };
+//         secondPayment = { status: "pending", amount: 0 };
+//         finalPayment = { status: "pending", amount: 0 };
+//       }
+//     }
+
+//     // -----------------------
+//     // Booking ID (display)
+//     // -----------------------
+//     const bookingId = generateBookingId();
+
+//     // -----------------------
+//     // Payment link (added after save)
+//     // -----------------------
+//     let paymentLink = {}; // 🔥 Keep empty until booking is saved
+
+//     // -----------------------
+//     // Build bookingDetails config
+//     // -----------------------
+//     const bookingDetailsConfig = {
+//       booking_id: bookingId,
+//       bookingDate: bookingDetails?.bookingDate
+//         ? new Date(bookingDetails.bookingDate)
+//         : new Date(),
+//       bookingTime: new Date().toLocaleTimeString([], {
+//         hour: "2-digit",
+//         minute: "2-digit",
+//         hour12: true,
+//       }),
+//       status: "Pending",
+//       bookingAmount,
+//       originalTotalAmount,
+//       finalTotal:
+//         finalTotal === 0 && serviceType === "deep_cleaning"
+//           ? originalTotalAmount
+//           : finalTotal,
+//       paidAmount,
+//       amountYetToPay,
+//       paymentMethod: bookingDetails?.paymentMethod || "Cash",
+//       paymentStatus: "Unpaid",
+//       otp: generateOTP(),
+//       siteVisitCharges,
+//       firstPayment,
+//       secondPayment,
+//       finalPayment,
+//       paymentLink, // initially empty
+//     };
+
+//     // -----------------------
+//     // Payments array
+//     // -----------------------
+//     let payments = [];
+//     if (!isEnquiry && paidAmount > 0) {
+//       payments.push({
+//         at: new Date(),
+//         method: bookingDetailsConfig.paymentMethod,
+//         amount: paidAmount,
+//         providerRef: "razorpay_order_xyz",
+
+//       });
+//     }
+
+//     // -----------------------
+//     // Create booking object
+//     // -----------------------
+//     const booking = new UserBooking({
+//       customer: {
+//         customerId: checkUser._id,
+//         name: checkUser.userName,
+//         phone: checkUser.mobileNumber,
+//       },
+//       service: service.map((s) => ({
+//         category: s.category,
+//         subCategory: s.subCategory,
+//         serviceName: s.serviceName,
+//         price: Number(s.price || 0),
+//         quantity: Number(s.quantity || 1),
+//         teamMembersRequired: Number(s.teamMembersRequired || 0),
+//         duration: s.duration,
+//         packageId: s.packageId,
+//       })),
+//       serviceType,
+//       bookingDetails: bookingDetailsConfig,
+//       assignedProfessional: assignedProfessional
+//         ? {
+//             professionalId: assignedProfessional.professionalId,
+//             name: assignedProfessional.name,
+//             phone: assignedProfessional.phone,
+//           }
+//         : undefined,
+//       address: {
+//         houseFlatNumber: address?.houseFlatNumber || "",
+//         streetArea: address?.streetArea || "",
+//         landMark: address?.landMark || "",
+//         city: address?.city || "",
+//         location: {
+//           type: "Point",
+//           coordinates: address.location.coordinates,
+//         },
+//       },
+//       selectedSlot: {
+//         slotDate:
+//           selectedSlot?.slotDate || new Date().toISOString().slice(0, 10),
+//         slotTime: selectedSlot?.slotTime || "10:00 AM",
+//       },
+//       payments,
+//       isEnquiry: Boolean(isEnquiry),
+//       formName: formName || "admin panel",
+//       createdDate: new Date(),
+//     });
+
+//     // Save booking
+//     await booking.save();
+
+//     // --------------------------------------------
+//     // 🔥 CREATE REAL PAYMENT LINK AFTER SAVE
+//     // --------------------------------------------
+//     // const redirectionUrl = "http://localhost:5173/checkout/payment";
+//     const pay_type = "auto-pay";
+
+//     const paymentLinkUrl = `${redirectionUrl}${
+//       booking._id
+//     }/${Date.now()}/${pay_type}`;
+
+//     booking.bookingDetails.paymentLink = {
+//       url: paymentLinkUrl,
+//       isActive: true,
+//       providerRef: "razorpay_order_xyz",
+//     };
+
+//     await booking.save();
+
+//     return res.status(201).json({
+//       message: "Admin booking created successfully",
+//       bookingId: booking._id,
+//       booking,
+//     });
+//   } catch (error) {
+//     console.error("Admin Create Booking Error:", error);
+//     return res
+//       .status(500)
+//       .json({ message: "Server error", error: error.message });
+//   }
+// };
+
 exports.adminCreateBooking = async (req, res) => {
   try {
     const {
@@ -961,8 +1260,7 @@ exports.adminCreateBooking = async (req, res) => {
         originalTotalAmount = 0;
         finalTotal = 0;
         amountYetToPay = 0;
-
-        firstPayment = { status: "No Payment", amount: 0 };
+        firstPayment = { status: "pending", amount: 0 };
         secondPayment = { status: "pending", amount: 0 };
         finalPayment = { status: "pending", amount: 0 };
       }
@@ -1089,6 +1387,7 @@ exports.adminCreateBooking = async (req, res) => {
       url: paymentLinkUrl,
       isActive: true,
       providerRef: "razorpay_order_xyz",
+      ...(serviceType === "deep_cleaning" ? { installmentStage: "first" } : {}),
     };
 
     await booking.save();
@@ -1105,7 +1404,6 @@ exports.adminCreateBooking = async (req, res) => {
       .json({ message: "Server error", error: error.message });
   }
 };
-
 // exports.getAllBookings = async (req, res) => {
 //   try {
 //     const { service, city, timePeriod, startDate, endDate } = req.query;
@@ -4655,6 +4953,7 @@ exports.makePayment = async (req, res) => {
       serviceType,
       d
     );
+
     booking.payments = booking.payments || [];
     booking.payments.push({
       at: new Date(),
@@ -5251,11 +5550,19 @@ exports.adminToCustomerPayment = async (req, res) => {
     if (d.paymentStatus) d.paymentStatus = "Partial Payment";
     if (d.paymentMethod) d.paymentMethod = "UPI";
 
+    const stage = normalizeStage(
+      d.paymentLink?.installmentStage,
+      serviceType,
+      d
+    );
+
     booking.payments.push({
       at: new Date(),
       method: paymentMethod,
       amount,
       providerRef: providerRef || undefined,
+      installment: stage || undefined,
+      purpose: "site_visit" || undefined,
     });
 
     await booking.save();

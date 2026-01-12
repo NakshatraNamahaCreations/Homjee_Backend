@@ -1,6 +1,7 @@
 const ManualPayment = require("../../models/user/manualPayment.js");
 
-const redirectionUrl = "http://localhost:5173/checkout/payment";
+// const redirectionUrl = "http://localhost:5173/checkout/payment";
+const redirectionUrl = "https://websitehomjee.netlify.app/checkout/payment";
 
 exports.createManualPayment = async (req, res) => {
   try {
@@ -57,6 +58,7 @@ exports.createManualPayment = async (req, res) => {
 exports.markManualPaymentPaid = async (req, res) => {
   try {
     const { id } = req.params;
+    const { method, providerRef } = req.body; // 👈 from payload
 
     const payment = await ManualPayment.findById(id);
 
@@ -67,8 +69,12 @@ exports.markManualPaymentPaid = async (req, res) => {
       });
     }
 
+    // Update payment details
     payment.payment.status = "Paid";
-    payment.payment.activeUrl = false;
+    payment.payment.method = method ;
+    payment.payment.providerRef = providerRef ;
+    payment.payment.isActive = false;
+    payment.payment.paidAt = new Date();
 
     await payment.save();
 
@@ -79,7 +85,10 @@ exports.markManualPaymentPaid = async (req, res) => {
     });
   } catch (error) {
     console.error("Error updating payment:", error);
-    res.status(500).json({ success: false, message: "Internal Server Error" });
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 };
 
@@ -101,5 +110,39 @@ exports.getManualPayments = async (req, res) => {
   } catch (err) {
     console.error("getManualPayments Err:", err);
     res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.getManualPaymentById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate MongoDB ObjectId
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment ID",
+      });
+    }
+
+    const payment = await ManualPayment.findById(id);
+
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        message: "Manual payment not found",
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      data: payment,
+    });
+  } catch (error) {
+    console.error("Error fetching manual payment:", error);
+    res.status(500).json({
+      success: false,
+      message: "Internal Server Error",
+    });
   }
 };
