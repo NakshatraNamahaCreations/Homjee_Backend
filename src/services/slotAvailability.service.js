@@ -159,7 +159,7 @@
 //   endAt: toTime(maxStart),
 // });
 
-  
+
 
 //   for (let slotStart = startMin; slotStart <= maxStart; slotStart += 30) {
 //     // 🚫 ABSOLUTE PAST SLOT BLOCK
@@ -247,8 +247,8 @@ function haversine(lat1, lon1, lat2, lon2) {
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) ** 2;
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -280,8 +280,8 @@ function calculateAvailableSlots({
   lat,
   lng,
 }) {
-  console.log("\n================ SLOT CALCULATION START ================");
-  console.table({ date, lat, lng, serviceDuration, minTeamMembers });
+  // console.log("\n================ SLOT CALCULATION START ================");
+  // console.table({ date, lat, lng, serviceDuration, minTeamMembers });
 
   const vendorResources = {};
   const reasons = {
@@ -297,11 +297,11 @@ function calculateAvailableSlots({
 
     const dist = haversine(lat, lng, v.address.latitude, v.address.longitude);
 
-    console.log(
-      `📍 Vendor ${v.vendor?.vendorName || v._id} distance: ${dist.toFixed(
-        2
-      )} km`
-    );
+    // console.log(
+    //   `📍 Vendor ${v.vendor?.vendorName || v._id} distance: ${dist.toFixed(
+    //     2
+    //   )} km`
+    // );
 
     if (dist > RADIUS_KM) {
       reasons.outsideRadius = true;
@@ -313,15 +313,15 @@ function calculateAvailableSlots({
         (m) => !m.markedLeaves?.includes(date)
       );
 
-      console.log(`   👥 Team available: ${availableTeam.length}`);
+      // console.log(`   👥 Team available: ${availableTeam.length}`);
 
       if (availableTeam.length >= minTeamMembers) {
         vendorResources[v._id.toString()] = true;
-        console.log("   ✅ VENDOR ELIGIBLE (DEEP CLEANING)");
+        // console.log("   ✅ VENDOR ELIGIBLE (DEEP CLEANING)");
       }
     } else {
       vendorResources[v._id.toString()] = true;
-      console.log("   ✅ VENDOR ELIGIBLE (HOUSE PAINTING)");
+      // console.log("   ✅ VENDOR ELIGIBLE (HOUSE PAINTING)");
     }
   });
 
@@ -354,11 +354,11 @@ function calculateAvailableSlots({
     blocked[vendorId] = blocked[vendorId] || [];
     blocked[vendorId].push({ start: blockStart, end: blockEnd });
 
-    console.log(
-      `🔒 Vendor ${vendorId} blocked ${toTime(blockStart)} → ${toTime(
-        blockEnd
-      )}`
-    );
+    // console.log(
+    //   `🔒 Vendor ${vendorId} blocked ${toTime(blockStart)} → ${toTime(
+    //     blockEnd
+    //   )}`
+    // );
   });
 
   /* ================= STEP 3: SLOT CHECK ================= */
@@ -367,15 +367,15 @@ function calculateAvailableSlots({
   const startMin = Math.max(DAY_START, getStartMinute(date));
   const maxStart = DAY_END - serviceDuration;
 
-  console.log("⏱ Slot generation window:", {
-    startFrom: toTime(startMin),
-    endAt: toTime(maxStart),
-  });
+  // console.log("⏱ Slot generation window:", {
+  //   startFrom: toTime(startMin),
+  //   endAt: toTime(maxStart),
+  // });
 
   for (let slotStart = startMin; slotStart <= maxStart; slotStart += 30) {
     // 🚫 ABSOLUTE PAST SLOT BLOCK
     if (slotStart < getStartMinute(date)) {
-      console.log(`⏭ Skipping past slot ${toTime(slotStart)}`);
+      // console.log(`⏭ Skipping past slot ${toTime(slotStart)}`);
       continue;
     }
 
@@ -387,7 +387,7 @@ function calculateAvailableSlots({
     if (candidateEnd > DAY_TRAVEL_END) continue;
 
     const slotLabel = toTime(slotStart);
-    console.log(`\n🕒 Checking slot: ${slotLabel}`);
+    // console.log(`\n🕒 Checking slot: ${slotLabel}`);
 
     let available = false;
 
@@ -400,7 +400,7 @@ function calculateAvailableSlots({
       );
 
       if (!clash) {
-        console.log(`   🟢 Vendor ${vId} can handle this slot`);
+        // console.log(`   🟢 Vendor ${vId} can handle this slot`);
         available = true;
         break;
       }
@@ -410,10 +410,10 @@ function calculateAvailableSlots({
     else reasons.allBooked = true;
   }
 
-  console.log("\n================ FINAL RESULT ================");
-  console.log("AVAILABLE SLOTS:", slots);
-  console.log("ELIGIBLE VENDORS:", eligibleVendors.length);
-  console.log("================ SLOT CALC END ================\n");
+  // console.log("\n================ FINAL RESULT ================");
+  // console.log("AVAILABLE SLOTS:", slots);
+  // console.log("ELIGIBLE VENDORS:", eligibleVendors.length);
+  // console.log("================ SLOT CALC END ================\n");
 
   return {
     slots,

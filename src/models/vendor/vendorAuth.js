@@ -132,6 +132,19 @@ const vendorAuthSchema = new mongoose.Schema({
       type: Number,
       default: 0,
     },
+    paymentLink: {
+      type: String,
+    },
+    linkExpiry: {
+      type: Date,
+    },
+    isLinkActive: {
+      type: Boolean,
+      default: false, // Set default as false
+    },
+    canRespondLead: {
+      type: Boolean,
+    },
   },
   team: {
     type: [teamMemberInfo], // Embed team member objects
@@ -155,5 +168,14 @@ vendorAuthSchema.index({ "address.geo": "2dsphere" });
 
 // ✅ Service type + active filter
 vendorAuthSchema.index({ "vendor.serviceType": 1, activeStatus: 1 });
+
+// Middleware to check if the link has expired and set isLinkActive accordingly
+vendorAuthSchema.wallet?.pre('save', function (next) {
+  // If linkExpiry is set, check if it has expired
+  if (this.linkExpiry && this.linkExpiry < new Date()) {
+    this.isLinkActive = false; // Set the link as inactive if the expiry date has passed
+  }
+  next();
+});
 
 module.exports = mongoose.model("vendor", vendorAuthSchema);

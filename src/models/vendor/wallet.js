@@ -1,0 +1,39 @@
+const mongoose = require('mongoose');
+
+const vendorTransactionSchema = new mongoose.Schema(
+    {
+        vendorId: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: 'Vendor',
+            required: true,
+        },
+        title: {
+            type: String,
+            required: true, // Example: 'Recharged Wallet', 'Lead Responded'
+        },
+        amount: {
+            type: Number,
+            required: true,
+        },
+        date: {
+            type: Date,
+            default: Date.now, // Automatically set the current date if no date is provided
+        },
+        transactionType: {
+            type: String,
+            enum: ['wallet recharge', 'lead response', 'cancellation refund'],
+            required: true,
+        },
+        type: {
+            type: String,
+            enum: ['added', 'deduct'],
+            required: true,
+        },
+    },
+    { timestamps: true }
+);
+
+
+const VendorTransaction = mongoose.model('walletTransaction', vendorTransactionSchema);
+
+module.exports = VendorTransaction;

@@ -153,25 +153,14 @@ function syncDerivedFields(details, finalTotal) {
   details.currentTotalAmount = Number(finalTotal);
 }
 
+function roundMoney(n) {
+  // choose your policy: Math.ceil/Math.round to rupees
+  return Math.round(Number(n || 0));
+}
 
 // -----------------------------
 // works for ALL combinations: cash + online + mixed
 // -----------------------------
-
-const isFinalRequested = (d) => {
-  const linkFinalActive =
-    d?.paymentLink?.isActive === true &&
-    String(d?.paymentLink?.installmentStage || "").toLowerCase() === "final";
-
-  const anyFinalMoney =
-    Number(d?.finalPayment?.amount || 0) > 0 ||
-    Number(d?.finalPayment?.prePayment || 0) > 0;
-
-  const finalMarked = !!d?.finalPayment?.paidAt;
-
-  return linkFinalActive || anyFinalMoney || finalMarked;
-};
-
 const ensureMilestoneDefaults = (m = {}) => {
   m.status = m.status || "pending";
   m.amount = Number(m.amount || 0);
@@ -200,14 +189,13 @@ const fixFinalTargetIfStale = (d, syncMilestone) => {
   try {
     if (!d) return;
 
-    // ✅ DO NOTHING until final is requested
-    if (!isFinalRequested(d)) return;
-
     d.firstPayment = d.firstPayment || {};
     d.secondPayment = d.secondPayment || {};
     d.finalPayment = d.finalPayment || {};
 
-    const total = Number(d.finalTotal || d.currentTotalAmount || d.bookingAmount || 0);
+    const total = Number(
+      d.finalTotal || d.currentTotalAmount || d.bookingAmount || 0
+    );
 
     const firstReq = Number(d.firstPayment.requestedAmount || 0);
     const secondReq = Number(d.secondPayment.requestedAmount || 0);
@@ -218,13 +206,16 @@ const fixFinalTargetIfStale = (d, syncMilestone) => {
       Number(d.finalPayment.amount || 0) === 0 &&
       Number(d.finalPayment.prePayment || 0) === 0;
 
-    if (finalNotStarted && total > 0 && firstReq > 0) {
+    // ✅ Only auto-fix BEFORE final payments start
+    if (finalNotStarted && total > 0 && firstReq > 0 && secondReq > 0) {
       const currentFinalReq = Number(d.finalPayment.requestedAmount || 0);
 
+      // If mismatch (eg 7630), correct it
       if (currentFinalReq !== computedFinalTarget) {
         d.finalPayment.requestedAmount = computedFinalTarget;
       }
 
+      // Recompute remaining/status (must include prePayment via syncMilestone)
       syncMilestone(d.finalPayment);
     }
   } catch (e) {
@@ -241,98 +232,46 @@ const isStageExactlyPaid = (m) => {
   return Math.min(req, amt + pre) === req;
 };
 
-// const ensureInstallmentTargets = (d, finalTotal, serviceType) => {
-//   try {
-//     if (!d) return;
+// const ensureInstallmentTargets = (
+//   d,
+//   finalTotal,
+//   serviceType = "house_painting"
+// ) => {
+//   d.firstPayment = ensureMilestoneDefaults(d.firstPayment || {});
+//   d.secondPayment = ensureMilestoneDefaults(d.secondPayment || {});
+//   d.finalPayment = ensureMilestoneDefaults(d.finalPayment || {});
 
-//     // init objects
-//     d.firstPayment = d.firstPayment || {
-//       status: "pending",
-//       amount: 0,
-//       method: "None",
-//       requestedAmount: 0,
-//       remaining: 0,
-//       prePayment: 0,
-//     };
-
-//     d.secondPayment = d.secondPayment || {
-//       status: "pending",
-//       amount: 0,
-//       method: "None",
-//       requestedAmount: 0,
-//       remaining: 0,
-//       prePayment: 0,
-//     };
-
-//     d.finalPayment = d.finalPayment || {
-//       status: "pending",
-//       amount: 0,
-//       method: "None",
-//       requestedAmount: 0,
-//       remaining: 0,
-//       prePayment: 0,
-//     };
-
-//     // store "planned targets" separately (DO NOT touch requestedAmount yet)
-//     d.installmentPlan = d.installmentPlan || {};
-
-//     const isDeepCleaning = String(serviceType).toLowerCase() === "deep_cleaning";
-
-//     if (isDeepCleaning) {
-//       // Deep cleaning: first + final
-//       const firstTarget =
-//         Number(d.firstPayment.requestedAmount) > 0
-//           ? Number(d.firstPayment.requestedAmount)
-//           : Math.round(finalTotal * 0.4); // example; use your existing formula
-//       const finalTarget = Math.max(0, finalTotal - firstTarget);
-
-//       d.installmentPlan.firstTarget = firstTarget;
-//       d.installmentPlan.secondTarget = 0;
-//       d.installmentPlan.finalTarget = finalTarget;
-
-//       // ✅ keep second/final requestedAmount & remaining 0 until requested
-//       if (!(Number(d.secondPayment.requestedAmount) > 0)) d.secondPayment.requestedAmount = 0;
-//       if (!(Number(d.secondPayment.remaining) > 0)) d.secondPayment.remaining = 0;
-
-//       if (d.finalPayment.status !== "paid" && !(Number(d.finalPayment.requestedAmount) > 0)) {
-//         d.finalPayment.requestedAmount = 0;
-//         d.finalPayment.remaining = 0;
-//       }
-//     } else {
-//       // House painting: first + second + final
-//       // Use your existing split logic here. Below is just an example.
-//       const firstTarget = Math.round(finalTotal * 0.4);
-//       const secondTarget = Math.round(finalTotal * 0.3);
-//       const finalTarget = Math.max(0, finalTotal - firstTarget - secondTarget);
-
-//       d.installmentPlan.firstTarget = firstTarget;
-//       d.installmentPlan.secondTarget = secondTarget;
-//       d.installmentPlan.finalTarget = finalTarget;
-
-//       // ✅ keep second/final requestedAmount & remaining 0 until requested
-//       if (d.secondPayment.status !== "paid" && !(Number(d.secondPayment.requestedAmount) > 0)) {
-//         d.secondPayment.requestedAmount = 0;
-//         d.secondPayment.remaining = 0;
-//       }
-
-//       if (d.finalPayment.status !== "paid" && !(Number(d.finalPayment.requestedAmount) > 0)) {
-//         d.finalPayment.requestedAmount = 0;
-//         d.finalPayment.remaining = 0;
-//       }
-//     }
-//     // ✅ HARD RULE: finalPayment must stay 0 until requested
-//     if (!isFinalRequested(d)) {
-//       d.finalPayment.requestedAmount = 0;
-//       d.finalPayment.remaining = 0;
-//       d.finalPayment.amount = 0;     // important: prevents admin UI confusion
-//       if (d.finalPayment.status !== "paid") d.finalPayment.status = "pending";
-//       if (!d.finalPayment.method || d.finalPayment.method === "None") {
-//         d.finalPayment.method = "None";
-//       }
-//     }
-//   } catch (e) {
-//     console.error("ensureInstallmentTargets error:", e);
+//   // Legacy fallback: if requestedAmount missing but amount exists (old docs)
+//   if (d.firstPayment.requestedAmount <= 0 && d.firstPayment.amount > 0) {
+//     d.firstPayment.requestedAmount = Number(d.firstPayment.amount || 0);
 //   }
+
+//   // ✅ deep cleaning has NO second installment
+//   if (isDeepCleaning(serviceType)) {
+//     applyDeepCleaningPlan(d);
+//   } else {
+//     if (d.secondPayment.requestedAmount <= 0 && d.secondPayment.amount > 0) {
+//       d.secondPayment.requestedAmount = Number(d.secondPayment.amount || 0);
+//     }
+//   }
+
+//   const firstReq = Number(d.firstPayment.requestedAmount || 0);
+//   const secondReq = isDeepCleaning(serviceType)
+//     ? 0
+//     : Number(d.secondPayment.requestedAmount || 0);
+
+//   // Final target derived from finalTotal if missing
+//   if (d.finalPayment.requestedAmount <= 0 && Number(finalTotal || 0) > 0) {
+//     d.finalPayment.requestedAmount = Math.max(
+//       0,
+//       Number(finalTotal) - firstReq - secondReq
+//     );
+//   }
+
+//   // Keep remaining/status consistent (includes prePayment)
+//   syncMilestone(d.firstPayment);
+//   syncMilestone(d.secondPayment);
+//   syncMilestone(d.finalPayment);
 // };
 
 const ensureInstallmentTargets = (d, finalTotal, serviceType) => {
@@ -367,52 +306,43 @@ const ensureInstallmentTargets = (d, finalTotal, serviceType) => {
       prePayment: 0,
     };
 
+    // store "planned targets" separately (DO NOT touch requestedAmount yet)
     d.installmentPlan = d.installmentPlan || {};
 
     const isDeepCleaning = String(serviceType).toLowerCase() === "deep_cleaning";
 
     if (isDeepCleaning) {
-      // Deep cleaning: first + final (keep your logic)
+      // Deep cleaning: first + final
       const firstTarget =
         Number(d.firstPayment.requestedAmount) > 0
           ? Number(d.firstPayment.requestedAmount)
-          : Math.round(finalTotal * 0.4);
-
+          : Math.round(finalTotal * 0.4); // example; use your existing formula
       const finalTarget = Math.max(0, finalTotal - firstTarget);
 
       d.installmentPlan.firstTarget = firstTarget;
       d.installmentPlan.secondTarget = 0;
       d.installmentPlan.finalTarget = finalTarget;
 
-      // keep second/final requestedAmount 0 until requested
-      if (!(Number(d.secondPayment.requestedAmount) > 0)) {
-        d.secondPayment.requestedAmount = 0;
-        d.secondPayment.remaining = 0;
-      }
+      // ✅ keep second/final requestedAmount & remaining 0 until requested
+      if (!(Number(d.secondPayment.requestedAmount) > 0)) d.secondPayment.requestedAmount = 0;
+      if (!(Number(d.secondPayment.remaining) > 0)) d.secondPayment.remaining = 0;
 
       if (d.finalPayment.status !== "paid" && !(Number(d.finalPayment.requestedAmount) > 0)) {
         d.finalPayment.requestedAmount = 0;
         d.finalPayment.remaining = 0;
       }
     } else {
-      // ✅ House painting: 40% / 40% / 20%
-      const firstTarget =
-        Number(d.firstPayment.requestedAmount) > 0
-          ? Number(d.firstPayment.requestedAmount)
-          : Math.round(finalTotal * 0.4);
-
-      const secondTarget =
-        Number(d.secondPayment.requestedAmount) > 0
-          ? Number(d.secondPayment.requestedAmount)
-          : Math.round(finalTotal * 0.4);
-
+      // House painting: first + second + final
+      // Use your existing split logic here. Below is just an example.
+      const firstTarget = Math.round(finalTotal * 0.4);
+      const secondTarget = Math.round(finalTotal * 0.3);
       const finalTarget = Math.max(0, finalTotal - firstTarget - secondTarget);
 
       d.installmentPlan.firstTarget = firstTarget;
       d.installmentPlan.secondTarget = secondTarget;
       d.installmentPlan.finalTarget = finalTarget;
 
-      // keep second/final requestedAmount 0 until requested
+      // ✅ keep second/final requestedAmount & remaining 0 until requested
       if (d.secondPayment.status !== "paid" && !(Number(d.secondPayment.requestedAmount) > 0)) {
         d.secondPayment.requestedAmount = 0;
         d.secondPayment.remaining = 0;
@@ -427,7 +357,6 @@ const ensureInstallmentTargets = (d, finalTotal, serviceType) => {
     console.error("ensureInstallmentTargets error:", e);
   }
 };
-
 const activateInstallmentStage = (d, stage) => {
   try {
     if (!d || !stage) return;
@@ -435,55 +364,25 @@ const activateInstallmentStage = (d, stage) => {
 
     const s = String(stage).toLowerCase();
 
-    const setTarget = (obj, planTarget) => {
-      const alreadyRequested = Number(obj?.requestedAmount || 0);
-      const target = alreadyRequested > 0 ? alreadyRequested : Math.max(0, Number(planTarget || 0));
+    const setTarget = (obj, target) => {
+      const paid = Number(obj.amount || 0) + Number(obj.prePayment || 0);
+      const t = Math.max(0, Number(target || 0));
 
-      const paid = Math.max(0, Number(obj.amount || 0)) + Math.max(0, Number(obj.prePayment || 0));
+      obj.requestedAmount = t;
+      obj.remaining = Math.max(0, t - paid);
 
-      obj.requestedAmount = target;
-      obj.remaining = Math.max(0, target - paid);
-
-      if (target <= 0) obj.status = "pending";
-      else if (obj.remaining === 0) obj.status = "paid";
-      else if (paid > 0) obj.status = "partial";
-      else obj.status = "pending";
+      // keep status consistent
+      if (obj.remaining === 0 && t > 0) obj.status = "paid";
+      else if (t > 0) obj.status = obj.status === "paid" ? "paid" : "pending";
     };
 
     if (s === "first") setTarget(d.firstPayment, d.installmentPlan.firstTarget);
     if (s === "second") setTarget(d.secondPayment, d.installmentPlan.secondTarget);
     if (s === "final") setTarget(d.finalPayment, d.installmentPlan.finalTarget);
   } catch (e) {
-    console.error("activateInstallmentStage error:", e);
+    console.error("error:", e);
   }
 };
-
-// const activateInstallmentStage = (d, stage) => {
-//   try {
-//     if (!d || !stage) return;
-//     d.installmentPlan = d.installmentPlan || {};
-
-//     const s = String(stage).toLowerCase();
-
-//     const setTarget = (obj, target) => {
-//       const paid = Number(obj.amount || 0) + Number(obj.prePayment || 0);
-//       const t = Math.max(0, Number(target || 0));
-
-//       obj.requestedAmount = t;
-//       obj.remaining = Math.max(0, t - paid);
-
-//       // keep status consistent
-//       if (obj.remaining === 0 && t > 0) obj.status = "paid";
-//       else if (t > 0) obj.status = obj.status === "paid" ? "paid" : "pending";
-//     };
-
-//     if (s === "first") setTarget(d.firstPayment, d.installmentPlan.firstTarget);
-//     if (s === "second") setTarget(d.secondPayment, d.installmentPlan.secondTarget);
-//     if (s === "final") setTarget(d.finalPayment, d.installmentPlan.finalTarget);
-//   } catch (e) {
-//     console.error("error:", e);
-//   }
-// };
 
 const resyncMilestonesFromLedger = (
   d,
@@ -649,31 +548,6 @@ const finalizeIfFullyPaid = ({ booking, bookingId, finalTotal }) => {
   }
 };
 
-const getServiceTypeFromBooking = (booking) =>
-  String(booking?.serviceType || "").toLowerCase();
-
-const isDeepCleaning = (serviceType) => serviceType === "deep_cleaning";
-
-const normalizeStage = (rawStage, serviceType, d) => {
-  const s = String(rawStage || "").toLowerCase();
-
-  if (isDeepCleaning(serviceType)) {
-    // deep cleaning supports only: first, final
-    if (s === "first" || s === "final") return s;
-    // derive safely if missing/wrong
-    return d?.firstPayment?.status === "paid" ? "final" : "first";
-  }
-
-  // house painting: first, second, final
-  if (["first", "second", "final"].includes(s)) return s;
-
-  // derive safely if missing
-  if (d?.secondPayment?.status === "paid") return "final";
-  if (d?.firstPayment?.status === "paid") return "second";
-  return "first";
-};
-
-// .........................................
 function detectServiceType(formName, services) {
   const formLower = (formName || "").toLowerCase();
   const serviceCategories = services.map((s) =>
@@ -713,6 +587,88 @@ const CANCELLED_STATUSES = Object.freeze([
   "Admin Cancelled",
   "Cancelled",
 ]);
+
+const getServiceTypeFromBooking = (booking) =>
+  String(booking?.serviceType || "").toLowerCase();
+
+const isDeepCleaning = (serviceType) => serviceType === "deep_cleaning";
+
+const normalizeStage = (rawStage, serviceType, d) => {
+  const s = String(rawStage || "").toLowerCase();
+
+  if (isDeepCleaning(serviceType)) {
+    // deep cleaning supports only: first, final
+    if (s === "first" || s === "final") return s;
+    // derive safely if missing/wrong
+    return d?.firstPayment?.status === "paid" ? "final" : "first";
+  }
+
+  // house painting: first, second, final
+  if (["first", "second", "final"].includes(s)) return s;
+
+  // derive safely if missing
+  if (d?.secondPayment?.status === "paid") return "final";
+  if (d?.firstPayment?.status === "paid") return "second";
+  return "first";
+};
+
+// ✅ Disable second installment for deep_cleaning
+const applyDeepCleaningPlan = (d) => {
+  d.secondPayment = ensureMilestoneDefaults(d.secondPayment || {});
+  d.secondPayment.requestedAmount = 0;
+  d.secondPayment.amount = 0;
+  d.secondPayment.prePayment = 0;
+  d.secondPayment.remaining = 0;
+  d.secondPayment.status = "No Payment";
+  d.secondPayment.method = d.secondPayment.method || "None";
+};
+
+const repairDeepCleaningDoc = (d, finalTotal) => {
+  // ensure objects
+  d.firstPayment = ensureMilestoneDefaults(d.firstPayment || {});
+  d.secondPayment = ensureMilestoneDefaults(d.secondPayment || {});
+  d.finalPayment = ensureMilestoneDefaults(d.finalPayment || {});
+
+  // deep cleaning => no second installment
+  applyDeepCleaningPlan(d);
+
+  // ✅ firstPayment.requestedAmount must be set
+  if (Number(d.firstPayment.requestedAmount || 0) <= 0) {
+    const adv = Number(d.bookingAmount || d.firstPayment.amount || 0);
+    if (adv > 0) d.firstPayment.requestedAmount = adv;
+  }
+
+  const firstReq = Number(d.firstPayment.requestedAmount || 0);
+
+  // ✅ finalPayment.requestedAmount = finalTotal - firstReq
+  if (
+    Number(d.finalPayment.requestedAmount || 0) <= 0 &&
+    Number(finalTotal || 0) > 0
+  ) {
+    d.finalPayment.requestedAmount = Math.max(0, Number(finalTotal) - firstReq);
+  }
+
+  // ✅ If old docs stored "remaining" inside finalPayment.amount, reset it
+  // (Most common pattern: finalPayment.amount == amountYetToPay when only first paid)
+  const onlyAdvancePaid =
+    Number(d.paidAmount || 0) === Number(d.firstPayment.amount || 0);
+
+  if (
+    onlyAdvancePaid &&
+    (d.finalPayment.status === "pending" ||
+      d.finalPayment.status === "partial") &&
+    !d.finalPayment.paidAt &&
+    Number(d.finalPayment.amount || 0) ===
+    Math.max(0, Number(finalTotal || 0) - Number(d.paidAmount || 0))
+  ) {
+    d.finalPayment.amount = 0;
+  }
+
+  // sync all
+  syncMilestone(d.firstPayment);
+  syncMilestone(d.secondPayment);
+  syncMilestone(d.finalPayment);
+};
 
 // ..........................API's.......................................
 // BOOKED FROM THE WEBSITE
@@ -854,29 +810,15 @@ exports.createBooking = async (req, res) => {
     };
 
     // Track payment line-item for all service
-
     const payments = [
       {
         at: new Date(),
-        method: bookingDetailsConfig.paymentMethod, // "UPI" / "Cash" etc
+        method: bookingDetailsConfig.paymentMethod,
         amount:
           serviceType === "house_painting" ? siteVisitCharges : paidAmount,
         providerRef: "razorpay_order_xyz",
-        ...(serviceType === "house_painting" ? { purpose: "site_visit" } : {}),
-
-        ...(serviceType === "deep_cleaning" ? { installment: "first" } : {}), // ✅ only deep_cleaning
       },
     ];
-
-    // const payments = [
-    //   {
-    //     at: new Date(),
-    //     method: bookingDetailsConfig.paymentMethod,
-    //     amount:
-    //       serviceType === "house_painting" ? siteVisitCharges : paidAmount,
-    //     providerRef: "razorpay_order_xyz",
-    //   },
-    // ];
     // untrack of hp site amt
     // const payments =
     //   serviceType === "house_painting"
@@ -989,291 +931,6 @@ exports.createBooking = async (req, res) => {
 };
 
 // add requestedAmount = amount, remaining = amount, prePayment=0 in the firstPayment obj
-// exports.adminCreateBooking = async (req, res) => {
-//   try {
-//     const {
-//       customer,
-//       service,
-//       bookingDetails = {},
-//       assignedProfessional,
-//       address,
-//       selectedSlot,
-//       formName,
-//       isEnquiry,
-//     } = req.body;
-
-//     // ***************************************
-//     // 🟢 CHECK USER EXISTS OR CREATE NEW USER
-//     // ***************************************
-//     let checkUser = await userSchema.findOne({
-//       mobileNumber: customer.phone,
-//     });
-
-//     if (!checkUser) {
-//       checkUser = new userSchema({
-//         userName: customer.name,
-//         mobileNumber: customer.phone,
-//         savedAddress: {
-//           uniqueCode: `ADDR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-//           address: address.streetArea,
-//           houseNumber: address.houseFlatNumber,
-//           landmark: address.landMark,
-//           latitude: address.location.coordinates[1],
-//           longitude: address.location.coordinates[0],
-//           city: address.city,
-//         },
-//       });
-
-//       await checkUser.save();
-//     }
-
-//     // -----------------------
-//     // Basic validations
-//     // -----------------------
-//     if (!service || !Array.isArray(service) || service.length === 0) {
-//       return res.status(400).json({ message: "Service list cannot be empty." });
-//     }
-
-//     if (
-//       !address ||
-//       !address.location ||
-//       !Array.isArray(address.location.coordinates) ||
-//       address.location.coordinates.length !== 2
-//     ) {
-//       return res.status(400).json({ message: "Invalid address coordinates." });
-//     }
-
-//     // detect service type
-//     const serviceType = detectServiceType(formName, service);
-
-//     // Extract fields & default values
-//     let bookingAmount = Number(bookingDetails?.bookingAmount ?? 0);
-//     let paidAmount = Number(bookingDetails?.paidAmount ?? 0);
-//     let originalTotalAmount = Number(
-//       bookingDetails?.originalTotalAmount ?? bookingDetails?.finalTotal ?? 0
-//     );
-//     let finalTotal =
-//       Number(bookingDetails?.finalTotal ?? 0) || originalTotalAmount;
-
-//     let amountYetToPay = 0;
-//     let siteVisitCharges = 0;
-
-//     let firstPayment = {};
-//     let secondPayment = {};
-//     let finalPayment = {};
-
-//     // -----------------------
-//     // Deep cleaning logic
-//     // -----------------------
-//     if (serviceType === "deep_cleaning") {
-//       if (isEnquiry && bookingAmount > 0) {
-//         amountYetToPay = Math.max(0, finalTotal - bookingAmount);
-
-//         firstPayment = {
-//           status: paidAmount > 0 ? "paid" : "pending",
-//           amount: bookingAmount,
-//           paidAt: paidAmount > 0 ? new Date() : null,
-//           method:
-//             paidAmount > 0
-//               ? bookingDetails?.paymentMethod || "None"
-//               : undefined,
-//           //below added by kir
-//           requestedAmount: bookingAmount,
-//           remaining: bookingAmount,
-//           prePayment: 0,
-//         };
-
-//         finalPayment = {
-//           status: amountYetToPay > 0 ? "pending" : "paid",
-//           amount: amountYetToPay,
-//         };
-//       } else {
-//         paidAmount = Number(bookingDetails?.paidAmount ?? bookingAmount);
-//         amountYetToPay = Math.max(0, finalTotal - paidAmount);
-
-//         firstPayment = {
-//           status: paidAmount > 0 ? "paid" : "No Payment",
-//           amount: paidAmount,
-//           paidAt: paidAmount > 0 ? new Date() : null,
-//           method:
-//             paidAmount > 0 ? bookingDetails?.paymentMethod || "None" : "None",
-//         };
-
-//         finalPayment = {
-//           status: amountYetToPay > 0 ? "pending" : "paid",
-//           amount: amountYetToPay,
-//         };
-//       }
-//     }
-
-//     // -----------------------
-//     // House painting logic
-//     // -----------------------
-//     if (serviceType === "house_painting") {
-//       siteVisitCharges = Number(bookingDetails?.bookingAmount || 0);
-
-//       if (isEnquiry && siteVisitCharges > 0) {
-//         bookingAmount = 0;
-//         paidAmount = 0;
-//         originalTotalAmount = 0;
-//         finalTotal = 0;
-//         amountYetToPay = 0;
-
-//         firstPayment = { status: "pending", amount: 0 };
-//         secondPayment = { status: "pending", amount: 0 };
-//         finalPayment = { status: "pending", amount: 0 };
-//       } else {
-//         bookingAmount = 0;
-//         paidAmount = 0;
-//         originalTotalAmount = 0;
-//         finalTotal = 0;
-//         amountYetToPay = 0;
-
-//         firstPayment = { status: "No Payment", amount: 0 };
-//         secondPayment = { status: "pending", amount: 0 };
-//         finalPayment = { status: "pending", amount: 0 };
-//       }
-//     }
-
-//     // -----------------------
-//     // Booking ID (display)
-//     // -----------------------
-//     const bookingId = generateBookingId();
-
-//     // -----------------------
-//     // Payment link (added after save)
-//     // -----------------------
-//     let paymentLink = {}; // 🔥 Keep empty until booking is saved
-
-//     // -----------------------
-//     // Build bookingDetails config
-//     // -----------------------
-//     const bookingDetailsConfig = {
-//       booking_id: bookingId,
-//       bookingDate: bookingDetails?.bookingDate
-//         ? new Date(bookingDetails.bookingDate)
-//         : new Date(),
-//       bookingTime: new Date().toLocaleTimeString([], {
-//         hour: "2-digit",
-//         minute: "2-digit",
-//         hour12: true,
-//       }),
-//       status: "Pending",
-//       bookingAmount,
-//       originalTotalAmount,
-//       finalTotal:
-//         finalTotal === 0 && serviceType === "deep_cleaning"
-//           ? originalTotalAmount
-//           : finalTotal,
-//       paidAmount,
-//       amountYetToPay,
-//       paymentMethod: bookingDetails?.paymentMethod || "Cash",
-//       paymentStatus: "Unpaid",
-//       otp: generateOTP(),
-//       siteVisitCharges,
-//       firstPayment,
-//       secondPayment,
-//       finalPayment,
-//       paymentLink, // initially empty
-//     };
-
-//     // -----------------------
-//     // Payments array
-//     // -----------------------
-//     let payments = [];
-//     if (!isEnquiry && paidAmount > 0) {
-//       payments.push({
-//         at: new Date(),
-//         method: bookingDetailsConfig.paymentMethod,
-//         amount: paidAmount,
-//         providerRef: "razorpay_order_xyz",
-
-//       });
-//     }
-
-//     // -----------------------
-//     // Create booking object
-//     // -----------------------
-//     const booking = new UserBooking({
-//       customer: {
-//         customerId: checkUser._id,
-//         name: checkUser.userName,
-//         phone: checkUser.mobileNumber,
-//       },
-//       service: service.map((s) => ({
-//         category: s.category,
-//         subCategory: s.subCategory,
-//         serviceName: s.serviceName,
-//         price: Number(s.price || 0),
-//         quantity: Number(s.quantity || 1),
-//         teamMembersRequired: Number(s.teamMembersRequired || 0),
-//         duration: s.duration,
-//         packageId: s.packageId,
-//       })),
-//       serviceType,
-//       bookingDetails: bookingDetailsConfig,
-//       assignedProfessional: assignedProfessional
-//         ? {
-//             professionalId: assignedProfessional.professionalId,
-//             name: assignedProfessional.name,
-//             phone: assignedProfessional.phone,
-//           }
-//         : undefined,
-//       address: {
-//         houseFlatNumber: address?.houseFlatNumber || "",
-//         streetArea: address?.streetArea || "",
-//         landMark: address?.landMark || "",
-//         city: address?.city || "",
-//         location: {
-//           type: "Point",
-//           coordinates: address.location.coordinates,
-//         },
-//       },
-//       selectedSlot: {
-//         slotDate:
-//           selectedSlot?.slotDate || new Date().toISOString().slice(0, 10),
-//         slotTime: selectedSlot?.slotTime || "10:00 AM",
-//       },
-//       payments,
-//       isEnquiry: Boolean(isEnquiry),
-//       formName: formName || "admin panel",
-//       createdDate: new Date(),
-//     });
-
-//     // Save booking
-//     await booking.save();
-
-//     // --------------------------------------------
-//     // 🔥 CREATE REAL PAYMENT LINK AFTER SAVE
-//     // --------------------------------------------
-//     // const redirectionUrl = "http://localhost:5173/checkout/payment";
-//     const pay_type = "auto-pay";
-
-//     const paymentLinkUrl = `${redirectionUrl}${
-//       booking._id
-//     }/${Date.now()}/${pay_type}`;
-
-//     booking.bookingDetails.paymentLink = {
-//       url: paymentLinkUrl,
-//       isActive: true,
-//       providerRef: "razorpay_order_xyz",
-//     };
-
-//     await booking.save();
-
-//     return res.status(201).json({
-//       message: "Admin booking created successfully",
-//       bookingId: booking._id,
-//       booking,
-//     });
-//   } catch (error) {
-//     console.error("Admin Create Booking Error:", error);
-//     return res
-//       .status(500)
-//       .json({ message: "Server error", error: error.message });
-//   }
-// };
-
 exports.adminCreateBooking = async (req, res) => {
   try {
     const {
@@ -1413,7 +1070,8 @@ exports.adminCreateBooking = async (req, res) => {
         originalTotalAmount = 0;
         finalTotal = 0;
         amountYetToPay = 0;
-        firstPayment = { status: "pending", amount: 0 };
+
+        firstPayment = { status: "No Payment", amount: 0 };
         secondPayment = { status: "pending", amount: 0 };
         finalPayment = { status: "pending", amount: 0 };
       }
@@ -1539,7 +1197,6 @@ exports.adminCreateBooking = async (req, res) => {
       url: paymentLinkUrl,
       isActive: true,
       providerRef: "razorpay_order_xyz",
-      ...(serviceType === "deep_cleaning" ? { installmentStage: "first" } : {}),
     };
 
     await booking.save();
@@ -1556,6 +1213,7 @@ exports.adminCreateBooking = async (req, res) => {
       .json({ message: "Server error", error: error.message });
   }
 };
+
 // exports.getAllBookings = async (req, res) => {
 //   try {
 //     const { service, city, timePeriod, startDate, endDate } = req.query;
@@ -3787,11 +3445,10 @@ exports.markPendingHiring = async (req, res) => {
 
     // ✅ Calculate 40% for first installment...................
     const firstInstallment = Math.round(d.finalTotal * 0.4);
-    d.firstPayment.amount = 0; //firstInstallment || Math.round(finalTotal * 0.4);
+    d.firstPayment.amount = firstInstallment || Math.round(finalTotal * 0.4);
     d.firstPayment.status = "pending";
     // presever installment amt
     d.firstPayment.requestedAmount = firstInstallment || Math.round(finalTotal * 0.4);
-    d.firstPayment.remaining = firstInstallment;
     // ..........................
 
     const updatedQuote = await Quote.updateOne(
@@ -4140,10 +3797,9 @@ exports.requestSecondPayment = async (req, res) => {
 
     // ✅ Update second payment milestone...........
     d.secondPayment.status = "pending";
-    d.secondPayment.amount = 0;//secondInstallment
+    d.secondPayment.amount = secondInstallment
     // presever installment amt
     d.secondPayment.requestedAmount = secondInstallment;
-    d.secondPayment.remaining = secondInstallment;
     // ......................................
     // 🔗 Generate payment link
     const pay_type = "auto-pay";
@@ -4269,10 +3925,9 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
     // ✅ Set finalPayment fields (do NOT overwrite requestedAmount to reduced value)
     details.finalPayment.requestedAmount = finalTarget; // e.g., 2543 (fixed)
     details.finalPayment.prePayment = pre; // e.g., 3
-    details.finalPayment.amount = 0 // Number(details.finalPayment.amount || 0); // paid in final stage (usually 0)
+    details.finalPayment.amount = Number(details.finalPayment.amount || 0); // paid in final stage (usually 0)
     details.finalPayment.remaining = amountDue; // e.g., 2540
-    // details.finalPayment.status = amountDue === 0 ? "paid" : "pending";
-    details.finalPayment.status = pre === 0 ? "pending" : "partial";
+    details.finalPayment.status = amountDue === 0 ? "paid" : "pending";
 
     details.jobEndRequestedAt = new Date();
 
@@ -4341,10 +3996,9 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
   }
 };
 
-// controllers/payment.controller.js
 exports.makePayment = async (req, res) => {
   try {
-    const { bookingId, paymentMethod, paidAmount, providerRef, installmentStage } = req.body;
+    const { bookingId, paymentMethod, paidAmount, providerRef } = req.body;
 
     if (!bookingId || !paymentMethod || paidAmount == null) {
       return res.status(400).json({
@@ -4355,128 +4009,135 @@ exports.makePayment = async (req, res) => {
 
     const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
     if (!validPaymentMethods.includes(String(paymentMethod))) {
-      return res.status(400).json({ success: false, message: "Invalid payment method" });
+      return res.status(400).json({
+        success: false,
+        message: "Invalid payment method",
+      });
     }
 
     const amount = Number(paidAmount);
     if (!(amount > 0)) {
-      return res.status(400).json({ success: false, message: "Paid amount must be greater than zero" });
+      return res.status(400).json({
+        success: false,
+        message: "Paid amount must be greater than zero",
+      });
     }
 
     const booking = await UserBooking.findById(bookingId);
     if (!booking) {
-      return res.status(404).json({ success: false, message: "Booking not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     }
 
-    const d = booking.bookingDetails;
-    if (!d) {
-      return res.status(400).json({ success: false, message: "bookingDetails missing" });
-    }
-
-    // ✅ IMPORTANT: providerRef must be unique per payment (razorpay_order_id)
-    // If you keep "razorpay_order_xyz" for all, idempotency will block updates.
+    // ✅ Idempotency (gateway callbacks)
     if (providerRef) {
       booking.payments = booking.payments || [];
-      d.paymentLink.providerRef = providerRef;
-      const already = booking.payments.some((p) => p.providerRef === providerRef);
+      const already = booking.payments.some(
+        (p) => p.providerRef === providerRef
+      );
       if (already) {
-        // Return current state (do NOT mutate again)
         return res.status(200).json({
           success: true,
           message: "Payment already recorded (idempotent).",
           bookingId: booking._id,
-          bookingDetails: d,
+          bookingDetails: booking.bookingDetails,
         });
       }
     }
 
-    const serviceType = getServiceTypeFromBooking(booking);
-    const isDeepCleaningSvc = String(serviceType).toLowerCase() === "deep_cleaning";
+    const customerId = booking.customer?.customerId;
+    const vendorId = booking.assignedProfessional?.professionalId;
+    const vendorName = booking.assignedProfessional?.name;
+    const vendorPhoto = booking.assignedProfessional?.profile;
 
-    // ---------- finalTotal ----------
-    let finalTotal = Number(d.finalTotal || 0);
+    const serviceType = getServiceTypeFromBooking(booking);
+    const isDeepCleaning =
+      String(serviceType).toLowerCase() === "deep_cleaning";
+
+    const d = booking.bookingDetails || (booking.bookingDetails = {});
+
+    // 🧠 Compute/lock final total (keep your existing logic)
+    let finalTotal = Number(d.finalTotal ?? 0);
+
+    if (isDeepCleaning && !(finalTotal > 0)) {
+      finalTotal = Number(d.bookingAmount ?? d.siteVisitCharges ?? 0);
+      if (finalTotal > 0) d.finalTotal = finalTotal;
+    }
+
+    if (!(finalTotal > 0)) {
+      finalTotal = computeFinalTotal(d);
+      if (finalTotal > 0) d.finalTotal = finalTotal;
+    }
+
     if (!(finalTotal > 0)) {
       return res.status(400).json({
         success: false,
-        message: "Final total not set. Finalize quote first.",
+        message: "Booking amount not set. Finalize quote first.",
       });
     }
 
-    // ---------- Ensure milestone objects ----------
-    d.firstPayment = ensureMilestoneDefaults(d.firstPayment || {});
-    d.secondPayment = ensureMilestoneDefaults(d.secondPayment || {});
-    d.finalPayment = ensureMilestoneDefaults(d.finalPayment || {});
+    // ✅ Ensure installment targets exist (requestedAmount) for BOTH service types
+    ensureInstallmentTargets(d, finalTotal, serviceType);
 
-    // ---------- Determine stage ----------
+    // ✅ Booking-level remaining check
+    const currentPaid = Number(d.paidAmount || 0);
+    const remaining = Math.max(0, finalTotal - currentPaid);
+    if (amount > remaining) {
+      return res.status(400).json({
+        success: false,
+        message: "Paid amount cannot exceed remaining balance",
+      });
+    }
+
+    // ✅ Apply payment at booking level
+    d.paymentMethod = String(paymentMethod);
+    d.paidAmount = currentPaid + amount;
+
+    // Disable any active payment link
+    if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
+
+    // Log payment (include installmentStage for reporting)
+    // const stage = normalizeStage(
+    //   d.paymentLink?.installmentStage,
+    //   serviceType,
+    //   d
+    // );
+    // ✅ Determine stage safely
     let stage = null;
 
-    // 1) Strongest: gateway callback reference matches current link
-    if (providerRef && d.paymentLink?.providerRef && d.paymentLink.providerRef === providerRef) {
-      stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
-    }
-    // 2) Website caller may send installmentStage (ok)
-    else if (installmentStage) {
-      stage = normalizeStage(installmentStage, serviceType, d);
-    }
-    // 3) Active link stage
-    else if (d.paymentLink?.isActive && d.paymentLink?.installmentStage) {
-      stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
-    }
-    // 4) Fallback derive
-    else {
-      stage = normalizeStage(null, serviceType, d);
+    const requestedStage = req.body.installmentStage; // <-- send this from UI for cash/manual
+
+    if (String(paymentMethod) === "Cash") {
+      stage = normalizeStage(requestedStage, serviceType, d);
+    } else {
+      // online callback: trust paymentLink stage ONLY if providerRef matches
+      if (providerRef && d.paymentLink?.providerRef && d.paymentLink.providerRef === providerRef) {
+        stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
+      } else if (d.paymentLink?.isActive) {
+        stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
+      }
     }
 
+    // ✅ If still null, block
     if (!stage) {
       return res.status(400).json({
         success: false,
         message: "installmentStage is required for this payment.",
       });
     }
+    activateInstallmentStage(d, stage);
 
-    // ---------- Stage key ----------
+    // ✅ Installment-level due cap
     const instKey =
-      stage === "first"
-        ? "firstPayment"
-        : stage === "second"
-          ? "secondPayment"
-          : "finalPayment";
+      stage === "first" ? "firstPayment" : stage === "second" ? "secondPayment" : "finalPayment";
 
-    // ✅ BLOCK paying any stage that is not requested yet
-    const requestedAmt = Number(d[instKey]?.requestedAmount || 0);
-    if (!(requestedAmt > 0)) {
-      return res.status(400).json({
-        success: false,
-        message: `${stage} payment is not requested yet.`,
-        stage,
-        requestedAmount: requestedAmt,
-      });
-    }
-
-    // ---------- Safe activate (does NOT wipe requestedAmount to 0) ----------
-    const safeActivate = (milestone) => {
-      const reqAmt = Number(milestone.requestedAmount || 0);
-      const paidSoFar = Number(milestone.amount || 0) + Number(milestone.prePayment || 0);
-      milestone.remaining = Math.max(0, reqAmt - paidSoFar);
-
-      // status consistency
-      if (reqAmt <= 0) milestone.status = "pending";
-      else if (paidSoFar <= 0) milestone.status = "pending";
-      else if (milestone.remaining === 0) milestone.status = "paid";
-      else milestone.status = "partial";
-    };
-
-    safeActivate(d[instKey]);
-
-    // ---------- Due cap ----------
     const installmentDue = Number(d[instKey]?.remaining || 0);
+
     if (!(installmentDue > 0)) {
       return res.status(400).json({
         success: false,
         message: `No payable amount found for ${stage} installment.`,
-        stage,
-        installmentDue,
-        milestone: d[instKey],
       });
     }
 
@@ -4487,69 +4148,130 @@ exports.makePayment = async (req, res) => {
       });
     }
 
-    // ---------- Booking-level cap ----------
-    const currentPaid = Number(d.paidAmount || 0);
-    const bookingRemaining = Math.max(0, finalTotal - currentPaid);
-    if (amount > bookingRemaining) {
-      return res.status(400).json({
-        success: false,
-        message: "Paid amount cannot exceed remaining balance",
-      });
-    }
-
-    // ---------- Apply payment ----------
-    d.paymentMethod = String(paymentMethod);
-    d.paidAmount = currentPaid + amount;
-
-    // log payment
     booking.payments = booking.payments || [];
     booking.payments.push({
       at: new Date(),
       method: d.paymentMethod,
       amount,
       providerRef: providerRef || undefined,
-      installment: stage,
+      installment: stage || undefined,
     });
 
-    // ✅ deactivate link because payment is recorded
-    if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
+    // ✅ Resync milestones from ledger so cash+online always stays consistent
+    const { prevFinalStatus } = resyncMilestonesFromLedger(
+      d,
+      paymentMethod,
+      serviceType
+    );
 
-    // ✅ Resync milestones from ledger (your function)
-    const { prevFinalStatus } = resyncMilestonesFromLedger(d, d.paymentMethod, serviceType);
-
-    // derived fields (your function)
+    // ✅ Derived fields
     syncDerivedFields(d, finalTotal);
 
-    // mark job hired etc (your existing logic)
+    // ✅ Stage auto-move
+    if (d.paymentLink?.isActive && d.paymentLink?.installmentStage) {
+      const normalized = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
+
+      if (isDeepCleaning) {
+        if (normalized === "first" && d.firstPayment.remaining === 0 && Number(d.firstPayment.requestedAmount || 0) > 0) {
+          d.paymentLink.installmentStage = "final";
+        }
+      } else {
+        if (normalized === "second" && d.secondPayment.remaining === 0 && Number(d.secondPayment.requestedAmount || 0) > 0) {
+          d.paymentLink.installmentStage = "final";
+        }
+      }
+    }
+    // if (d.paymentLink?.installmentStage) {
+    //   const normalized = normalizeStage(
+    //     d.paymentLink.installmentStage,
+    //     serviceType,
+    //     d
+    //   );
+
+    //   if (isDeepCleaning) {
+    //     // Deep cleaning: first -> final
+    //     if (
+    //       normalized === "first" &&
+    //       d.firstPayment.remaining === 0 &&
+    //       Number(d.firstPayment.requestedAmount || 0) > 0
+    //     ) {
+    //       d.paymentLink.installmentStage = "final";
+    //     }
+    //   } else {
+    //     // House painting: second -> final
+    //     if (
+    //       normalized === "second" &&
+    //       d.secondPayment.remaining === 0 &&
+    //       Number(d.secondPayment.requestedAmount || 0) > 0
+    //     ) {
+    //       d.paymentLink.installmentStage = "final";
+    //     }
+    //   }
+    // }
+
+    // ✅ Complete ONLY when FINAL is exactly paid (amount + prePayment)
     const finalIsExactlyPaid = isStageExactlyPaid(d.finalPayment);
     const finalJustPaidNow = prevFinalStatus !== "paid" && finalIsExactlyPaid;
 
     if (finalJustPaidNow) {
       d.paymentStatus = "Paid";
-      if (["Waiting for final payment", "Project Ongoing", "Job Ongoing"].includes(String(d.status))) {
+      booking.vendorRatingUrl = `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}`;
+
+      if (
+        [
+          "Waiting for final payment",
+          "Project Ongoing",
+          "Job Ongoing",
+        ].includes(String(d.status))
+      ) {
         d.status = "Project Completed";
-        d.jobEndedAt = d.jobEndedAt || new Date();
+        const now = new Date();
+        if (booking.assignedProfessional) {
+          booking.assignedProfessional.completedDate = now;
+          booking.assignedProfessional.completedTime = moment().format("LT");
+        }
+        d.jobEndedAt = now;
+      }
+
+      // Maintain hiring info
+      if (booking.assignedProfessional?.hiring) {
+        booking.assignedProfessional.hiring.status = "active";
+        if (!booking.assignedProfessional.hiring.hiredDate) {
+          booking.assignedProfessional.hiring.hiredDate = new Date();
+          booking.assignedProfessional.hiring.hiredTime = moment().format("LT");
+        }
       }
     } else {
+      // Partial status
       const ratio = finalTotal > 0 ? Number(d.paidAmount || 0) / finalTotal : 0;
-      d.paymentStatus = ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
+      d.paymentStatus =
+        ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
+
       const statusNorm = (d.status || "").trim().toLowerCase();
-      if (["pending hiring", "pending"].includes(statusNorm)) d.status = "Hired";
+      if (["pending hiring", "pending"].includes(statusNorm))
+        d.status = "Hired";
+
+      if (booking.assignedProfessional?.hiring) {
+        booking.assignedProfessional.hiring.status = "active";
+        if (!booking.assignedProfessional.hiring.hiredDate) {
+          booking.assignedProfessional.hiring.hiredDate = new Date();
+          booking.assignedProfessional.hiring.hiredTime = moment().format("LT");
+        }
+      }
     }
 
     booking.isEnquiry = false;
 
+    // idempotent finalize (keeps Paid + Project Completed consistent, settles prePayment too)
     finalizeIfFullyPaid({ booking, bookingId, finalTotal });
-
-    // ✅ Force nested save (fixes “API hits but DB not updated” cases)
-    booking.markModified("bookingDetails");
-    booking.markModified("payments");
 
     await booking.save();
 
     return res.json({
       success: true,
-      message: finalJustPaidNow ? "Final payment completed. Job marked as ended." : "Payment received.",
+      message: finalJustPaidNow
+        ? "Final payment completed. Job marked as ended."
+        : "Payment received.",
       bookingId: booking._id,
       finalTotal,
       totalPaid: d.paidAmount,
@@ -4559,8 +4281,10 @@ exports.makePayment = async (req, res) => {
       firstPayment: d.firstPayment,
       secondPayment: d.secondPayment,
       finalPayment: d.finalPayment,
-      paymentLink: d.paymentLink,
       finalJustPaidNow,
+      ratingURL: finalJustPaidNow
+        ? `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}`
+        : "",
     });
   } catch (err) {
     console.error("makePayment error:", err);
@@ -4571,245 +4295,6 @@ exports.makePayment = async (req, res) => {
     });
   }
 };
-// exports.makePayment = async (req, res) => {
-//   try {
-//     const { bookingId, paymentMethod, paidAmount, providerRef, installmentStage } = req.body;
-
-//     if (!bookingId || !paymentMethod || paidAmount == null) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "bookingId, paymentMethod, and paidAmount are required",
-//       });
-//     }
-
-//     const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
-//     if (!validPaymentMethods.includes(String(paymentMethod))) {
-//       return res.status(400).json({ success: false, message: "Invalid payment method" });
-//     }
-
-//     const amount = Number(paidAmount);
-//     if (!(amount > 0)) {
-//       return res.status(400).json({ success: false, message: "Paid amount must be greater than zero" });
-//     }
-
-//     const booking = await UserBooking.findById(bookingId);
-//     if (!booking) {
-//       return res.status(404).json({ success: false, message: "Booking not found" });
-//     }
-
-//     const d = booking.bookingDetails;
-//     if (!d) {
-//       return res.status(400).json({ success: false, message: "bookingDetails missing" });
-//     }
-
-//     // ✅ IMPORTANT: providerRef must be unique per payment (razorpay_order_id)
-//     // If you keep "razorpay_order_xyz" for all, idempotency will block updates.
-//     if (providerRef) {
-//       booking.payments = booking.payments || [];
-//       d.paymentLink.providerRef = providerRef;
-//       const already = booking.payments.some((p) => p.providerRef === providerRef);
-//       if (already) {
-//         // Return current state (do NOT mutate again)
-//         return res.status(200).json({
-//           success: true,
-//           message: "Payment already recorded (idempotent).",
-//           bookingId: booking._id,
-//           bookingDetails: d,
-//         });
-//       }
-//     }
-
-//     const serviceType = getServiceTypeFromBooking(booking);
-//     const isDeepCleaningSvc = String(serviceType).toLowerCase() === "deep_cleaning";
-
-//     // ---------- finalTotal ----------
-//     let finalTotal = Number(d.finalTotal || 0);
-//     if (!(finalTotal > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Final total not set. Finalize quote first.",
-//       });
-//     }
-
-//     // ---------- Ensure milestone objects ----------
-//     d.firstPayment = ensureMilestoneDefaults(d.firstPayment || {});
-//     d.secondPayment = ensureMilestoneDefaults(d.secondPayment || {});
-//     d.finalPayment = ensureMilestoneDefaults(d.finalPayment || {});
-
-//     // ---------- Determine stage ----------
-//     let stage = null;
-
-//     // 1) Strongest: gateway callback reference matches current link
-//     if (providerRef && d.paymentLink?.providerRef && d.paymentLink.providerRef === providerRef) {
-//       stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
-//     }
-//     // 2) Website caller may send installmentStage (ok)
-//     else if (installmentStage) {
-//       stage = normalizeStage(installmentStage, serviceType, d);
-//     }
-//     // 3) Active link stage
-//     else if (d.paymentLink?.isActive && d.paymentLink?.installmentStage) {
-//       stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
-//     }
-//     // 4) Fallback derive
-//     else {
-//       stage = normalizeStage(null, serviceType, d);
-//     }
-
-//     if (!stage) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "installmentStage is required for this payment.",
-//       });
-//     }
-
-//     // ---------- Stage key ----------
-//     const instKey =
-//       stage === "first"
-//         ? "firstPayment"
-//         : stage === "second"
-//           ? "secondPayment"
-//           : "finalPayment";
-
-//     // ✅ BLOCK paying any stage that is not requested yet
-//     const requestedAmt = Number(d[instKey]?.requestedAmount || 0);
-//     if (!(requestedAmt > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `${stage} payment is not requested yet.`,
-//         stage,
-//         requestedAmount: requestedAmt,
-//       });
-//     }
-
-//     // ---------- Safe activate (does NOT wipe requestedAmount to 0) ----------
-//     const safeActivate = (milestone) => {
-//       const reqAmt = Number(milestone.requestedAmount || 0);
-//       const paidSoFar = Number(milestone.amount || 0) + Number(milestone.prePayment || 0);
-//       milestone.remaining = Math.max(0, reqAmt - paidSoFar);
-
-//       // status consistency
-//       if (reqAmt <= 0) milestone.status = "pending";
-//       else if (paidSoFar <= 0) milestone.status = "pending";
-//       else if (milestone.remaining === 0) milestone.status = "paid";
-//       else milestone.status = "partial";
-//     };
-
-//     safeActivate(d[instKey]);
-
-//     // ---------- Due cap ----------
-//     const installmentDue = Number(d[instKey]?.remaining || 0);
-//     if (!(installmentDue > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `No payable amount found for ${stage} installment.`,
-//         stage,
-//         installmentDue,
-//         milestone: d[instKey],
-//       });
-//     }
-
-//     if (amount > installmentDue) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `Paid amount cannot exceed remaining for ${stage} installment (${installmentDue}).`,
-//       });
-//     }
-
-//     // ---------- Booking-level cap ----------
-//     const currentPaid = Number(d.paidAmount || 0);
-//     const bookingRemaining = Math.max(0, finalTotal - currentPaid);
-//     if (amount > bookingRemaining) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Paid amount cannot exceed remaining balance",
-//       });
-//     }
-
-//     // ---------- Apply payment ----------
-//     d.paymentMethod = String(paymentMethod);
-//     d.paidAmount = currentPaid + amount;
-
-//     // Disable any active payment link
-//     if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
-
-//     // Log payment (include installmentStage for reporting)
-//     const stage = normalizeStage(
-//       d.paymentLink?.installmentStage,
-//       serviceType,
-//       d
-//     );
-
-//     // log payment
-//     booking.payments = booking.payments || [];
-//     booking.payments.push({
-//       at: new Date(),
-//       method: d.paymentMethod,
-//       amount,
-//       providerRef: providerRef || undefined,
-//       installment: stage,
-//     });
-
-//     // ✅ deactivate link because payment is recorded
-//     if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
-
-//     // ✅ Resync milestones from ledger (your function)
-//     const { prevFinalStatus } = resyncMilestonesFromLedger(d, d.paymentMethod, serviceType);
-
-//     // derived fields (your function)
-//     syncDerivedFields(d, finalTotal);
-
-//     // mark job hired etc (your existing logic)
-//     const finalIsExactlyPaid = isStageExactlyPaid(d.finalPayment);
-//     const finalJustPaidNow = prevFinalStatus !== "paid" && finalIsExactlyPaid;
-
-//     if (finalJustPaidNow) {
-//       d.paymentStatus = "Paid";
-//       if (["Waiting for final payment", "Project Ongoing", "Job Ongoing"].includes(String(d.status))) {
-//         d.status = "Project Completed";
-//         d.jobEndedAt = d.jobEndedAt || new Date();
-//       }
-//     } else {
-//       const ratio = finalTotal > 0 ? Number(d.paidAmount || 0) / finalTotal : 0;
-//       d.paymentStatus = ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
-//       const statusNorm = (d.status || "").trim().toLowerCase();
-//       if (["pending hiring", "pending"].includes(statusNorm)) d.status = "Hired";
-//     }
-
-//     booking.isEnquiry = false;
-
-//     finalizeIfFullyPaid({ booking, bookingId, finalTotal });
-
-//     // ✅ Force nested save (fixes “API hits but DB not updated” cases)
-//     booking.markModified("bookingDetails");
-//     booking.markModified("payments");
-
-//     await booking.save();
-
-//     return res.json({
-//       success: true,
-//       message: finalJustPaidNow ? "Final payment completed. Job marked as ended." : "Payment received.",
-//       bookingId: booking._id,
-//       finalTotal,
-//       totalPaid: d.paidAmount,
-//       remainingAmount: Math.max(0, finalTotal - d.paidAmount),
-//       status: d.status,
-//       paymentStatus: d.paymentStatus,
-//       firstPayment: d.firstPayment,
-//       secondPayment: d.secondPayment,
-//       finalPayment: d.finalPayment,
-//       paymentLink: d.paymentLink,
-//       finalJustPaidNow,
-//     });
-//   } catch (err) {
-//     console.error("makePayment error:", err);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Server error while processing payment",
-//       error: err.message,
-//     });
-//   }
-// };
 
 exports.updateManualPayment = async (req, res) => {
   try {
@@ -4859,32 +4344,12 @@ exports.updateManualPayment = async (req, res) => {
     const d = booking.bookingDetails || (booking.bookingDetails = {});
     const finalTotal = Number(d.finalTotal || 0);
 
-    // ensureInstallmentTargets(d, finalTotal, serviceType);
-
-    // const stage = normalizeStage(
-    //   req.body.installmentStage, serviceType, d
-    // );
-    // activateInstallmentStage(d, stage);
     ensureInstallmentTargets(d, finalTotal, serviceType);
-    const stage = normalizeStage(req.body.installmentStage, serviceType, d);
-    activateInstallmentStage(d, stage);
 
-    // ✅ stage due lock
-    const key = stage === "first" ? "firstPayment" : stage === "second" ? "secondPayment" : "finalPayment";
-    const due = Number(d[key]?.remaining || 0);
-    if (!(due > 0)) {
-      return res.status(400).json({
-        success: false,
-        message: `No payable amount found for ${stage} installment.`,
-      });
-    }
+    const stage = normalizeStage(
+      req.body.installmentStage, serviceType, d
+    );
 
-    if (currentPaid > due) {
-      return res.status(400).json({
-        success: false,
-        message: `Paid amount cannot exceed remaining for ${stage} installment (${due}).`,
-      });
-    }
     // ---------- BOOKING-LEVEL NUMBERS (BEFORE THIS PAYMENT) ----------
     const existingPaid = Number(d.paidAmount || 0);
     const prevAmountYetToPay = Number(d.amountYetToPay || 0);
@@ -4976,6 +4441,17 @@ exports.updateManualPayment = async (req, res) => {
       });
     }
 
+    // ✅ Ensure targets exist for BOTH service types
+    // ensureInstallmentTargets(d, totalBookingAmt, serviceType);
+    // activateInstallmentStage(d, stage)
+
+    // ✅ stage due lock
+    // const key = stage === "first" ? "firstPayment" : stage === "second" ? "secondPayment" : "finalPayment";
+    // const due = Number(d[key].remaining || 0);
+    // if (Number(paidAmount) > due) {
+    //   return res.status(400).json({ success: false, message: "Paid amount cannot exceed installment remaining." });
+    // }
+
     const firstReq = Number(d.firstPayment.requestedAmount || 0);
     const secondReq = isDeepCleaning
       ? 0
@@ -4983,8 +4459,7 @@ exports.updateManualPayment = async (req, res) => {
     const finalReq = Number(d.finalPayment.requestedAmount || 0);
 
     // ✅ Allocate existingPaid into milestone buckets
-    // IMPORTANT: prePayment already exists inside paidAmount, 
-    // subtract it to avoid double-counting in amount buckets.
+    // IMPORTANT: prePayment already exists inside paidAmount, subtract it to avoid double-counting in amount buckets.
     const prePay = Math.max(0, Number(d.finalPayment?.prePayment || 0));
     let remainingPaid = Math.max(0, existingPaid - prePay);
 
@@ -5048,7 +4523,7 @@ exports.updateManualPayment = async (req, res) => {
           ? "deep_cleaning_additional_amount_prePayment"
           : "additional_amount_prePayment"
       );
-      if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
+
       await booking.save();
 
       return res.status(200).json({
@@ -5123,15 +4598,6 @@ exports.updateManualPayment = async (req, res) => {
       }
 
       overflowAppliedToFinal = 0;
-    }
-
-    // if second installment is fully paid by cash/manual, deactivate payment link
-    if (d.paymentLink?.isActive) {
-      const linkStage = String(d.paymentLink.installmentStage || "").toLowerCase();
-
-      if (linkStage === "second" && isStageExactlyPaid(d.secondPayment)) {
-        d.paymentLink.isActive = false;
-      }
     }
 
     const remainingBookingAmount = updateBookingLevel();
@@ -5218,413 +4684,6 @@ exports.updateManualPayment = async (req, res) => {
   }
 };
 
-// exports.updateManualPayment = async (req, res) => {
-//   try {
-//     const {
-//       bookingId,
-//       paymentMethod,
-//       paidAmount,
-//       providerRef,
-//       isAdditionalAmount,
-//     } = req.body;
-
-//     if (!bookingId || !paymentMethod || paidAmount == null) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "bookingId, paymentMethod, and paidAmount are required",
-//       });
-//     }
-
-//     const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
-//     if (!validPaymentMethods.includes(String(paymentMethod))) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Invalid payment method",
-//       });
-//     }
-
-//     const currentPaid = Number(paidAmount || 0);
-//     if (!(currentPaid > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "paidAmount must be greater than 0",
-//       });
-//     }
-
-//     const booking = await UserBooking.findById(bookingId);
-//     if (!booking) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Booking not found",
-//       });
-//     }
-
-//     const serviceType = getServiceTypeFromBooking(booking);
-//     const isDeepCleaning =
-//       String(serviceType).toLowerCase() === "deep_cleaning";
-
-//     const d = booking.bookingDetails || (booking.bookingDetails = {});
-//     const finalTotal = Number(d.finalTotal || 0);
-
-//     // ensureInstallmentTargets(d, finalTotal, serviceType);
-
-//     // const stage = normalizeStage(
-//     //   req.body.installmentStage, serviceType, d
-//     // );
-//     // activateInstallmentStage(d, stage);
-//     ensureInstallmentTargets(d, finalTotal, serviceType);
-//     const stage = normalizeStage(req.body.installmentStage, serviceType, d);
-//     activateInstallmentStage(d, stage);
-
-//     // ✅ stage due lock
-//     const key = stage === "first" ? "firstPayment" : stage === "second" ? "secondPayment" : "finalPayment";
-//     const due = Number(d[key]?.remaining || 0);
-//     if (!(due > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `No payable amount found for ${stage} installment.`,
-//       });
-//     }
-
-//     if (currentPaid > due) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `Paid amount cannot exceed remaining for ${stage} installment (${due}).`,
-//       });
-//     }
-//     // ---------- BOOKING-LEVEL NUMBERS (BEFORE THIS PAYMENT) ----------
-//     const existingPaid = Number(d.paidAmount || 0);
-//     const prevAmountYetToPay = Number(d.amountYetToPay || 0);
-
-//     if (currentPaid > prevAmountYetToPay) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `Amount exceeds total pending amount (${prevAmountYetToPay})`,
-//       });
-//     }
-
-//     // ---------- Helpers ----------
-//     const disablePaymentLinkIfFullyPaid = () => {
-//       if (Number(d.amountYetToPay || 0) === 0 && d.paymentLink?.isActive) {
-//         d.paymentLink.isActive = false;
-//       }
-//     };
-
-//     const logPayment = (note) => {
-//       booking.payments = booking.payments || [];
-//       booking.payments.push({
-//         at: new Date(),
-//         method: String(paymentMethod),
-//         amount: currentPaid,
-//         providerRef: providerRef || undefined,
-//         ...(note ? { note } : {}),
-//         installment: stage || undefined,
-//       });
-//     };
-
-//     const updateBookingLevel = () => {
-//       d.paidAmount = existingPaid + currentPaid;
-//       d.paymentMethod = String(paymentMethod);
-
-//       const remainingBookingAmount = Math.max(
-//         0,
-//         prevAmountYetToPay - currentPaid
-//       );
-//       d.amountYetToPay = remainingBookingAmount;
-
-//       d.paymentStatus =
-//         remainingBookingAmount === 0 ? "Paid" : "Partial Payment";
-
-//       disablePaymentLinkIfFullyPaid();
-//       return remainingBookingAmount;
-//     };
-
-//     // ✅ amount = paid so far, prePayment = extra collected, requestedAmount = target
-//     const syncMilestone = (m) => {
-//       const req = Number(m.requestedAmount || 0);
-//       const amt = Math.max(0, Number(m.amount || 0));
-//       const pre = Math.max(0, Number(m.prePayment || 0));
-
-//       const effectivePaid = Math.min(req, amt + pre);
-//       m.remaining = Math.max(0, req - effectivePaid);
-
-//       if (req <= 0) m.status = "pending";
-//       else if (effectivePaid === 0) m.status = "pending";
-//       else if (m.remaining === 0) m.status = "paid";
-//       else m.status = "partial";
-//     };
-
-//     // ---------- ENSURE PAYMENT OBJECTS ----------
-//     d.firstPayment = d.firstPayment || {};
-//     d.secondPayment = d.secondPayment || {};
-//     d.finalPayment = d.finalPayment || {};
-
-//     const ensureDefaults = (m) => {
-//       m.status = m.status || "pending";
-//       m.amount = Number(m.amount || 0);
-//       m.requestedAmount = Number(m.requestedAmount || 0);
-//       m.remaining = Number(m.remaining || 0);
-//       m.method = m.method || "None";
-//       m.prePayment = Number(m.prePayment || 0);
-//     };
-
-//     ensureDefaults(d.firstPayment);
-//     ensureDefaults(d.secondPayment);
-//     ensureDefaults(d.finalPayment);
-
-//     // ---------- Total ----------
-//     const totalBookingAmt = Number(
-//       d.finalTotal || existingPaid + prevAmountYetToPay || 0
-//     );
-//     if (!(totalBookingAmt > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Final total not set. Finalize quote first.",
-//       });
-//     }
-
-//     const firstReq = Number(d.firstPayment.requestedAmount || 0);
-//     const secondReq = isDeepCleaning
-//       ? 0
-//       : Number(d.secondPayment.requestedAmount || 0);
-//     const finalReq = Number(d.finalPayment.requestedAmount || 0);
-
-//     // ✅ Allocate existingPaid into milestone buckets
-//     // IMPORTANT: prePayment already exists inside paidAmount, 
-//     // subtract it to avoid double-counting in amount buckets.
-//     const prePay = Math.max(0, Number(d.finalPayment?.prePayment || 0));
-//     let remainingPaid = Math.max(0, existingPaid - prePay);
-
-//     const firstPaidSoFar = Math.max(0, Math.min(firstReq, remainingPaid));
-//     remainingPaid -= firstPaidSoFar;
-
-//     let secondPaidSoFar = 0;
-//     if (!isDeepCleaning) {
-//       secondPaidSoFar = Math.max(0, Math.min(secondReq, remainingPaid));
-//       remainingPaid -= secondPaidSoFar;
-//     }
-
-//     const finalPaidSoFar = Math.max(0, Math.min(finalReq, remainingPaid));
-
-//     d.firstPayment.amount = firstPaidSoFar;
-//     if (!isDeepCleaning) d.secondPayment.amount = secondPaidSoFar;
-//     else d.secondPayment.amount = 0; // ✅ deep cleaning hard-lock
-//     d.finalPayment.amount = finalPaidSoFar;
-
-//     syncMilestone(d.firstPayment);
-//     syncMilestone(d.secondPayment);
-//     syncMilestone(d.finalPayment);
-
-//     // ---------- ADDITIONAL AMOUNT (round-off / extra) ----------
-//     const gateCompleted = isDeepCleaning
-//       ? firstReq > 0 &&
-//       d.firstPayment.status === "paid" &&
-//       isStageExactlyPaid(d.firstPayment)
-//       : secondReq > 0 &&
-//       d.secondPayment.status === "paid" &&
-//       isStageExactlyPaid(d.secondPayment);
-
-//     if (isAdditionalAmount === true && !gateCompleted) {
-//       return res.status(400).json({
-//         success: false,
-//         message: isDeepCleaning
-//           ? "Extra amount can be added only after First installment is fully paid."
-//           : "Extra amount can be added only after Second installment is fully paid.",
-//         stage,
-//         firstPayment: d.firstPayment,
-//         secondPayment: d.secondPayment,
-//         finalPayment: d.finalPayment,
-//       });
-//     }
-
-//     if (isAdditionalAmount === true && gateCompleted) {
-//       const extra = currentPaid;
-
-//       d.finalPayment.prePayment =
-//         Number(d.finalPayment.prePayment || 0) + extra;
-
-//       if (!d.finalPayment.method || d.finalPayment.method === "None") {
-//         d.finalPayment.method = String(paymentMethod);
-//       }
-
-//       syncMilestone(d.finalPayment);
-
-//       const remainingBookingAmount = updateBookingLevel();
-//       logPayment(
-//         isDeepCleaning
-//           ? "deep_cleaning_additional_amount_prePayment"
-//           : "additional_amount_prePayment"
-//       );
-//       if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
-//       await booking.save();
-
-//       return res.status(200).json({
-//         success: true,
-//         message:
-//           "Additional amount stored in finalPayment.prePayment (requestedAmount preserved).",
-//         paidAmount: d.paidAmount,
-//         amountYetToPay: d.amountYetToPay,
-//         stage,
-//         firstPayment: d.firstPayment,
-//         secondPayment: d.secondPayment,
-//         finalPayment: d.finalPayment,
-//         extraStoredAsPrePayment: extra,
-//         remainingBookingAmount,
-//       });
-//     }
-
-//     // ---------- NORMAL PAYMENT APPLY ----------
-//     const prevFinalStatus = d.finalPayment.status;
-//     let overflowAppliedToFinal = 0;
-
-//     if (stage === "final") {
-//       // Pay FINAL directly
-//       const finalPaidNow = Number(d.finalPayment.amount || 0);
-//       const pendingFinal = Math.max(
-//         0,
-//         finalReq - (finalPaidNow + Number(d.finalPayment.prePayment || 0))
-//       );
-
-//       const appliedToFinal = Math.min(currentPaid, pendingFinal);
-//       overflowAppliedToFinal = appliedToFinal;
-
-//       if (appliedToFinal > 0) {
-//         d.finalPayment.amount = finalPaidNow + appliedToFinal;
-
-//         if (!d.finalPayment.method || d.finalPayment.method === "None") {
-//           d.finalPayment.method = String(paymentMethod);
-//         }
-//         syncMilestone(d.finalPayment);
-//       }
-//     } else if (isDeepCleaning) {
-//       // ✅ Deep cleaning: pay FIRST (NOT second)
-//       const firstPaidNow = Number(d.firstPayment.amount || 0);
-//       const pendingFirst = Math.max(0, firstReq - firstPaidNow);
-
-//       const appliedToFirst = Math.min(currentPaid, pendingFirst);
-
-//       if (appliedToFirst > 0) {
-//         d.firstPayment.amount = firstPaidNow + appliedToFirst;
-
-//         if (!d.firstPayment.method || d.firstPayment.method === "None") {
-//           d.firstPayment.method = String(paymentMethod);
-//         }
-//         syncMilestone(d.firstPayment);
-//       }
-
-//       overflowAppliedToFinal = 0;
-//     } else {
-//       // House painting: pay SECOND
-//       const secondPaidNow = Number(d.secondPayment.amount || 0);
-//       const pendingSecond = Math.max(0, secondReq - secondPaidNow);
-
-//       const appliedToSecond = Math.min(currentPaid, pendingSecond);
-
-//       if (appliedToSecond > 0) {
-//         d.secondPayment.amount = secondPaidNow + appliedToSecond;
-
-//         if (!d.secondPayment.method || d.secondPayment.method === "None") {
-//           d.secondPayment.method = String(paymentMethod);
-//         }
-//         syncMilestone(d.secondPayment);
-//       }
-
-//       overflowAppliedToFinal = 0;
-//     }
-
-//     // if second installment is fully paid by cash/manual, deactivate payment link
-//     if (d.paymentLink?.isActive) {
-//       const linkStage = String(d.paymentLink.installmentStage || "").toLowerCase();
-
-//       if (linkStage === "second" && isStageExactlyPaid(d.secondPayment)) {
-//         d.paymentLink.isActive = false;
-//       }
-//     }
-
-//     const remainingBookingAmount = updateBookingLevel();
-
-//     // ✅ Stage auto-move
-//     if (d.paymentLink?.installmentStage) {
-//       if (isDeepCleaning) {
-//         if (d.firstPayment.remaining === 0 && firstReq > 0) {
-//           d.paymentLink.installmentStage = "final";
-//         }
-//       } else {
-//         if (d.secondPayment.remaining === 0 && secondReq > 0) {
-//           d.paymentLink.installmentStage = "final";
-//         }
-//       }
-//     }
-
-//     // ✅ COMPLETE ONLY WHEN FINAL is exactly paid (amount + prePayment)
-//     const finalIsExactlyPaid =
-//       stage === "final" && isStageExactlyPaid(d.finalPayment);
-//     const finalJustPaidNow = prevFinalStatus !== "paid" && finalIsExactlyPaid;
-
-//     if (finalJustPaidNow) {
-//       const customerId = booking.customer?.customerId;
-//       const vendorId = booking.assignedProfessional?.professionalId;
-//       const vendorName = booking.assignedProfessional?.name;
-//       const vendorPhoto = booking.assignedProfessional?.profile;
-
-//       d.paymentStatus = "Paid";
-//       booking.vendorRatingUrl = `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}`;
-
-//       if (
-//         [
-//           "Waiting for final payment",
-//           "Project Ongoing",
-//           "Job Ongoing",
-//         ].includes(String(d.status))
-//       ) {
-//         d.status = "Project Completed";
-//         const now = new Date();
-
-//         if (booking.assignedProfessional) {
-//           booking.assignedProfessional.completedDate = now;
-//           booking.assignedProfessional.completedTime = moment().format("LT");
-//         }
-//         d.jobEndedAt = now;
-//       }
-//     }
-
-//     logPayment();
-//     disablePaymentLinkIfFullyPaid();
-
-//     // idempotent finalize (keeps Paid + Project Completed consistent, settles prePayment too)
-//     finalizeIfFullyPaid({
-//       booking,
-//       bookingId,
-//       finalTotal: Number(
-//         d.finalTotal || existingPaid + prevAmountYetToPay || 0
-//       ),
-//     });
-
-//     await booking.save();
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "Payment updated successfully",
-//       paidAmount: d.paidAmount,
-//       amountYetToPay: d.amountYetToPay,
-//       stage,
-//       firstPayment: d.firstPayment,
-//       secondPayment: d.secondPayment,
-//       finalPayment: d.finalPayment,
-//       overflowAppliedToFinal,
-//       remainingBookingAmount,
-//       finalJustPaidNow,
-//     });
-//   } catch (error) {
-//     console.log("updateManualPayment error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Server error",
-//       error: error.message,
-//     });
-//   }
-// };
-
 exports.adminToCustomerPayment = async (req, res) => {
   try {
     const { bookingId, paymentMethod, paidAmount, providerRef } = req.body;
@@ -5705,19 +4764,11 @@ exports.adminToCustomerPayment = async (req, res) => {
     if (d.paymentStatus) d.paymentStatus = "Partial Payment";
     if (d.paymentMethod) d.paymentMethod = "UPI";
 
-    const stage = normalizeStage(
-      d.paymentLink?.installmentStage,
-      serviceType,
-      d
-    );
-
     booking.payments.push({
       at: new Date(),
       method: paymentMethod,
       amount,
       providerRef: providerRef || undefined,
-      installment: stage || undefined,
-      purpose: "site_visit" || undefined,
     });
 
     await booking.save();
