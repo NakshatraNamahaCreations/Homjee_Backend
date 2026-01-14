@@ -77,7 +77,7 @@ exports.markManualPaymentPaid = async (req, res) => {
     payment.payment.paidAt = new Date();
 
     await payment.save();
-
+  
     res.status(200).json({
       success: true,
       message: "Payment marked as Paid successfully.",

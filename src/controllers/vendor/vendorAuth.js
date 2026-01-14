@@ -982,29 +982,74 @@ exports.getAllVendors = async (req, res) => {
 
 // ... (Other existing endpoints like loginWithMobile, verifyOTP, etc. remain unchanged)
 
+// exports.addCoin = async (req, res) => {
+//   try {
+//     const { vendorId, coins } = req.body;
+//     if (!vendorId || !coins) {
+//       return res.status(400).json({ message: "vendorId and coins required" });
+//     }
+
+//     const vendor = await vendorAuthSchema.findByIdAndUpdate(
+//       vendorId,
+//       { $inc: { "wallet.coins": coins } },
+//       { new: true }
+//     );
+
+//     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+
+//     res
+//       .status(200)
+//       .json({ message: "Coins added successfully", wallet: vendor.wallet });
+//   } catch (error) {
+//     console.error("AddCoin error:", error);
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
 exports.addCoin = async (req, res) => {
   try {
     const { vendorId, coins } = req.body;
+
     if (!vendorId || !coins) {
-      return res.status(400).json({ message: "vendorId and coins required" });
+      return res.status(400).json({
+        success: false,
+        message: "vendorId and coins are required",
+      });
     }
 
     const vendor = await vendorAuthSchema.findByIdAndUpdate(
       vendorId,
-      { $inc: { "wallet.coins": coins } },
+      {
+        $inc: { "wallet.coins": Number(coins) },
+        $set: {
+          "wallet.canRespondLead": true,   // ✅ enable lead response
+          "wallet.isLinkActive": true,     // ✅ activate payment link
+        },
+      },
       { new: true }
     );
 
-    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: "Vendor not found",
+      });
+    }
 
-    res
-      .status(200)
-      .json({ message: "Coins added successfully", wallet: vendor.wallet });
+    return res.status(200).json({
+      success: true,
+      message: "Coins added successfully",
+      wallet: vendor.wallet,
+    });
   } catch (error) {
     console.error("AddCoin error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
+
 
 exports.reduceCoin = async (req, res) => {
   try {
