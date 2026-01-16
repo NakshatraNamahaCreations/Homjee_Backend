@@ -19,6 +19,13 @@ const citiesObj = {
   Pune: "Pune",
 };
 
+function generateProviderRef() {
+  const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // e.g. "20251120"
+  // Generate a random 4-digit number or pull last count from DB for uniqueness
+  const rand = Math.floor(1000 + Math.random() * 9000);
+  return `OMO${dateStr}${rand}`;
+}
+
 function generateBookingId() {
   // Use today's date in YYYYMMDD format
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // e.g. "20251120"
@@ -812,7 +819,8 @@ exports.createBooking = async (req, res) => {
       };
       finalPayment = {
         status: "pending",
-        amount: Math.max(0, originalTotalAmount - paidAmount),
+        amount: 0
+        // amount: Math.max(0, originalTotalAmount - paidAmount),
       };
     }
 
@@ -861,7 +869,7 @@ exports.createBooking = async (req, res) => {
         method: bookingDetailsConfig.paymentMethod, // "UPI" / "Cash" etc
         amount:
           serviceType === "house_painting" ? siteVisitCharges : paidAmount,
-        providerRef: "razorpay_order_xyz",
+        providerRef: generateProviderRef(),
         ...(serviceType === "house_painting" ? { purpose: "site_visit" } : {}),
 
         ...(serviceType === "deep_cleaning" ? { installment: "first" } : {}), // ✅ only deep_cleaning
@@ -874,7 +882,7 @@ exports.createBooking = async (req, res) => {
     //     method: bookingDetailsConfig.paymentMethod,
     //     amount:
     //       serviceType === "house_painting" ? siteVisitCharges : paidAmount,
-    //     providerRef: "razorpay_order_xyz",
+    //     providerRef: generateProviderRef(),
     //   },
     // ];
     // untrack of hp site amt
@@ -886,7 +894,7 @@ exports.createBooking = async (req, res) => {
     //         at: new Date(),
     //         method: bookingDetailsConfig.paymentMethod,
     //         amount: paidAmount,
-    //         providerRef: "razorpay_order_xyz",
+    //         providerRef: generateProviderRef(),
     //       },
     //     ];
 
@@ -946,7 +954,7 @@ exports.createBooking = async (req, res) => {
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
       isActive: false, // make it true once payment gateway impl and each makePayment make it false - once payment done
-      providerRef: "razorpay_order_xyz",
+      providerRef: generateProviderRef(),
     };
     const updatedBooking = await UserBooking.findByIdAndUpdate(
       booking._id,
@@ -955,7 +963,7 @@ exports.createBooking = async (req, res) => {
           "bookingDetails.paymentLink": {
             url: paymentLinkUrl,
             isActive: false,
-            providerRef: "razorpay_order_xyz",
+            providerRef: generateProviderRef(),
           },
         },
       },
@@ -1186,7 +1194,7 @@ exports.createBooking = async (req, res) => {
 //         at: new Date(),
 //         method: bookingDetailsConfig.paymentMethod,
 //         amount: paidAmount,
-//         providerRef: "razorpay_order_xyz",
+//         providerRef: generateProviderRef(),
 
 //       });
 //     }
@@ -1256,7 +1264,7 @@ exports.createBooking = async (req, res) => {
 //     booking.bookingDetails.paymentLink = {
 //       url: paymentLinkUrl,
 //       isActive: true,
-//       providerRef: "razorpay_order_xyz",
+//       providerRef: generateProviderRef(),
 //     };
 
 //     await booking.save();
@@ -1471,7 +1479,7 @@ exports.adminCreateBooking = async (req, res) => {
         at: new Date(),
         method: bookingDetailsConfig.paymentMethod,
         amount: paidAmount,
-        providerRef : `payment_${Date.now()}_${Math.floor(Math.random() * 1e6)}`
+        providerRef: generateProviderRef(),
       });
     }
 
@@ -1539,7 +1547,7 @@ exports.adminCreateBooking = async (req, res) => {
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
-      providerRef: "razorpay_order_xyz",
+      providerRef: generateProviderRef(),
       ...(serviceType === "deep_cleaning" ? { installmentStage: "first" } : {}),
     };
 
@@ -3886,7 +3894,7 @@ exports.markPendingHiring = async (req, res) => {
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
-      providerRef: "razorpay_order_xyz", // fill if you have gateway id
+      providerRef: generateProviderRef(), // fill if you have gateway id
       installmentStage: "first",
     };
 
@@ -4153,7 +4161,7 @@ exports.requestSecondPayment = async (req, res) => {
     d.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
-      providerRef: "razorpay_order_xyz",
+      providerRef: generateProviderRef(),
       installmentStage: "second",
     };
 
@@ -4308,7 +4316,7 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
     details.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
-      providerRef: "razorpay_order_xyz",
+      providerRef: generateProviderRef(),
       installmentStage: "final",
     };
 
@@ -4375,7 +4383,7 @@ exports.makePayment = async (req, res) => {
     }
 
     // ✅ IMPORTANT: providerRef must be unique per payment (razorpay_order_id)
-    // If you keep "razorpay_order_xyz" for all, idempotency will block updates.
+    // If you keep razorpay_order_xyz for all, idempotency will block updates.
     if (providerRef) {
       booking.payments = booking.payments || [];
       d.paymentLink.providerRef = providerRef;
@@ -4572,246 +4580,6 @@ exports.makePayment = async (req, res) => {
     });
   }
 };
-// exports.makePayment = async (req, res) => {
-//   try {
-//     const { bookingId, paymentMethod, paidAmount, providerRef, installmentStage } = req.body;
-
-//     if (!bookingId || !paymentMethod || paidAmount == null) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "bookingId, paymentMethod, and paidAmount are required",
-//       });
-//     }
-
-//     const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
-//     if (!validPaymentMethods.includes(String(paymentMethod))) {
-//       return res.status(400).json({ success: false, message: "Invalid payment method" });
-//     }
-
-//     const amount = Number(paidAmount);
-//     if (!(amount > 0)) {
-//       return res.status(400).json({ success: false, message: "Paid amount must be greater than zero" });
-//     }
-
-//     const booking = await UserBooking.findById(bookingId);
-//     if (!booking) {
-//       return res.status(404).json({ success: false, message: "Booking not found" });
-//     }
-
-//     const d = booking.bookingDetails;
-//     if (!d) {
-//       return res.status(400).json({ success: false, message: "bookingDetails missing" });
-//     }
-
-//     // ✅ IMPORTANT: providerRef must be unique per payment (razorpay_order_id)
-//     // If you keep "razorpay_order_xyz" for all, idempotency will block updates.
-//     if (providerRef) {
-//       booking.payments = booking.payments || [];
-//       d.paymentLink.providerRef = providerRef;
-//       const already = booking.payments.some((p) => p.providerRef === providerRef);
-//       if (already) {
-//         // Return current state (do NOT mutate again)
-//         return res.status(200).json({
-//           success: true,
-//           message: "Payment already recorded (idempotent).",
-//           bookingId: booking._id,
-//           bookingDetails: d,
-//         });
-//       }
-//     }
-
-//     const serviceType = getServiceTypeFromBooking(booking);
-//     const isDeepCleaningSvc = String(serviceType).toLowerCase() === "deep_cleaning";
-
-//     // ---------- finalTotal ----------
-//     let finalTotal = Number(d.finalTotal || 0);
-//     if (!(finalTotal > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Final total not set. Finalize quote first.",
-//       });
-//     }
-
-//     // ---------- Ensure milestone objects ----------
-//     d.firstPayment = ensureMilestoneDefaults(d.firstPayment || {});
-//     d.secondPayment = ensureMilestoneDefaults(d.secondPayment || {});
-//     d.finalPayment = ensureMilestoneDefaults(d.finalPayment || {});
-
-//     // ---------- Determine stage ----------
-//     let stage = null;
-
-//     // 1) Strongest: gateway callback reference matches current link
-//     if (providerRef && d.paymentLink?.providerRef && d.paymentLink.providerRef === providerRef) {
-//       stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
-//     }
-//     // 2) Website caller may send installmentStage (ok)
-//     else if (installmentStage) {
-//       stage = normalizeStage(installmentStage, serviceType, d);
-//     }
-//     // 3) Active link stage
-//     else if (d.paymentLink?.isActive && d.paymentLink?.installmentStage) {
-//       stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
-//     }
-//     // 4) Fallback derive
-//     else {
-//       stage = normalizeStage(null, serviceType, d);
-//     }
-
-//     if (!stage) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "installmentStage is required for this payment.",
-//       });
-//     }
-
-//     // ---------- Stage key ----------
-//     const instKey =
-//       stage === "first"
-//         ? "firstPayment"
-//         : stage === "second"
-//           ? "secondPayment"
-//           : "finalPayment";
-
-//     // ✅ BLOCK paying any stage that is not requested yet
-//     const requestedAmt = Number(d[instKey]?.requestedAmount || 0);
-//     if (!(requestedAmt > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `${stage} payment is not requested yet.`,
-//         stage,
-//         requestedAmount: requestedAmt,
-//       });
-//     }
-
-//     // ---------- Safe activate (does NOT wipe requestedAmount to 0) ----------
-//     const safeActivate = (milestone) => {
-//       const reqAmt = Number(milestone.requestedAmount || 0);
-//       const paidSoFar = Number(milestone.amount || 0) + Number(milestone.prePayment || 0);
-//       milestone.remaining = Math.max(0, reqAmt - paidSoFar);
-
-//       // status consistency
-//       if (reqAmt <= 0) milestone.status = "pending";
-//       else if (paidSoFar <= 0) milestone.status = "pending";
-//       else if (milestone.remaining === 0) milestone.status = "paid";
-//       else milestone.status = "partial";
-//     };
-
-//     safeActivate(d[instKey]);
-
-//     // ---------- Due cap ----------
-//     const installmentDue = Number(d[instKey]?.remaining || 0);
-//     if (!(installmentDue > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `No payable amount found for ${stage} installment.`,
-//         stage,
-//         installmentDue,
-//         milestone: d[instKey],
-//       });
-//     }
-
-//     if (amount > installmentDue) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `Paid amount cannot exceed remaining for ${stage} installment (${installmentDue}).`,
-//       });
-//     }
-
-//     // ---------- Booking-level cap ----------
-//     const currentPaid = Number(d.paidAmount || 0);
-//     const bookingRemaining = Math.max(0, finalTotal - currentPaid);
-//     if (amount > bookingRemaining) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Paid amount cannot exceed remaining balance",
-//       });
-//     }
-
-//     // ---------- Apply payment ----------
-//     d.paymentMethod = String(paymentMethod);
-//     d.paidAmount = currentPaid + amount;
-
-//     // Disable any active payment link
-//     if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
-
-//     // Log payment (include installmentStage for reporting)
-//     const stage = normalizeStage(
-//       d.paymentLink?.installmentStage,
-//       serviceType,
-//       d
-//     );
-
-//     // log payment
-//     booking.payments = booking.payments || [];
-//     booking.payments.push({
-//       at: new Date(),
-//       method: d.paymentMethod,
-//       amount,
-//       providerRef: providerRef || undefined,
-//       installment: stage,
-//     });
-
-//     // ✅ deactivate link because payment is recorded
-//     if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
-
-//     // ✅ Resync milestones from ledger (your function)
-//     const { prevFinalStatus } = resyncMilestonesFromLedger(d, d.paymentMethod, serviceType);
-
-//     // derived fields (your function)
-//     syncDerivedFields(d, finalTotal);
-
-//     // mark job hired etc (your existing logic)
-//     const finalIsExactlyPaid = isStageExactlyPaid(d.finalPayment);
-//     const finalJustPaidNow = prevFinalStatus !== "paid" && finalIsExactlyPaid;
-
-//     if (finalJustPaidNow) {
-//       d.paymentStatus = "Paid";
-//       if (["Waiting for final payment", "Project Ongoing", "Job Ongoing"].includes(String(d.status))) {
-//         d.status = "Project Completed";
-//         d.jobEndedAt = d.jobEndedAt || new Date();
-//       }
-//     } else {
-//       const ratio = finalTotal > 0 ? Number(d.paidAmount || 0) / finalTotal : 0;
-//       d.paymentStatus = ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
-//       const statusNorm = (d.status || "").trim().toLowerCase();
-//       if (["pending hiring", "pending"].includes(statusNorm)) d.status = "Hired";
-//     }
-
-//     booking.isEnquiry = false;
-
-//     finalizeIfFullyPaid({ booking, bookingId, finalTotal });
-
-//     // ✅ Force nested save (fixes “API hits but DB not updated” cases)
-//     booking.markModified("bookingDetails");
-//     booking.markModified("payments");
-
-//     await booking.save();
-
-//     return res.json({
-//       success: true,
-//       message: finalJustPaidNow ? "Final payment completed. Job marked as ended." : "Payment received.",
-//       bookingId: booking._id,
-//       finalTotal,
-//       totalPaid: d.paidAmount,
-//       remainingAmount: Math.max(0, finalTotal - d.paidAmount),
-//       status: d.status,
-//       paymentStatus: d.paymentStatus,
-//       firstPayment: d.firstPayment,
-//       secondPayment: d.secondPayment,
-//       finalPayment: d.finalPayment,
-//       paymentLink: d.paymentLink,
-//       finalJustPaidNow,
-//     });
-//   } catch (err) {
-//     console.error("makePayment error:", err);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Server error while processing payment",
-//       error: err.message,
-//     });
-//   }
-// };
-
 exports.updateManualPayment = async (req, res) => {
   try {
     const {

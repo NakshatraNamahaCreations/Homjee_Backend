@@ -15,6 +15,18 @@ const vendorTransactionSchema = new mongoose.Schema(
             type: Number,
             required: true,
         },
+        coin: {
+            type: Number,
+            required: true,
+        },
+        gst18Perc: {
+            type: Number,
+            required: true,
+        },
+        totalPaid: {
+            type: Number,
+            required: true,
+        },
         date: {
             type: Date,
             default: Date.now, // Automatically set the current date if no date is provided
