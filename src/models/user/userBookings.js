@@ -247,6 +247,13 @@ const invitedVendorSchema = new mongoose.Schema({
     ],
     default: "pending",
   },
+  coinsDeducted: { type: Boolean, default: false },
+  coinsDeductedAt: { type: Date },
+  coinsDeductedValue: { type: Number, default: 0 },
+
+  coinsRefunded: { type: Boolean, default: false },
+  coinsRefundedAt: { type: Date },
+  coinsRefundedValue: { type: Number, default: 0 },
 });
 
 const selectedTeam = new mongoose.Schema(

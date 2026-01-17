@@ -10,6 +10,9 @@ const notificationSchema = require("../../models/notification/Notification");
 const userSchema = require("../../models/user/userAuth");
 const VendorRating = require("../../models/vendor/vendorRating");
 
+const vendorAuthSchema = require("../../models/vendor/vendorAuth"); // adjust path
+const walletTransaction = require("../../models/vendor/wallet"); // adjust path
+
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
 const redirectionUrl = "https://websitehomjee.netlify.app/checkout/payment/";
 const vendorRatingURL = "https://websitehomjee.netlify.app/vendor-ratings";
@@ -2846,67 +2849,247 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
   }
 };
 
+// exports.respondConfirmJobVendorLine = async (req, res) => {
+//   try {
+//     const { bookingId, status, assignedProfessional, vendorId, cancelledBy } =
+//       req.body;
+//     if (!bookingId)
+//       return res.status(400).json({ message: "bookingId is required" });
+//     if (!vendorId)
+//       return res
+//         .status(400)
+//         .json({ message: "vendorId (professionalId) is required" });
+
+//     const updateFields = {};
+//     if (status) updateFields["bookingDetails.status"] = status;
+//     if (assignedProfessional)
+//       updateFields.assignedProfessional = assignedProfessional;
+
+//     // 1) ensure invite exists
+//     await UserBooking.updateOne(
+//       {
+//         _id: bookingId,
+//         "invitedVendors.professionalId": { $ne: String(vendorId) },
+//       },
+//       {
+//         $addToSet: {
+//           invitedVendors: {
+//             professionalId: String(vendorId),
+//             invitedAt: new Date(),
+//             responseStatus: "pending",
+//           },
+//         },
+//       }
+//     );
+
+//     // 2) build $set from the patch object (DO NOT assign the object to the string path)
+//     const patch = mapStatusToInvite(status, cancelledBy);
+//     const setOps = {
+//       ...updateFields,
+//       "invitedVendors.$[iv].respondedAt": new Date(),
+//     };
+//     if (patch.responseStatus)
+//       setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
+//     if (patch.cancelledAt)
+//       setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
+//     if (patch.cancelledBy)
+//       setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
+
+//     const result = await UserBooking.findOneAndUpdate(
+//       { _id: bookingId },
+//       { $set: setOps },
+//       {
+//         new: true,
+//         runValidators: true,
+//         arrayFilters: [{ "iv.professionalId": String(vendorId) }],
+//       }
+//     );
+
+//     if (!result) return res.status(404).json({ message: "Booking not found" });
+//     res.status(200).json({ message: "Booking updated", booking: result });
+//   } catch (error) {
+//     console.error("Error updating booking:", error);
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
+
+
 exports.respondConfirmJobVendorLine = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
     const { bookingId, status, assignedProfessional, vendorId, cancelledBy } =
       req.body;
+
     if (!bookingId)
-      return res.status(400).json({ message: "bookingId is required" });
+      return res.status(400).json({ success: false, message: "bookingId is required" });
     if (!vendorId)
-      return res
-        .status(400)
-        .json({ message: "vendorId (professionalId) is required" });
+      return res.status(400).json({ success: false, message: "vendorId (professionalId) is required" });
 
-    const updateFields = {};
-    if (status) updateFields["bookingDetails.status"] = status;
-    if (assignedProfessional)
-      updateFields.assignedProfessional = assignedProfessional;
+    // ✅ Decide when to charge coins
+    const shouldChargeCoins = ["confirmed", "accepted"].includes(norm(status));
+    // If your app uses "Pending"/"Confirmed" etc, adjust this list.
 
-    // 1) ensure invite exists
-    await UserBooking.updateOne(
-      {
-        _id: bookingId,
-        "invitedVendors.professionalId": { $ne: String(vendorId) },
-      },
-      {
-        $addToSet: {
-          invitedVendors: {
-            professionalId: String(vendorId),
-            invitedAt: new Date(),
-            responseStatus: "pending",
+    await session.withTransaction(async () => {
+      // 0) Load booking
+      const booking = await UserBooking.findById(bookingId).session(session);
+      if (!booking) {
+        throw new Error("Booking not found");
+      }
+
+      // 1) ensure invite exists
+      await UserBooking.updateOne(
+        {
+          _id: bookingId,
+          "invitedVendors.professionalId": { $ne: String(vendorId) },
+        },
+        {
+          $addToSet: {
+            invitedVendors: {
+              professionalId: String(vendorId),
+              invitedAt: new Date(),
+              responseStatus: "pending",
+              coinsDeducted: false, // ✅ add this field
+            },
           },
         },
+        { session }
+      );
+
+      // 2) Build update ops for invitedVendors
+      const updateFields = {};
+      if (status) updateFields["bookingDetails.status"] = status;
+      if (assignedProfessional) updateFields.assignedProfessional = assignedProfessional;
+
+      const patch = mapStatusToInvite(status, cancelledBy); // your existing helper
+      const setOps = {
+        ...updateFields,
+        "invitedVendors.$[iv].respondedAt": new Date(),
+      };
+      if (patch.responseStatus)
+        setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
+      if (patch.cancelledAt)
+        setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
+      if (patch.cancelledBy)
+        setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
+
+      // 3) If charging coins, compute total
+      let totalCoinsToDeduct = 0;
+
+      if (shouldChargeCoins) {
+        totalCoinsToDeduct = (booking.service || []).reduce((sum, s) => {
+          const coins = Number(s.coinDeduction || 0);
+          // const qty = Number(s.quantity || 1);
+          return sum + coins;
+        }, 0);
+
+        if (totalCoinsToDeduct <= 0) {
+          // nothing to deduct; still allow response update
+          totalCoinsToDeduct = 0;
+        }
       }
-    );
 
-    // 2) build $set from the patch object (DO NOT assign the object to the string path)
-    const patch = mapStatusToInvite(status, cancelledBy);
-    const setOps = {
-      ...updateFields,
-      "invitedVendors.$[iv].respondedAt": new Date(),
-    };
-    if (patch.responseStatus)
-      setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
-    if (patch.cancelledAt)
-      setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
-    if (patch.cancelledBy)
-      setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
+      // console.log("totalCoinsToDeduct", totalCoinsToDeduct)
 
-    const result = await UserBooking.findOneAndUpdate(
-      { _id: bookingId },
-      { $set: setOps },
-      {
-        new: true,
-        runValidators: true,
-        arrayFilters: [{ "iv.professionalId": String(vendorId) }],
+      // 4) Wallet deduction + transaction log (idempotent)
+      if (shouldChargeCoins && totalCoinsToDeduct > 0) {
+        // ✅ Check if already deducted for this booking + vendor
+        const alreadyDeducted = await UserBooking.findOne({
+          _id: bookingId,
+          invitedVendors: {
+            $elemMatch: {
+              professionalId: String(vendorId),
+              coinsDeducted: true,
+            },
+          },
+        }).session(session);
+
+        if (!alreadyDeducted) {
+          const vendor = await vendorAuthSchema
+            .findById(vendorId)
+            .session(session);
+
+          if (!vendor) throw new Error("Vendor not found");
+
+          const currentCoins = Number(vendor?.wallet?.coins || 0);
+          if (currentCoins < totalCoinsToDeduct) {
+            // you may want to block responding if insufficient coins
+            const err = new Error(
+              `Insufficient wallet coins. Required ${totalCoinsToDeduct}, available ${currentCoins}.`
+            );
+            err.statusCode = 400;
+            throw err;
+          }
+
+          // ✅ Deduct
+          vendor.wallet.coins = currentCoins - totalCoinsToDeduct;
+
+          // Optionally update canRespondLead flag
+          vendor.wallet.canRespondLead = vendor.wallet.coins > 0;
+
+          await vendor.save({ session });
+
+          // ✅ Log transaction (deduct)
+          await walletTransaction.create(
+            [
+              {
+                vendorId,
+                // title: `Lead response coin deduction (${totalCoinsToDeduct} coins)`,
+                title: `Lead response`,
+                coin: totalCoinsToDeduct,
+                transactionType: "lead response",
+                amount: 0,
+                gst18Perc: 0,
+                totalPaid: 0,
+                type: "deduct",
+                date: new Date(),
+                metaData: {
+                  bookingId,
+                  bookingCode: booking?.bookingDetails?.booking_id,
+                  serviceType: booking?.serviceType,
+                },
+              },
+            ],
+            { session }
+          );
+
+          // ✅ Mark deducted in booking invite entry
+          setOps["invitedVendors.$[iv].coinsDeducted"] = true;
+          setOps["invitedVendors.$[iv].coinsDeductedAt"] = new Date();
+          setOps["invitedVendors.$[iv].coinsDeductedValue"] = totalCoinsToDeduct;
+        }
       }
-    );
 
-    if (!result) return res.status(404).json({ message: "Booking not found" });
-    res.status(200).json({ message: "Booking updated", booking: result });
+      // 5) Update booking (status + invited vendor status + maybe coinsDeducted)
+      const updated = await UserBooking.findOneAndUpdate(
+        { _id: bookingId },
+        { $set: setOps },
+        {
+          new: true,
+          runValidators: true,
+          session,
+          arrayFilters: [{ "iv.professionalId": String(vendorId) }],
+        }
+      );
+
+      if (!updated) throw new Error("Booking not found");
+      // store updated into outer scope? not needed; just return after transaction
+      res.locals.updatedBooking = updated;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Booking updated",
+      booking: res.locals.updatedBooking,
+    });
   } catch (error) {
     console.error("Error updating booking:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error?.message || "Server error",
+    });
+  } finally {
+    session.endSession();
   }
 };
 
@@ -2919,7 +3102,7 @@ exports.getBookingExceptPendingAndCancelled = async (req, res) => {
 
     const q = {
       "assignedProfessional.professionalId": professionalId,
-      "bookingDetails.status": { $ne: "Pending", $ne: "Cancelled" },
+      "bookingDetails.status": { $ne: "Pending", $ne: "Cancelled", $ne: "Cancelled Rescheduled" },
     };
 
     // Descending by date (reverse: 29, 28, 27...), then most recent created
@@ -3534,64 +3717,221 @@ exports.rescheduleBooking = async (req, res) => {
 // cancellling by customer from the website
 // won't count this in Vendor's performance, this lead will vanish from the android app
 exports.cancelLeadFromWebsite = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
     const { bookingId, status } = req.body;
 
     if (!bookingId)
-      return res.status(400).json({ message: "bookingId is required" });
+      return res.status(400).json({ success: false, message: "bookingId is required" });
 
-    if (!status) return res.status(400).json({ message: "status is required" });
+    if (!status)
+      return res.status(400).json({ success: false, message: "status is required" });
 
-    const booking = await UserBooking.findById(bookingId);
-    if (!booking) return res.status(404).json({ message: "Booking not found" });
-
-    // booking-level fields
-    const updateFields = {
-      "bookingDetails.status": status,
-      "bookingDetails.updatedAt": new Date(), // track when status changed
-    };
-
-    const updated = await UserBooking.findByIdAndUpdate(
-      bookingId,
-      { $set: updateFields },
-      {
-        new: true,
-        runValidators: true,
+    await session.withTransaction(async () => {
+      const booking = await UserBooking.findById(bookingId).session(session);
+      if (!booking) {
+        const err = new Error("Booking not found");
+        err.statusCode = 404;
+        throw err;
       }
-    );
 
-    if (!updated)
-      return res
-        .status(404)
-        .json({ message: "Booking not found after update" });
+      // 1) Update booking status
+      const updateFields = {
+        "bookingDetails.status": status,
+        "bookingDetails.updatedAt": new Date(),
+      };
 
-    const customerName = booking?.customer.name;
-    const customer_id = booking?.customer.customerId;
-    const ID = booking?.bookingDetails.booking_id;
-    const newBookingNotification = {
-      bookingId: booking._id,
-      notificationType: "CUSTOMER_CANCEL_REQUESTED",
-      thumbnailTitle: "Lead Cancel Requested",
-      message: `Customer ${customerName} has requested cancellation for Lead #${ID}.`,
-      metaData: {
-        customer_id,
-        customerMsg: `Your booking #${ID} has been cancelled.`,
-      },
-      status: "unread",
-      created_at: new Date(),
-      notifyTo: "admin",
-    };
-    await notificationSchema.create(newBookingNotification);
+      // 2) Refund logic only when vendor already accepted (and booking is deep_cleaning if needed)
+      // Decide which statuses should trigger refund
+      const refundTriggerStatuses = ["customer cancelled", "cancelled", "canceled"];
+      const shouldRefund = refundTriggerStatuses.includes(norm(status));
 
-    res.status(200).json({
+      // Find accepted vendor from invitedVendors
+      const acceptedInvite = (booking.invitedVendors || []).find(
+        (v) => norm(v.responseStatus) === "accepted"
+      );
+
+      if (shouldRefund && acceptedInvite?.professionalId) {
+        const vendorId = String(acceptedInvite.professionalId);
+
+        // ✅ Prevent double refund
+        if (!acceptedInvite.coinsRefunded) {
+          // 3) Compute refund coins
+          // Based on your latest clarification: coinDeduction already includes quantity.
+          // So sum directly, do NOT multiply with quantity.
+          const coinsToRefund = (booking.service || []).reduce((sum, s) => {
+            return sum + Number(s.coinDeduction || 0);
+          }, 0);
+
+          if (coinsToRefund > 0) {
+            // 4) Add coins back to vendor wallet
+            const vendor = await vendorAuthSchema.findById(vendorId).session(session);
+            if (!vendor) {
+              const err = new Error("Vendor not found for refund");
+              err.statusCode = 404;
+              throw err;
+            }
+
+            const currentCoins = Number(vendor?.wallet?.coins || 0);
+            vendor.wallet.coins = currentCoins + coinsToRefund;
+            vendor.wallet.canRespondLead = vendor.wallet.coins > 0;
+
+            await vendor.save({ session });
+
+            // 5) Store transaction history (refund)
+            await walletTransaction.create(
+              [
+                {
+                  vendorId: vendorId,
+                  title: `Lead cancellation refund`,
+                  amount: 0,
+                  coin: coinsToRefund,
+                  gst18Perc: 0,
+                  totalPaid: 0,
+                  transactionType: "cancellation refund",
+                  type: "added",
+                  date: new Date(),
+                  meta: {
+                    bookingId: String(booking._id),
+                    bookingCode: booking?.bookingDetails?.booking_id,
+                    reason: status,
+                    serviceType: booking?.serviceType,
+                  },
+                },
+              ],
+              { session }
+            );
+
+            // 6) Mark refunded in invitedVendors entry (idempotency)
+            // We'll update via arrayFilters
+            updateFields["invitedVendors.$[iv].coinsRefunded"] = true;
+            updateFields["invitedVendors.$[iv].coinsRefundedAt"] = new Date();
+            updateFields["invitedVendors.$[iv].coinsRefundedValue"] = coinsToRefund;
+          }
+        }
+      }
+
+      const updated = await UserBooking.findByIdAndUpdate(
+        bookingId,
+        { $set: updateFields },
+        {
+          new: true,
+          runValidators: true,
+          session,
+          arrayFilters: acceptedInvite?.professionalId
+            ? [{ "iv.professionalId": String(acceptedInvite.professionalId) }]
+            : undefined,
+        }
+      );
+
+      if (!updated) {
+        const err = new Error("Booking not found after update");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      // 7) Notification to admin (your existing logic)
+      const customerName = booking?.customer?.name;
+      const customer_id = booking?.customer?.customerId;
+      const ID = booking?.bookingDetails?.booking_id;
+
+      await notificationSchema.create(
+        [
+          {
+            bookingId: booking._id,
+            notificationType: "CUSTOMER_CANCEL_REQUESTED",
+            thumbnailTitle: "Lead Cancel Requested",
+            message: `Customer ${customerName} has requested cancellation for Lead #${ID}.`,
+            metaData: {
+              customer_id,
+              customerMsg: `Your booking #${ID} has been cancelled.`,
+            },
+            status: "unread",
+            created_at: new Date(),
+            notifyTo: "admin",
+          },
+        ],
+        { session }
+      );
+
+      res.locals.updatedBooking = updated;
+    });
+
+    return res.status(200).json({
+      success: true,
       message: "Booking cancelled successfully",
-      booking: updated,
+      booking: res.locals.updatedBooking,
     });
   } catch (error) {
     console.error("Error cancelling booking:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error.message || "Server error",
+    });
+  } finally {
+    session.endSession();
   }
 };
+// exports.cancelLeadFromWebsite = async (req, res) => {
+//   try {
+//     const { bookingId, status } = req.body;
+
+//     if (!bookingId)
+//       return res.status(400).json({ message: "bookingId is required" });
+
+//     if (!status) return res.status(400).json({ message: "status is required" });
+
+//     const booking = await UserBooking.findById(bookingId);
+//     if (!booking) return res.status(404).json({ message: "Booking not found" });
+
+//     // booking-level fields
+//     const updateFields = {
+//       "bookingDetails.status": status,
+//       "bookingDetails.updatedAt": new Date(), // track when status changed
+//     };
+
+//     const updated = await UserBooking.findByIdAndUpdate(
+//       bookingId,
+//       { $set: updateFields },
+//       {
+//         new: true,
+//         runValidators: true,
+//       }
+//     );
+
+//     if (!updated)
+//       return res
+//         .status(404)
+//         .json({ message: "Booking not found after update" });
+
+//     const customerName = booking?.customer.name;
+//     const customer_id = booking?.customer.customerId;
+//     const ID = booking?.bookingDetails.booking_id;
+//     const newBookingNotification = {
+//       bookingId: booking._id,
+//       notificationType: "CUSTOMER_CANCEL_REQUESTED",
+//       thumbnailTitle: "Lead Cancel Requested",
+//       message: `Customer ${customerName} has requested cancellation for Lead #${ID}.`,
+//       metaData: {
+//         customer_id,
+//         customerMsg: `Your booking #${ID} has been cancelled.`,
+//       },
+//       status: "unread",
+//       created_at: new Date(),
+//       notifyTo: "admin",
+//     };
+//     await notificationSchema.create(newBookingNotification);
+
+//     res.status(200).json({
+//       message: "Booking cancelled successfully",
+//       booking: updated,
+//     });
+//   } catch (error) {
+//     console.error("Error cancelling booking:", error);
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
 
 exports.bookingCancelledbyAdmin = async (req, res) => {
   try {

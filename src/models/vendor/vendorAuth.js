@@ -132,6 +132,10 @@ const vendorAuthSchema = new mongoose.Schema({
       type: Number,
       default: 0,
     },
+    overallCoinPurchased: {
+      type: Number,
+      default: 0
+    },
     paymentLink: {
       type: String,
     },

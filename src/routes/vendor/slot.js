@@ -162,6 +162,7 @@ const express = require("express");
 const router = express.Router();
 const Vendor = require("../../models/vendor/vendorAuth");
 const UserBooking = require("../../models/user/userBookings");
+const walletTransaction = require("../../models/vendor/wallet");
 const moment = require("moment");
 const mongoose = require("mongoose");
 
@@ -301,24 +302,177 @@ router.post(
   }
 );
 
+// router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
+//   const session = await mongoose.startSession();
+//   session.startTransaction();
+
+//   try {
+//     const { bookingId } = req.params;
+//     const { slotDate, slotTime } = req.query; // ✅ FROM QUERY
+
+//     if (!bookingId || !slotDate || !slotTime) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "bookingId, slotDate and slotTime are required",
+//       });
+//     }
+
+//     const booking = await UserBooking.findById(bookingId).lean();
+
+//     if (!booking) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Booking not found",
+//       });
+//     }
+
+//     /* --------------------------------------------------
+//        CHECK IF BOOKING IS ALREADY RESPONDED
+//     -------------------------------------------------- */
+
+//     const isAssigned = Boolean(booking.assignedProfessional?.professionalId);
+
+//     const isAcceptedVendor = booking.invitedVendors?.some(
+//       (v) => v.responseStatus === "accepted"
+//     );
+
+//     const isResponded = isAssigned || isAcceptedVendor;
+
+//     /* --------------------------------------------------
+//        CASE 1: NOT RESPONDED → UPDATE SAME BOOKING
+//     -------------------------------------------------- */
+
+//     if (!isResponded) {
+//       await UserBooking.updateOne(
+//         { _id: bookingId },
+//         {
+//           $set: {
+//             "selectedSlot.slotDate": slotDate,
+//             "selectedSlot.slotTime": slotTime,
+//           },
+//         },
+//         { session }
+//       );
+
+//       await session.commitTransaction();
+//       session.endSession();
+
+//       return res.json({
+//         success: true,
+//         message: "Slot updated on existing booking",
+//         mode: "same-booking",
+//       });
+//     }
+
+//     /* --------------------------------------------------
+//        CASE 2: RESPONDED → CLONE (NO _IDs)
+//     -------------------------------------------------- */
+
+//     const newBooking = {
+//       customer: {
+//         customerId: booking.customer.customerId,
+//         name: booking.customer.name,
+//         phone: booking.customer.phone,
+//       },
+
+//       serviceType: booking.serviceType,
+//       isEnquiry: booking.isEnquiry,
+//       isRead: booking.isRead,
+//       isDismmised: false,
+//       formName: booking.formName,
+//       parentBookingId: booking._id,
+
+//       address: { ...booking.address },
+
+//       service: booking.service.map((s) => ({
+//         category: s.category,
+//         subCategory: s.subCategory,
+//         serviceName: s.serviceName,
+//         price: s.price,
+//         quantity: s.quantity,
+//         teamMembersRequired: s.teamMembersRequired,
+//         packageId: s.packageId,
+//         duration: s.duration,
+//       })),
+
+//       payments: (booking.payments || []).map((p) => ({
+//         at: p.at,
+//         method: p.method,
+//         amount: p.amount,
+//         providerRef: p.providerRef,
+//       })),
+
+//       bookingDetails: {
+//         ...booking.bookingDetails,
+//         status: "Pending",
+//         isJobStarted: false,
+//       },
+
+//       selectedSlot: {
+//         slotDate,
+//         slotTime,
+//       },
+
+//       invitedVendors: [],
+//       createdDate: new Date(),
+//     };
+
+//     await UserBooking.create([newBooking], { session });
+
+//     await UserBooking.updateOne(
+//       { _id: booking._id },
+//       {
+//         $set: {
+//           "bookingDetails.status": "Cancelled Rescheduled",
+//           isDismmised: true,
+//         },
+//       },
+//       { session }
+//     );
+
+//     await session.commitTransaction();
+//     session.endSession();
+
+//     return res.json({
+//       success: true,
+//       message: "Booking rescheduled successfully",
+//       mode: "new-booking",
+//     });
+//   } catch (error) {
+//     await session.abortTransaction();
+//     session.endSession();
+
+//     console.error("Reschedule booking error:", error);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to reschedule booking",
+//     });
+//   }
+// });
+
 router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
   const session = await mongoose.startSession();
   session.startTransaction();
 
   try {
     const { bookingId } = req.params;
-    const { slotDate, slotTime } = req.query; // ✅ FROM QUERY
+    const { slotDate, slotTime } = req.query;
 
     if (!bookingId || !slotDate || !slotTime) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(400).json({
         success: false,
         message: "bookingId, slotDate and slotTime are required",
       });
     }
 
-    const booking = await UserBooking.findById(bookingId).lean();
+    // ✅ Always read booking in the same session
+    const booking = await UserBooking.findById(bookingId).session(session).lean();
 
     if (!booking) {
+      await session.abortTransaction();
+      session.endSession();
       return res.status(404).json({
         success: false,
         message: "Booking not found",
@@ -332,7 +486,7 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
     const isAssigned = Boolean(booking.assignedProfessional?.professionalId);
 
     const isAcceptedVendor = booking.invitedVendors?.some(
-      (v) => v.responseStatus === "accepted"
+      (v) => String(v.responseStatus || "").toLowerCase() === "accepted"
     );
 
     const isResponded = isAssigned || isAcceptedVendor;
@@ -364,7 +518,93 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
     }
 
     /* --------------------------------------------------
-       CASE 2: RESPONDED → CLONE (NO _IDs)
+       CASE 2: RESPONDED → REFUND COINS (IF ACCEPTED) → CLONE
+    -------------------------------------------------- */
+
+    // ✅ Find accepted vendor invite (if any)
+    const acceptedInvite = (booking.invitedVendors || []).find(
+      (v) => String(v.responseStatus || "").toLowerCase() === "accepted"
+    );
+
+    if (acceptedInvite?.professionalId) {
+      const vendorId = String(acceptedInvite.professionalId);
+
+      // ✅ Idempotency: do not refund twice
+      const alreadyRefunded = Boolean(acceptedInvite.coinsRefunded);
+
+      if (!alreadyRefunded) {
+        // ✅ Best: refund exactly what was deducted earlier (if you store it)
+        // fallback: compute from services (your rule: coinDeduction already totals line)
+        const coinsToRefund =
+          Number(acceptedInvite.coinsDeductedValue || 0) ||
+          (booking.service || []).reduce(
+            (sum, s) => sum + Number(s.coinDeduction || 0),
+            0
+          );
+
+        if (coinsToRefund > 0) {
+          // ✅ credit vendor wallet
+          const vendor = await Vendor.findById(vendorId).session(session);
+          if (!vendor) {
+            await session.abortTransaction();
+            session.endSession();
+            return res.status(404).json({
+              success: false,
+              message: "Vendor not found for refund",
+            });
+          }
+
+          const currentCoins = Number(vendor?.wallet?.coins || 0);
+          vendor.wallet.coins = currentCoins + coinsToRefund;
+          vendor.wallet.canRespondLead = vendor.wallet.coins > 0;
+
+          await vendor.save({ session });
+
+          // ✅ log wallet transaction
+          await walletTransaction.create(
+            [
+              {
+                vendorId,
+                title: `Coins refunded for reschedule`,
+                amount: 0,
+                coin: coinsToRefund,
+                gst18Perc: 0,
+                totalPaid: 0,
+                transactionType: "reschedule refund",
+                type: "added",
+                date: new Date(),
+                meta: {
+                  bookingId: String(booking._id),
+                  bookingCode: booking?.bookingDetails?.booking_id,
+                  serviceType: booking?.serviceType,
+                  reason: "Rescheduled after vendor accepted",
+                },
+              },
+            ],
+            { session }
+          );
+
+          // ✅ mark refunded on old booking's invitedVendors entry
+          await UserBooking.updateOne(
+            { _id: booking._id },
+            {
+              $set: {
+                "invitedVendors.$[iv].coinsRefunded": true,
+                "invitedVendors.$[iv].coinsRefundedAt": new Date(),
+                "invitedVendors.$[iv].coinsRefundedValue": coinsToRefund,
+              },
+            },
+            {
+              session,
+              arrayFilters: [{ "iv.professionalId": vendorId }],
+            }
+          );
+        }
+      }
+    }
+
+    /* --------------------------------------------------
+       CLONE (NO _IDs)
     -------------------------------------------------- */
 
     const newBooking = {
@@ -392,6 +632,7 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
         teamMembersRequired: s.teamMembersRequired,
         packageId: s.packageId,
         duration: s.duration,
+        coinDeduction: s.coinDeduction, // ✅ keep if you use it later
       })),
 
       payments: (booking.payments || []).map((p) => ({
@@ -399,6 +640,7 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
         method: p.method,
         amount: p.amount,
         providerRef: p.providerRef,
+        installment: p.installment,
       })),
 
       bookingDetails: {
@@ -444,7 +686,7 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
     console.error("Reschedule booking error:", error);
     return res.status(500).json({
       success: false,
-      message: "Failed to reschedule booking",
+      message: error?.message || "Failed to reschedule booking",
     });
   }
 });

@@ -62,9 +62,11 @@ router.post("/recharge-wallet/add-coin/vendor", async (req, res) => {
 
         // ✅ update wallet safely
         if (!vendor.wallet) vendor.wallet = { coins: 0 };
-
+        if (!vendor.wallet) vendor.wallet = { overallCoinPurchased: 0 };
+        const totalCoinValue = (Number(vendor.wallet.overallCoinPurchased) || 0) + coin
         if (transactionType === "wallet recharge" && type === "added") {
             vendor.wallet.coins = (Number(vendor.wallet.coins) || 0) + coin;
+            vendor.wallet.overallCoinPurchased = totalCoinValue
         }
 
         vendor.wallet.canRespondLead = true;
