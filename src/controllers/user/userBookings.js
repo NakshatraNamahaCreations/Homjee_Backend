@@ -19,6 +19,8 @@ const citiesObj = {
   Pune: "Pune",
 };
 
+const norm = (s) => String(s || "").toLowerCase().trim();
+
 function generateProviderRef() {
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // e.g. "20251120"
   // Generate a random 4-digit number or pull last count from DB for uniqueness
@@ -914,6 +916,7 @@ exports.createBooking = async (req, res) => {
         quantity: Number(s.quantity) || 1,
         teamMembersRequired: Number(s.teamMembersRequired) || 0,
         duration: Number(s.duration) || 0,
+        coinDeduction: Number(s.coinsForVendor) || 0
       })),
       serviceType,
       bookingDetails: bookingDetailsConfig,

@@ -18,6 +18,7 @@ const serviceSchema = new mongoose.Schema({
     ref: "DeepCleaningPackage",
   },
   duration: Number,
+  coinDeduction: Number,
 });
 const PriceChangeSchema = new mongoose.Schema(
   {
@@ -319,7 +320,7 @@ const userBookingSchema = new mongoose.Schema({
       amount: { type: Number, required: true },
       providerRef: String,
       installment: { type: String, enum: ["first", "second", "final"] }, // helpful for reporting
-      purpose:String
+      purpose: String
     },
   ],
   serviceType: {
