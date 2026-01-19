@@ -180,5 +180,10 @@ router.post(
   vendorAuthController.bulkUploadVendors
 );
 
+router.get(
+  "/overall-coin-sold",
+ vendorAuthController.getOverallCoinPurchasedTotal
+);
+
 router.post("/get-available-vendor", vendorAuthController.getAvailableVendors)
 module.exports = router;

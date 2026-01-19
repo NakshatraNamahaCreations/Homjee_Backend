@@ -48,6 +48,8 @@ const vendorTransactionSchema = new mongoose.Schema(
     },
     { timestamps: true }
 );
+// vendorTransactionSchema
+vendorTransactionSchema.index({ transactionType: 1, type: 1, createdAt: 1 });
 
 
 const VendorTransaction = mongoose.model('walletTransaction', vendorTransactionSchema);

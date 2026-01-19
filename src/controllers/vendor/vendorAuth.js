@@ -139,7 +139,7 @@ exports.updateVendor = async (req, res) => {
       update,
       bankDetails,
       "accountNumber",
-      "bankDetails.accountNumber"
+      "bankDetails.accountNumber",
     );
     setIfPresent(update, bankDetails, "ifscCode", "bankDetails.ifscCode");
     setIfPresent(update, bankDetails, "bankName", "bankDetails.bankName");
@@ -184,7 +184,7 @@ exports.updateVendor = async (req, res) => {
     const updated = await vendorAuthSchema.findByIdAndUpdate(
       vendorId,
       { $set: update },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     return res.status(200).json({
@@ -273,7 +273,7 @@ exports.addTeamMember = async (req, res) => {
     const vendor = await vendorAuthSchema.findByIdAndUpdate(
       vendorId,
       { $push: { team: teamMember } },
-      { new: true }
+      { new: true },
     );
 
     if (!vendor) {
@@ -460,7 +460,7 @@ exports.addSmallTeamMember = async (req, res) => {
     const vendor = await vendorAuthSchema.findByIdAndUpdate(
       vendorId,
       { $push: { team: teamMember } },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
@@ -510,7 +510,7 @@ exports.removeTeamMember = async (req, res) => {
     const vendor = await vendorAuthSchema.findByIdAndUpdate(
       vendorId,
       { $pull: { team: { _id: memberId } } },
-      { new: true }
+      { new: true },
     );
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
     res.status(200).json({ message: "Team member removed", team: vendor.team });
@@ -709,7 +709,7 @@ exports.checkVendorAvailability = async (req, res) => {
     // Check team availability for each project day
     const availableMembers = vendor.team.filter((member) => {
       return !member.markedLeaves?.some((leaveDate) =>
-        projectDays.includes(leaveDate)
+        projectDays.includes(leaveDate),
       );
     });
 
@@ -767,7 +767,7 @@ exports.checkVendorAvailabilityRange = async (req, res) => {
 
       const availableMembers = vendor.team.filter((member) => {
         return !member.markedLeaves?.some((leaveDate) =>
-          projectDays.includes(leaveDate)
+          projectDays.includes(leaveDate),
         );
       });
 
@@ -981,64 +981,58 @@ exports.getAllVendors = async (req, res) => {
 };
 
 // ... (Other existing endpoints like loginWithMobile, verifyOTP, etc. remain unchanged)
-
-// exports.addCoin = async (req, res) => {
-//   try {
-//     const { vendorId, coins } = req.body;
-//     if (!vendorId || !coins) {
-//       return res.status(400).json({ message: "vendorId and coins required" });
-//     }
-
-//     const vendor = await vendorAuthSchema.findByIdAndUpdate(
-//       vendorId,
-//       { $inc: { "wallet.coins": coins } },
-//       { new: true }
-//     );
-
-//     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
-
-//     res
-//       .status(200)
-//       .json({ message: "Coins added successfully", wallet: vendor.wallet });
-//   } catch (error) {
-//     console.error("AddCoin error:", error);
-//     res.status(500).json({ message: "Server error", error: error.message });
-//   }
-// };
+// ✅ ADD COIN
 exports.addCoin = async (req, res) => {
   try {
     const { vendorId, coins } = req.body;
 
-    if (!vendorId || !coins) {
+    if (!vendorId || coins === undefined) {
       return res.status(400).json({
         success: false,
         message: "vendorId and coins are required",
       });
     }
 
-    const vendor = await vendorAuthSchema.findByIdAndUpdate(
+    const coinVal = Number(coins);
+    if (!Number.isFinite(coinVal) || coinVal <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "coins must be a valid number > 0",
+      });
+    }
+
+    // 1) First add coins to wallet + overallCoinPurchased
+    const updatedVendor = await vendorAuthSchema.findByIdAndUpdate(
       vendorId,
       {
-        $inc: { "wallet.coins": Number(coins) },
-        $set: {
-          "wallet.canRespondLead": true,   // ✅ enable lead response
-          "wallet.isLinkActive": true,     // ✅ activate payment link
+        $inc: {
+          "wallet.coins": coinVal,
+          "wallet.overallCoinPurchased": coinVal,
         },
       },
       { new: true }
     );
 
-    if (!vendor) {
+    if (!updatedVendor) {
       return res.status(404).json({
         success: false,
         message: "Vendor not found",
       });
     }
 
+    // 2) Now check updated wallet.coins and set canRespondLead accordingly
+    const updatedCoins = Number(updatedVendor?.wallet?.coins || 0);
+    const canRespondLead = updatedCoins > 100;
+
+    // 3) Update canRespondLead based on threshold
+    //    (Only if it needs change, but safe to set anyway)
+    updatedVendor.wallet.canRespondLead = canRespondLead;
+    await updatedVendor.save();
+
     return res.status(200).json({
       success: true,
       message: "Coins added successfully",
-      wallet: vendor.wallet,
+      wallet: updatedVendor.wallet,
     });
   } catch (error) {
     console.error("AddCoin error:", error);
@@ -1050,30 +1044,66 @@ exports.addCoin = async (req, res) => {
   }
 };
 
-
+// ✅ REDUCE COIN
 exports.reduceCoin = async (req, res) => {
   try {
     const { vendorId, coins } = req.body;
-    if (!vendorId || !coins) {
-      return res.status(400).json({ message: "vendorId and coins required" });
+
+    if (!vendorId || coins === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "vendorId and coins are required",
+      });
+    }
+
+    const coinVal = Number(coins);
+    if (!Number.isFinite(coinVal) || coinVal <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "coins must be a valid number > 0",
+      });
     }
 
     const vendor = await vendorAuthSchema.findById(vendorId);
-    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
-
-    if (vendor.wallet.coins < coins) {
-      return res.status(400).json({ message: "Insufficient coins" });
+    if (!vendor) {
+      return res.status(404).json({
+        success: false,
+        message: "Vendor not found",
+      });
     }
 
-    vendor.wallet.coins -= coins;
+    const currentCoins = Number(vendor?.wallet?.coins || 0);
+    if (currentCoins < coinVal) {
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient coins",
+      });
+    }
+
+    // ✅ Reduce from wallet.coins AND overallCoinPurchased
+    // (Don't allow overallCoinPurchased to go negative)
+    const currentOverall = Number(vendor?.wallet?.overallCoinPurchased || 0);
+
+    vendor.wallet.coins = currentCoins - coinVal;
+    vendor.wallet.overallCoinPurchased = Math.max(0, currentOverall - coinVal);
+
+    // ✅ After reduction, set canRespondLead based on updated wallet.coins
+    vendor.wallet.canRespondLead = vendor.wallet.coins > 100;
+
     await vendor.save();
 
-    res
-      .status(200)
-      .json({ message: "Coins reduced successfully", wallet: vendor.wallet });
+    return res.status(200).json({
+      success: true,
+      message: "Coins reduced successfully",
+      wallet: vendor.wallet,
+    });
   } catch (error) {
     console.error("ReduceCoin error:", error);
-    res.status(500).json({ message: "Server error", error: error.message });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      error: error.message,
+    });
   }
 };
 
@@ -1265,7 +1295,7 @@ exports.getAvailableVendors = async (req, res) => {
           lat,
           lng,
           v.address.latitude,
-          v.address.longitude
+          v.address.longitude,
         ) <= 5000
       );
     });
@@ -1304,7 +1334,7 @@ exports.getAvailableVendors = async (req, res) => {
     }
 
     const slotAvailable = locationFiltered.filter(
-      (v) => !blockedVendors.has(v._id.toString())
+      (v) => !blockedVendors.has(v._id.toString()),
     );
 
     /* ================= TEAM VALIDATION ================= */
@@ -1318,7 +1348,7 @@ exports.getAvailableVendors = async (req, res) => {
 
       const team = vendor.team || [];
       const availableCount = team.filter(
-        (m) => !m.markedLeaves?.includes(normalizedDate)
+        (m) => !m.markedLeaves?.includes(normalizedDate),
       ).length;
 
       if (availableCount >= requiredTeamMembers) {
@@ -1336,6 +1366,32 @@ exports.getAvailableVendors = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Server error",
+    });
+  }
+};
+
+exports.getOverallCoinPurchasedTotal = async (req, res) => {
+  try {
+    const agg = await vendorAuthSchema.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: { $ifNull: ["$wallet.overallCoinPurchased", 0] } },
+        },
+      },
+    ]);
+
+    const total = agg?.[0]?.total || 0;
+
+    return res.json({
+      success: true,
+      total,
+    });
+  } catch (err) {
+    return res.status(400).json({
+      success: false,
+      message:
+        err.message || "Failed to calculate overall coin purchased total",
     });
   }
 };

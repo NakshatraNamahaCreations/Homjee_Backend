@@ -156,5 +156,7 @@ const ManualPaymentSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+// ManualPaymentSchema
+ManualPaymentSchema.index({ type: 1, context: 1, "payment.status": 1, createdAt: 1 });
 
 module.exports = mongoose.model("ManualPayment", ManualPaymentSchema);

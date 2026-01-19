@@ -58,9 +58,7 @@
 
 // module.exports = mongoose.model("vendor", vendorAuthSchema);
 
-
 const mongoose = require("mongoose");
-
 
 const vendorInfo = new mongoose.Schema({
   vendorName: String,
@@ -118,7 +116,7 @@ const teamMemberInfo = new mongoose.Schema(
   },
   {
     timestamps: Date,
-  }
+  },
 );
 
 const vendorAuthSchema = new mongoose.Schema({
@@ -132,10 +130,12 @@ const vendorAuthSchema = new mongoose.Schema({
       type: Number,
       default: 0,
     },
+
     overallCoinPurchased: {
       type: Number,
-      default: 0
+      default: 0,
     },
+
     paymentLink: {
       type: String,
     },
@@ -162,9 +162,9 @@ const vendorAuthSchema = new mongoose.Schema({
       2: { type: Number, default: 0 },
       3: { type: Number, default: 0 },
       4: { type: Number, default: 0 },
-      5: { type: Number, default: 0 }
-    }
-  }
+      5: { type: Number, default: 0 },
+    },
+  },
 });
 
 // ✅ GEO index for location search (5km radius)
@@ -174,7 +174,7 @@ vendorAuthSchema.index({ "address.geo": "2dsphere" });
 vendorAuthSchema.index({ "vendor.serviceType": 1, activeStatus: 1 });
 
 // Middleware to check if the link has expired and set isLinkActive accordingly
-vendorAuthSchema.wallet?.pre('save', function (next) {
+vendorAuthSchema.wallet?.pre("save", function (next) {
   // If linkExpiry is set, check if it has expired
   if (this.linkExpiry && this.linkExpiry < new Date()) {
     this.isLinkActive = false; // Set the link as inactive if the expiry date has passed

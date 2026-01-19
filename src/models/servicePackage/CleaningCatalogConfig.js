@@ -21,12 +21,15 @@ const CleaningCatalogConfigSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-// export default mongoose.model(
-//     "CleaningCatalogConfig",
-//     CleaningCatalogConfigSchema
-// );
 
 module.exports = mongoose.model(
     "CleaningCatalogConfig",
     CleaningCatalogConfigSchema
 );
+
+
+
+// export default mongoose.model(
+//     "CleaningCatalogConfig",
+//     CleaningCatalogConfigSchema
+// );
