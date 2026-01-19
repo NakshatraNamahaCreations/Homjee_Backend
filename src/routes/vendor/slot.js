@@ -166,141 +166,142 @@ const walletTransaction = require("../../models/vendor/wallet");
 const moment = require("moment");
 const mongoose = require("mongoose");
 
-router.post(
-  "/vendor/reschedule-booking/available-slots/:vendorId",
-  async (req, res) => {
-    try {
-      const { vendorId } = req.params;
-      const { bookingId, targetDate } = req.body;
+// referring hour basis
+// router.post(
+//   "/vendor/reschedule-booking/available-slots/:vendorId",
+//   async (req, res) => {
+//     try {
+//       const { vendorId } = req.params;
+//       const { bookingId, targetDate } = req.body;
 
-      if (!vendorId || !bookingId || !targetDate) {
-        return res.status(400).json({ message: "Missing required fields" });
-      }
+//       if (!vendorId || !bookingId || !targetDate) {
+//         return res.status(400).json({ message: "Missing required fields" });
+//       }
 
-      /* 1️⃣ Load booking being rescheduled */
-      const currentBooking = await UserBooking.findById(bookingId);
-      if (!currentBooking) {
-        return res.status(404).json({ message: "Booking not found" });
-      }
+//       /* 1️⃣ Load booking being rescheduled */
+//       const currentBooking = await UserBooking.findById(bookingId);
+//       if (!currentBooking) {
+//         return res.status(404).json({ message: "Booking not found" });
+//       }
 
-      // ✅ Sum service durations (safe for future)
-      const serviceDuration = currentBooking.service.reduce(
-        (sum, s) => sum + s.duration,
-        0
-      );
+//       // ✅ Sum service durations (safe for future)
+//       const serviceDuration = currentBooking.service.reduce(
+//         (sum, s) => sum + s.duration,
+//         0
+//       );
 
-      const teamRequired = Math.max(
-        ...currentBooking.service.map((s) => s.teamMembersRequired)
-      );
+//       const teamRequired = Math.max(
+//         ...currentBooking.service.map((s) => s.teamMembersRequired)
+//       );
 
-      /* 2️⃣ Load vendor */
-      const vendor = await Vendor.findById(vendorId);
-      if (!vendor) {
-        return res.status(404).json({ message: "Vendor not found" });
-      }
+//       /* 2️⃣ Load vendor */
+//       const vendor = await Vendor.findById(vendorId);
+//       if (!vendor) {
+//         return res.status(404).json({ message: "Vendor not found" });
+//       }
 
-      /* 3️⃣ Team availability (leave check) */
-      const availableTeamCount = vendor.team.filter(
-        (m) => !m.markedLeaves?.includes(targetDate)
-      ).length;
+//       /* 3️⃣ Team availability (leave check) */
+//       const availableTeamCount = vendor.team.filter(
+//         (m) => !m.markedLeaves?.includes(targetDate)
+//       ).length;
 
-      if (availableTeamCount < teamRequired) {
-        return res.json({ availableSlots: [], availableTeamCount });
-      }
+//       if (availableTeamCount < teamRequired) {
+//         return res.json({ availableSlots: [], availableTeamCount });
+//       }
 
-      /* 4️⃣ Fetch future bookings (exclude current) */
-      const futureBookings = await UserBooking.find({
-        "assignedProfessional.professionalId": vendorId,
-        "selectedSlot.slotDate": targetDate,
-        _id: { $ne: bookingId },
-        "bookingDetails.status": {
-          $nin: ["Cancelled", "Customer Cancelled", "Admin Cancelled"],
-        },
-      });
+//       /* 4️⃣ Fetch future bookings (exclude current) */
+//       const futureBookings = await UserBooking.find({
+//         "assignedProfessional.professionalId": vendorId,
+//         "selectedSlot.slotDate": targetDate,
+//         _id: { $ne: bookingId },
+//         "bookingDetails.status": {
+//           $nin: ["Cancelled", "Customer Cancelled", "Admin Cancelled"],
+//         },
+//       });
 
-      /* 5️⃣ Build blocked ranges */
-      const blockedRanges = futureBookings.map((b) => {
-        const start = moment(
-          `${b.selectedSlot.slotDate} ${b.selectedSlot.slotTime}`,
-          "YYYY-MM-DD h:mm A"
-        );
+//       /* 5️⃣ Build blocked ranges */
+//       const blockedRanges = futureBookings.map((b) => {
+//         const start = moment(
+//           `${b.selectedSlot.slotDate} ${b.selectedSlot.slotTime}`,
+//           "YYYY-MM-DD h:mm A"
+//         );
 
-        const duration = b.service.reduce((s, x) => s + x.duration, 0);
+//         const duration = b.service.reduce((s, x) => s + x.duration, 0);
 
-        return {
-          start: start.clone().subtract(30, "minutes"),
-          end: start.clone().add(duration, "hours").add(30, "minutes"),
-        };
-      });
+//         return {
+//           start: start.clone().subtract(30, "minutes"),
+//           end: start.clone().add(duration, "hours").add(30, "minutes"),
+//         };
+//       });
 
-      /* 6️⃣ Working window */
-      const WORK_START = moment(`${targetDate} 8:00 AM`, "YYYY-MM-DD h:mm A");
-      const WORK_END = moment(`${targetDate} 8:30 PM`, "YYYY-MM-DD h:mm A");
-      const SERVICE_END_LIMIT = moment(
-        `${targetDate} 8:00 PM`,
-        "YYYY-MM-DD h:mm A"
-      );
+//       /* 6️⃣ Working window */
+//       const WORK_START = moment(`${targetDate} 8:00 AM`, "YYYY-MM-DD h:mm A");
+//       const WORK_END = moment(`${targetDate} 8:30 PM`, "YYYY-MM-DD h:mm A");
+//       const SERVICE_END_LIMIT = moment(
+//         `${targetDate} 8:00 PM`,
+//         "YYYY-MM-DD h:mm A"
+//       );
 
-      const requiredTotalMinutes = serviceDuration * 60 + 60;
+//       const requiredTotalMinutes = serviceDuration * 60 + 60;
 
-      /* 7️⃣ Slot generation */
-      const availableSlots = [];
-      const now = moment();
-      const isToday = moment(targetDate).isSame(now, "day");
+//       /* 7️⃣ Slot generation */
+//       const availableSlots = [];
+//       const now = moment();
+//       const isToday = moment(targetDate).isSame(now, "day");
 
-      let cursor = WORK_START.clone();
+//       let cursor = WORK_START.clone();
 
-      if (isToday) {
-        const roundedNow = now
-          .clone()
-          .add(30 - (now.minute() % 30), "minutes")
-          .startOf("minute");
+//       if (isToday) {
+//         const roundedNow = now
+//           .clone()
+//           .add(30 - (now.minute() % 30), "minutes")
+//           .startOf("minute");
 
-        if (roundedNow.isAfter(cursor)) cursor = roundedNow;
-      }
+//         if (roundedNow.isAfter(cursor)) cursor = roundedNow;
+//       }
 
-      while (cursor.isBefore(WORK_END)) {
-        const serviceStart = cursor.clone();
-        const serviceEnd = serviceStart.clone().add(serviceDuration, "hours");
+//       while (cursor.isBefore(WORK_END)) {
+//         const serviceStart = cursor.clone();
+//         const serviceEnd = serviceStart.clone().add(serviceDuration, "hours");
 
-        const teamBlockStart = serviceStart.clone().subtract(30, "minutes");
-        const teamBlockEnd = serviceEnd.clone().add(30, "minutes");
+//         const teamBlockStart = serviceStart.clone().subtract(30, "minutes");
+//         const teamBlockEnd = serviceEnd.clone().add(30, "minutes");
 
-        // ⛔ HARD RULES
-        if (
-          serviceEnd.isAfter(SERVICE_END_LIMIT) ||
-          teamBlockStart.isBefore(WORK_START) ||
-          teamBlockEnd.isAfter(WORK_END)
-        ) {
-          cursor.add(30, "minutes");
-          continue;
-        }
+//         // ⛔ HARD RULES
+//         if (
+//           serviceEnd.isAfter(SERVICE_END_LIMIT) ||
+//           teamBlockStart.isBefore(WORK_START) ||
+//           teamBlockEnd.isAfter(WORK_END)
+//         ) {
+//           cursor.add(30, "minutes");
+//           continue;
+//         }
 
-        const overlaps = blockedRanges.some(
-          (range) =>
-            teamBlockStart.isBefore(range.end) &&
-            teamBlockEnd.isAfter(range.start)
-        );
+//         const overlaps = blockedRanges.some(
+//           (range) =>
+//             teamBlockStart.isBefore(range.end) &&
+//             teamBlockEnd.isAfter(range.start)
+//         );
 
-        if (!overlaps) {
-          availableSlots.push(serviceStart.format("h:mm A"));
-        }
+//         if (!overlaps) {
+//           availableSlots.push(serviceStart.format("h:mm A"));
+//         }
 
-        cursor.add(30, "minutes");
-      }
+//         cursor.add(30, "minutes");
+//       }
 
-      return res.json({
-        date: targetDate,
-        availableSlots,
-        requiredTotalMinutes,
-        availableTeamCount,
-      });
-    } catch (error) {
-      console.error("Reschedule slot error:", error);
-      return res.status(500).json({ message: "Server error" });
-    }
-  }
-);
+//       return res.json({
+//         date: targetDate,
+//         availableSlots,
+//         requiredTotalMinutes,
+//         availableTeamCount,
+//       });
+//     } catch (error) {
+//       console.error("Reschedule slot error:", error);
+//       return res.status(500).json({ message: "Server error" });
+//     }
+//   }
+// );
 
 // router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
 //   const session = await mongoose.startSession();
@@ -449,6 +450,147 @@ router.post(
 //     });
 //   }
 // });
+
+router.post(
+  "/vendor/reschedule-booking/available-slots/:vendorId",
+  async (req, res) => {
+    // now duration in minutes
+    try {
+      const { vendorId } = req.params;
+      const { bookingId, targetDate } = req.body;
+
+      if (!vendorId || !bookingId || !targetDate) {
+        return res.status(400).json({ message: "Missing required fields" });
+      }
+
+      /* 1️⃣ Load booking being rescheduled */
+      const currentBooking = await UserBooking.findById(bookingId);
+      if (!currentBooking) {
+        return res.status(404).json({ message: "Booking not found" });
+      }
+
+      // ✅ duration is now MINUTES
+      const serviceDurationMinutes = (currentBooking.service || []).reduce(
+        (sum, s) => sum + Number(s.duration || 0),
+        0
+      );
+
+      const teamRequired = Math.max(
+        ...(currentBooking.service || []).map((s) => Number(s.teamMembersRequired || 0))
+      );
+
+      /* 2️⃣ Load vendor */
+      const vendor = await Vendor.findById(vendorId);
+      if (!vendor) {
+        return res.status(404).json({ message: "Vendor not found" });
+      }
+
+      /* 3️⃣ Team availability (leave check) */
+      const availableTeamCount = (vendor.team || []).filter(
+        (m) => !(m.markedLeaves || []).includes(targetDate)
+      ).length;
+
+      if (availableTeamCount < teamRequired) {
+        return res.json({ availableSlots: [], availableTeamCount });
+      }
+
+      /* 4️⃣ Fetch future bookings (exclude current) */
+      const futureBookings = await UserBooking.find({
+        "assignedProfessional.professionalId": vendorId,
+        "selectedSlot.slotDate": targetDate,
+        _id: { $ne: bookingId },
+        "bookingDetails.status": {
+          $nin: ["Cancelled", "Customer Cancelled", "Admin Cancelled"],
+        },
+      });
+
+      /* 5️⃣ Build blocked ranges */
+      const blockedRanges = (futureBookings || []).map((b) => {
+        const start = moment(
+          `${b.selectedSlot.slotDate} ${b.selectedSlot.slotTime}`,
+          "YYYY-MM-DD h:mm A"
+        );
+
+        // ✅ duration is MINUTES
+        const durationMinutes = (b.service || []).reduce(
+          (s, x) => s + Number(x.duration || 0),
+          0
+        );
+
+        return {
+          start: start.clone().subtract(30, "minutes"),
+          end: start.clone().add(durationMinutes, "minutes").add(30, "minutes"),
+        };
+      });
+
+      /* 6️⃣ Working window */
+      const WORK_START = moment(`${targetDate} 8:00 AM`, "YYYY-MM-DD h:mm A");
+      const WORK_END = moment(`${targetDate} 8:30 PM`, "YYYY-MM-DD h:mm A");
+      const SERVICE_END_LIMIT = moment(`${targetDate} 8:00 PM`, "YYYY-MM-DD h:mm A");
+
+      // ✅ total minutes required (your existing extra 60 mins kept)
+      const requiredTotalMinutes = serviceDurationMinutes + 60;
+
+      /* 7️⃣ Slot generation */
+      const availableSlots = [];
+      const now = moment();
+      const isToday = moment(targetDate).isSame(now, "day");
+
+      let cursor = WORK_START.clone();
+
+      if (isToday) {
+        const roundedNow = now
+          .clone()
+          .add(30 - (now.minute() % 30), "minutes")
+          .startOf("minute");
+
+        if (roundedNow.isAfter(cursor)) cursor = roundedNow;
+      }
+
+      while (cursor.isBefore(WORK_END)) {
+        const serviceStart = cursor.clone();
+
+        // ✅ duration is MINUTES
+        const serviceEnd = serviceStart.clone().add(serviceDurationMinutes, "minutes");
+
+        const teamBlockStart = serviceStart.clone().subtract(30, "minutes");
+        const teamBlockEnd = serviceEnd.clone().add(30, "minutes");
+
+        // ⛔ HARD RULES
+        if (
+          serviceEnd.isAfter(SERVICE_END_LIMIT) ||
+          teamBlockStart.isBefore(WORK_START) ||
+          teamBlockEnd.isAfter(WORK_END)
+        ) {
+          cursor.add(30, "minutes");
+          continue;
+        }
+
+        const overlaps = blockedRanges.some(
+          (range) =>
+            teamBlockStart.isBefore(range.end) &&
+            teamBlockEnd.isAfter(range.start)
+        );
+
+        if (!overlaps) {
+          availableSlots.push(serviceStart.format("h:mm A"));
+        }
+
+        cursor.add(30, "minutes");
+      }
+
+      return res.json({
+        date: targetDate,
+        availableSlots,
+        requiredTotalMinutes,
+        availableTeamCount,
+      });
+    } catch (error) {
+      console.error("Reschedule slot error:", error);
+      return res.status(500).json({ message: "Server error" });
+    }
+  }
+);
 
 router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
   const session = await mongoose.startSession();

@@ -2918,150 +2918,159 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    const { bookingId, status, assignedProfessional, vendorId, cancelledBy } =
-      req.body;
+    const { bookingId, status, assignedProfessional, vendorId, cancelledBy } = req.body;
 
     if (!bookingId)
       return res.status(400).json({ success: false, message: "bookingId is required" });
     if (!vendorId)
       return res.status(400).json({ success: false, message: "vendorId (professionalId) is required" });
 
-    // ✅ Decide when to charge coins
-    const shouldChargeCoins = ["confirmed", "accepted"].includes(norm(status));
-    // If your app uses "Pending"/"Confirmed" etc, adjust this list.
+    const n = (v) => {
+      const x = Number(v);
+      return Number.isFinite(x) ? x : 0;
+    };
+
+    const norm = (s) => String(s || "").toLowerCase().trim();
+    const normalizedStatus = norm(status);
+
+    // ✅ only these statuses should charge coins
+    const shouldChargeCoins = ["confirmed", "accepted"].includes(normalizedStatus);
+
+    let updatedBooking = null;
 
     await session.withTransaction(async () => {
       // 0) Load booking
       const booking = await UserBooking.findById(bookingId).session(session);
       if (!booking) {
-        throw new Error("Booking not found");
+        const err = new Error("Booking not found");
+        err.statusCode = 404;
+        throw err;
       }
 
-      // 1) ensure invite exists
+      // 1) Ensure invite exists (so arrayFilters always find something)
       await UserBooking.updateOne(
-        {
-          _id: bookingId,
-          "invitedVendors.professionalId": { $ne: String(vendorId) },
-        },
+        { _id: bookingId, "invitedVendors.professionalId": { $ne: String(vendorId) } },
         {
           $addToSet: {
             invitedVendors: {
               professionalId: String(vendorId),
               invitedAt: new Date(),
               responseStatus: "pending",
-              coinsDeducted: false, // ✅ add this field
+              coinsDeducted: false,
             },
           },
         },
         { session }
       );
 
-      // 2) Build update ops for invitedVendors
-      const updateFields = {};
-      if (status) updateFields["bookingDetails.status"] = status;
-      if (assignedProfessional) updateFields.assignedProfessional = assignedProfessional;
+      // Re-fetch booking after ensuring invite exists (so we can read coinsDeducted reliably)
+      const booking2 = await UserBooking.findById(bookingId).session(session);
+      if (!booking2) {
+        const err = new Error("Booking not found");
+        err.statusCode = 404;
+        throw err;
+      }
 
-      const patch = mapStatusToInvite(status, cancelledBy); // your existing helper
+      const inviteEntry = (booking2.invitedVendors || []).find(
+        (iv) => String(iv.professionalId) === String(vendorId)
+      );
+      const alreadyDeducted = !!inviteEntry?.coinsDeducted;
+
+      // 2) Compute required coins (✅ coinDeduction already includes quantity)
+      let requiredCoins = 0;
+      if (shouldChargeCoins) {
+        requiredCoins = (booking2.service || []).reduce((sum, s) => sum + n(s.coinDeduction), 0);
+
+        // ✅ If coin deduction is not configured properly, do NOT allow Confirm/Accept
+        if (requiredCoins <= 0) {
+          const err = new Error("Coin deduction not configured for this booking.");
+          err.statusCode = 400;
+          throw err;
+        }
+      }
+
+      // 3) HARD BLOCK: If confirming/accepting, vendor must have enough coins (unless already deducted)
+      // ✅ Use atomic deduction to prevent race conditions
+      if (shouldChargeCoins && !alreadyDeducted) {
+        const deductRes = await vendorAuthSchema.updateOne(
+          { _id: vendorId, "wallet.coins": { $gte: requiredCoins } },
+          { $inc: { "wallet.coins": -requiredCoins } },
+          { session }
+        );
+
+        // matchedCount === 0 => either vendor not found OR insufficient coins
+        if (deductRes.matchedCount === 0) {
+          const vendorNow = await vendorAuthSchema.findById(vendorId).session(session);
+          const available = n(vendorNow?.wallet?.coins);
+
+          const err = new Error(
+            `Insufficient wallet coins. Required ${requiredCoins}, available ${available}.`
+          );
+          err.statusCode = 400;
+          throw err; // ✅ abort transaction => booking will NOT be confirmed
+        }
+
+        // Update canRespondLead after deduction
+        const vendorAfter = await vendorAuthSchema.findById(vendorId).session(session);
+        const newCoins = n(vendorAfter?.wallet?.coins);
+
+        await vendorAuthSchema.updateOne(
+          { _id: vendorId },
+          { $set: { "wallet.canRespondLead": newCoins > 0 } },
+          { session }
+        );
+
+        // Log transaction
+        await walletTransaction.create(
+          [
+            {
+              vendorId,
+              title: "Lead response",
+              coin: requiredCoins,
+              transactionType: "lead response",
+              amount: 0,
+              gst18Perc: 0,
+              totalPaid: 0,
+              type: "deduct",
+              date: new Date(),
+              metaData: {
+                bookingId,
+                bookingCode: booking2?.bookingDetails?.booking_id,
+                serviceType: booking2?.serviceType,
+              },
+            },
+          ],
+          { session }
+        );
+
+        // Mark coins deducted on invite entry
+        // (done via setOps below)
+      }
+
+      // 4) Build booking update ops
+      const patch = mapStatusToInvite(status, cancelledBy); // your helper (case-sensitive)
+
       const setOps = {
-        ...updateFields,
+        // ⚠️ Only update bookingDetails.status when client sends status
+        ...(status ? { "bookingDetails.status": status } : {}),
+        ...(assignedProfessional ? { assignedProfessional } : {}),
         "invitedVendors.$[iv].respondedAt": new Date(),
       };
-      if (patch.responseStatus)
-        setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
-      if (patch.cancelledAt)
-        setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
-      if (patch.cancelledBy)
-        setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
 
-      // 3) If charging coins, compute total
-      let totalCoinsToDeduct = 0;
+      if (patch.responseStatus) setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
+      if (patch.cancelledAt) setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
+      if (patch.cancelledBy) setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
 
-      if (shouldChargeCoins) {
-        totalCoinsToDeduct = (booking.service || []).reduce((sum, s) => {
-          const coins = Number(s.coinDeduction || 0);
-          // const qty = Number(s.quantity || 1);
-          return sum + coins;
-        }, 0);
-
-        if (totalCoinsToDeduct <= 0) {
-          // nothing to deduct; still allow response update
-          totalCoinsToDeduct = 0;
-        }
+      // If we charged coins in this call, mark deducted fields
+      if (shouldChargeCoins && !alreadyDeducted) {
+        // requiredCoins will be > 0 here (validated above)
+        setOps["invitedVendors.$[iv].coinsDeducted"] = true;
+        setOps["invitedVendors.$[iv].coinsDeductedAt"] = new Date();
+        setOps["invitedVendors.$[iv].coinsDeductedValue"] = requiredCoins;
       }
 
-      // console.log("totalCoinsToDeduct", totalCoinsToDeduct)
-
-      // 4) Wallet deduction + transaction log (idempotent)
-      if (shouldChargeCoins && totalCoinsToDeduct > 0) {
-        // ✅ Check if already deducted for this booking + vendor
-        const alreadyDeducted = await UserBooking.findOne({
-          _id: bookingId,
-          invitedVendors: {
-            $elemMatch: {
-              professionalId: String(vendorId),
-              coinsDeducted: true,
-            },
-          },
-        }).session(session);
-
-        if (!alreadyDeducted) {
-          const vendor = await vendorAuthSchema
-            .findById(vendorId)
-            .session(session);
-
-          if (!vendor) throw new Error("Vendor not found");
-
-          const currentCoins = Number(vendor?.wallet?.coins || 0);
-          if (currentCoins < totalCoinsToDeduct) {
-            // you may want to block responding if insufficient coins
-            const err = new Error(
-              `Insufficient wallet coins. Required ${totalCoinsToDeduct}, available ${currentCoins}.`
-            );
-            err.statusCode = 400;
-            throw err;
-          }
-
-          // ✅ Deduct
-          vendor.wallet.coins = currentCoins - totalCoinsToDeduct;
-
-          // Optionally update canRespondLead flag
-          vendor.wallet.canRespondLead = vendor.wallet.coins > 0;
-
-          await vendor.save({ session });
-
-          // ✅ Log transaction (deduct)
-          await walletTransaction.create(
-            [
-              {
-                vendorId,
-                // title: `Lead response coin deduction (${totalCoinsToDeduct} coins)`,
-                title: `Lead response`,
-                coin: totalCoinsToDeduct,
-                transactionType: "lead response",
-                amount: 0,
-                gst18Perc: 0,
-                totalPaid: 0,
-                type: "deduct",
-                date: new Date(),
-                metaData: {
-                  bookingId,
-                  bookingCode: booking?.bookingDetails?.booking_id,
-                  serviceType: booking?.serviceType,
-                },
-              },
-            ],
-            { session }
-          );
-
-          // ✅ Mark deducted in booking invite entry
-          setOps["invitedVendors.$[iv].coinsDeducted"] = true;
-          setOps["invitedVendors.$[iv].coinsDeductedAt"] = new Date();
-          setOps["invitedVendors.$[iv].coinsDeductedValue"] = totalCoinsToDeduct;
-        }
-      }
-
-      // 5) Update booking (status + invited vendor status + maybe coinsDeducted)
-      const updated = await UserBooking.findOneAndUpdate(
+      // 5) Apply booking update (invite status + maybe booking status)
+      updatedBooking = await UserBooking.findOneAndUpdate(
         { _id: bookingId },
         { $set: setOps },
         {
@@ -3072,15 +3081,17 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
         }
       );
 
-      if (!updated) throw new Error("Booking not found");
-      // store updated into outer scope? not needed; just return after transaction
-      res.locals.updatedBooking = updated;
+      if (!updatedBooking) {
+        const err = new Error("Booking not found");
+        err.statusCode = 404;
+        throw err;
+      }
     });
 
     return res.status(200).json({
       success: true,
       message: "Booking updated",
-      booking: res.locals.updatedBooking,
+      booking: updatedBooking,
     });
   } catch (error) {
     console.error("Error updating booking:", error);
@@ -3092,6 +3103,7 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
     session.endSession();
   }
 };
+
 
 exports.getBookingExceptPendingAndCancelled = async (req, res) => {
   try {
