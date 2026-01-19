@@ -25,7 +25,8 @@ const isExpired = (expiry) => {
   return new Date() > new Date(expiry);
 };
 
-const paymentLink = "http://localhost:5173/wallet-recharge";
+// const paymentLink = "http://localhost:5173/wallet-recharge";// dev
+const paymentLink = "https://websitehomjee.netlify.app/wallet-recharge";
 
 // API to add a new transaction
 router.post("/recharge-wallet/add-coin/vendor", async (req, res) => {
