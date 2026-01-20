@@ -22,7 +22,10 @@ const citiesObj = {
   Pune: "Pune",
 };
 
-const norm = (s) => String(s || "").toLowerCase().trim();
+const norm = (s) =>
+  String(s || "")
+    .toLowerCase()
+    .trim();
 
 function generateProviderRef() {
   const dateStr = new Date().toISOString().slice(0, 10).replace(/-/g, ""); // e.g. "20251120"
@@ -165,7 +168,6 @@ function syncDerivedFields(details, finalTotal) {
   details.currentTotalAmount = Number(finalTotal);
 }
 
-
 // -----------------------------
 // works for ALL combinations: cash + online + mixed
 // -----------------------------
@@ -219,7 +221,9 @@ const fixFinalTargetIfStale = (d, syncMilestone) => {
     d.secondPayment = d.secondPayment || {};
     d.finalPayment = d.finalPayment || {};
 
-    const total = Number(d.finalTotal || d.currentTotalAmount || d.bookingAmount || 0);
+    const total = Number(
+      d.finalTotal || d.currentTotalAmount || d.bookingAmount || 0,
+    );
 
     const firstReq = Number(d.firstPayment.requestedAmount || 0);
     const secondReq = Number(d.secondPayment.requestedAmount || 0);
@@ -381,7 +385,8 @@ const ensureInstallmentTargets = (d, finalTotal, serviceType) => {
 
     d.installmentPlan = d.installmentPlan || {};
 
-    const isDeepCleaning = String(serviceType).toLowerCase() === "deep_cleaning";
+    const isDeepCleaning =
+      String(serviceType).toLowerCase() === "deep_cleaning";
 
     if (isDeepCleaning) {
       // Deep cleaning: first + final (keep your logic)
@@ -402,7 +407,10 @@ const ensureInstallmentTargets = (d, finalTotal, serviceType) => {
         d.secondPayment.remaining = 0;
       }
 
-      if (d.finalPayment.status !== "paid" && !(Number(d.finalPayment.requestedAmount) > 0)) {
+      if (
+        d.finalPayment.status !== "paid" &&
+        !(Number(d.finalPayment.requestedAmount) > 0)
+      ) {
         d.finalPayment.requestedAmount = 0;
         d.finalPayment.remaining = 0;
       }
@@ -425,12 +433,18 @@ const ensureInstallmentTargets = (d, finalTotal, serviceType) => {
       d.installmentPlan.finalTarget = finalTarget;
 
       // keep second/final requestedAmount 0 until requested
-      if (d.secondPayment.status !== "paid" && !(Number(d.secondPayment.requestedAmount) > 0)) {
+      if (
+        d.secondPayment.status !== "paid" &&
+        !(Number(d.secondPayment.requestedAmount) > 0)
+      ) {
         d.secondPayment.requestedAmount = 0;
         d.secondPayment.remaining = 0;
       }
 
-      if (d.finalPayment.status !== "paid" && !(Number(d.finalPayment.requestedAmount) > 0)) {
+      if (
+        d.finalPayment.status !== "paid" &&
+        !(Number(d.finalPayment.requestedAmount) > 0)
+      ) {
         d.finalPayment.requestedAmount = 0;
         d.finalPayment.remaining = 0;
       }
@@ -449,9 +463,14 @@ const activateInstallmentStage = (d, stage) => {
 
     const setTarget = (obj, planTarget) => {
       const alreadyRequested = Number(obj?.requestedAmount || 0);
-      const target = alreadyRequested > 0 ? alreadyRequested : Math.max(0, Number(planTarget || 0));
+      const target =
+        alreadyRequested > 0
+          ? alreadyRequested
+          : Math.max(0, Number(planTarget || 0));
 
-      const paid = Math.max(0, Number(obj.amount || 0)) + Math.max(0, Number(obj.prePayment || 0));
+      const paid =
+        Math.max(0, Number(obj.amount || 0)) +
+        Math.max(0, Number(obj.prePayment || 0));
 
       obj.requestedAmount = target;
       obj.remaining = Math.max(0, target - paid);
@@ -463,7 +482,8 @@ const activateInstallmentStage = (d, stage) => {
     };
 
     if (s === "first") setTarget(d.firstPayment, d.installmentPlan.firstTarget);
-    if (s === "second") setTarget(d.secondPayment, d.installmentPlan.secondTarget);
+    if (s === "second")
+      setTarget(d.secondPayment, d.installmentPlan.secondTarget);
     if (s === "final") setTarget(d.finalPayment, d.installmentPlan.finalTarget);
   } catch (e) {
     console.error("activateInstallmentStage error:", e);
@@ -500,7 +520,7 @@ const activateInstallmentStage = (d, stage) => {
 const resyncMilestonesFromLedger = (
   d,
   paymentMethodForThisTxn,
-  serviceType = "house_painting"
+  serviceType = "house_painting",
 ) => {
   const firstReq = Number(d.firstPayment.requestedAmount || 0);
   const secondReq = isDeepCleaning(serviceType)
@@ -620,7 +640,7 @@ const finalizeIfFullyPaid = ({ booking, bookingId, finalTotal }) => {
     // if (String(d.status) === "Waiting for final payment") {
     if (
       ["Waiting for final payment", "Project Ongoing", "Job Ongoing"].includes(
-        String(d.status)
+        String(d.status),
       )
     ) {
       d.status = "Project Completed";
@@ -689,7 +709,7 @@ const normalizeStage = (rawStage, serviceType, d) => {
 function detectServiceType(formName, services) {
   const formLower = (formName || "").toLowerCase();
   const serviceCategories = services.map((s) =>
-    (s.category || "").toLowerCase()
+    (s.category || "").toLowerCase(),
   );
 
   if (
@@ -805,7 +825,7 @@ exports.createBooking = async (req, res) => {
       // bookingAmount = result.reduce((sum, amt) => sum + Number(amt || 0), 0);
       originalTotalAmount = service.reduce(
         (sum, itm) => sum + Number(itm.price) * (itm.quantity || 1),
-        0
+        0,
       );
       bookingAmount = Math.round(originalTotalAmount * 0.2); //originalTotalAmount    // 20%
       // bookingAmount = Math.round(originalTotalAmount * 0.2); //originalTotalAmount    // 20%
@@ -824,7 +844,7 @@ exports.createBooking = async (req, res) => {
       };
       finalPayment = {
         status: "pending",
-        amount: 0
+        amount: 0,
         // amount: Math.max(0, originalTotalAmount - paidAmount),
       };
     }
@@ -919,16 +939,16 @@ exports.createBooking = async (req, res) => {
         quantity: Number(s.quantity) || 1,
         teamMembersRequired: Number(s.teamMembersRequired) || 0,
         duration: Number(s.duration) || 0,
-        coinDeduction: Number(s.coinsForVendor) || 0
+        coinDeduction: Number(s.coinsForVendor) || 0,
       })),
       serviceType,
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -954,8 +974,9 @@ exports.createBooking = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -973,7 +994,7 @@ exports.createBooking = async (req, res) => {
           },
         },
       },
-      { new: true }
+      { new: true },
     );
 
     const newBookingNotification = {
@@ -982,7 +1003,7 @@ exports.createBooking = async (req, res) => {
       thumbnailTitle: "New Booking Scheduled",
       notifyTo: "admin",
       message: `New ${service[0]?.category} booking scheduled for ${moment(
-        selectedSlot?.slotDate
+        selectedSlot?.slotDate,
       ).format("DD-MM-YYYY")} at ${selectedSlot?.slotTime}`,
       // metadata: { user_id, order_status },
       status: "unread",
@@ -1349,7 +1370,7 @@ exports.adminCreateBooking = async (req, res) => {
     let bookingAmount = Number(bookingDetails?.bookingAmount ?? 0);
     let paidAmount = Number(bookingDetails?.paidAmount ?? 0);
     let originalTotalAmount = Number(
-      bookingDetails?.originalTotalAmount ?? bookingDetails?.finalTotal ?? 0
+      bookingDetails?.originalTotalAmount ?? bookingDetails?.finalTotal ?? 0,
     );
     let finalTotal =
       Number(bookingDetails?.finalTotal ?? 0) || originalTotalAmount;
@@ -1507,15 +1528,16 @@ exports.adminCreateBooking = async (req, res) => {
         teamMembersRequired: Number(s.teamMembersRequired || 0),
         duration: s.duration,
         packageId: s.packageId,
+        coinDeduction: Number(s.coinDeduction || 0),
       })),
       serviceType,
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -1547,8 +1569,9 @@ exports.adminCreateBooking = async (req, res) => {
     // const redirectionUrl = "http://localhost:5173/checkout/payment";
     const pay_type = "auto-pay";
 
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -1848,13 +1871,13 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     const now = new Date();
 
     const todayStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     )
       .toISOString()
       .slice(0, 10);
 
     const dayAfterTomorrow = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2)
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2),
     );
     const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().slice(0, 10);
 
@@ -1887,7 +1910,7 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       const slotDateStr = slotDateMoment.format("YYYY-MM-DD");
       const slotDateTime = moment(
         `${slotDateStr} ${slotTimeStr}`,
-        "YYYY-MM-DD hh:mm A"
+        "YYYY-MM-DD hh:mm A",
       );
 
       // Today: keep only future-times
@@ -2152,13 +2175,13 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       // 1️⃣ Calculate GSV
       const bookingGsv = (booking.service || []).reduce(
         (sum, s) => sum + (s.price || 0) * (s.quantity || 0),
-        0
+        0,
       );
       totalGsv += bookingGsv;
 
       // 2️⃣ Get vendor invitation
       const vendorInvitation = (booking.invitedVendors || []).find(
-        (v) => String(v.professionalId) === String(vendorId)
+        (v) => String(v.professionalId) === String(vendorId),
       );
 
       if (!vendorInvitation) continue;
@@ -2180,7 +2203,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       ) {
         const bookedSlot = moment(
           `${booking.selectedSlot.slotDate} ${booking.selectedSlot.slotTime}`,
-          "YYYY-MM-DD hh:mm A"
+          "YYYY-MM-DD hh:mm A",
         );
 
         const cancelledAt = moment(vendorInvitation.cancelledAt);
@@ -2355,7 +2378,7 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     for (const booking of bookings) {
       // Only count leads for THIS vendor (use invitedVendors or assignedProfessional)
       const invited = (booking.invitedVendors || []).find(
-        (v) => String(v.professionalId) === String(vendorId)
+        (v) => String(v.professionalId) === String(vendorId),
       );
       if (!invited) continue;
 
@@ -2550,7 +2573,7 @@ exports.getOverallPerformance = async (req, res) => {
         // Calculate ratings for this vendor
         const ratings = await calculateVendorRatings(
           vendorId,
-          period === "this_month" ? "month" : "last"
+          period === "this_month" ? "month" : "last",
         );
         hpVendorRatings.set(vendorId, ratings);
       }
@@ -2591,7 +2614,7 @@ exports.getOverallPerformance = async (req, res) => {
       if (invited.responseStatus === "customer_cancelled") {
         const slot = moment(
           `${lead.selectedSlot.slotDate} ${lead.selectedSlot.slotTime}`,
-          "YYYY-MM-DD hh:mm A"
+          "YYYY-MM-DD hh:mm A",
         );
         const cancelled = moment(invited.cancelledAt);
         const diff = slot.diff(cancelled, "hours", true);
@@ -2606,7 +2629,7 @@ exports.getOverallPerformance = async (req, res) => {
       if (vendorId && !dcVendorRatings.has(vendorId)) {
         const ratings = await calculateVendorRatings(
           vendorId,
-          period === "this_month" ? "month" : "last"
+          period === "this_month" ? "month" : "last",
         );
         dcVendorRatings.set(vendorId, ratings);
       }
@@ -2646,7 +2669,7 @@ exports.getOverallPerformance = async (req, res) => {
         } else {
           // For DC, find the vendor in invitedVendors
           const invited = lead.invitedVendors?.find(
-            (iv) => String(iv.professionalId) === String(vendorId)
+            (iv) => String(iv.professionalId) === String(vendorId),
           );
           if (!invited) continue;
           prof = invited;
@@ -2659,7 +2682,7 @@ exports.getOverallPerformance = async (req, res) => {
           // Get vendor ratings
           const ratings = await calculateVendorRatings(
             vendorId,
-            period === "this_month" ? "month" : "last"
+            period === "this_month" ? "month" : "last",
           );
 
           map[vendorId] = {
@@ -2699,7 +2722,7 @@ exports.getOverallPerformance = async (req, res) => {
           if (prof.responseStatus === "customer_cancelled") {
             const slot = moment(
               `${lead.selectedSlot.slotDate} ${lead.selectedSlot.slotTime}`,
-              "YYYY-MM-DD hh:mm A"
+              "YYYY-MM-DD hh:mm A",
             );
             const cancelled = moment(prof.cancelledAt);
             const diff = slot.diff(cancelled, "hours", true);
@@ -2795,7 +2818,7 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
     const now = new Date();
     const todayStr = ymdLocal(now);
     const tomorrowStr = ymdLocal(
-      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
     );
 
     const nearbyBookings = await UserBooking.find({
@@ -2824,7 +2847,7 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
       const slotDateMoment = moment(slotDateStr, "YYYY-MM-DD");
       const slotDateTime = moment(
         `${slotDateStr} ${slotTimeStr}`,
-        "YYYY-MM-DD hh:mm A"
+        "YYYY-MM-DD hh:mm A",
       );
 
       if (slotDateMoment.isSame(nowMoment, "day")) {
@@ -2913,28 +2936,40 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
 //   }
 // };
 
-
 exports.respondConfirmJobVendorLine = async (req, res) => {
   const session = await mongoose.startSession();
 
   try {
-    const { bookingId, status, assignedProfessional, vendorId, cancelledBy } = req.body;
+    const { bookingId, status, assignedProfessional, vendorId, cancelledBy } =
+      req.body;
 
     if (!bookingId)
-      return res.status(400).json({ success: false, message: "bookingId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "bookingId is required" });
     if (!vendorId)
-      return res.status(400).json({ success: false, message: "vendorId (professionalId) is required" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "vendorId (professionalId) is required",
+        });
 
     const n = (v) => {
       const x = Number(v);
       return Number.isFinite(x) ? x : 0;
     };
 
-    const norm = (s) => String(s || "").toLowerCase().trim();
+    const norm = (s) =>
+      String(s || "")
+        .toLowerCase()
+        .trim();
     const normalizedStatus = norm(status);
 
     // ✅ only these statuses should charge coins
-    const shouldChargeCoins = ["confirmed", "accepted"].includes(normalizedStatus);
+    const shouldChargeCoins = ["confirmed", "accepted"].includes(
+      normalizedStatus,
+    );
 
     let updatedBooking = null;
 
@@ -2949,7 +2984,10 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
 
       // 1) Ensure invite exists (so arrayFilters always find something)
       await UserBooking.updateOne(
-        { _id: bookingId, "invitedVendors.professionalId": { $ne: String(vendorId) } },
+        {
+          _id: bookingId,
+          "invitedVendors.professionalId": { $ne: String(vendorId) },
+        },
         {
           $addToSet: {
             invitedVendors: {
@@ -2960,7 +2998,7 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
             },
           },
         },
-        { session }
+        { session },
       );
 
       // Re-fetch booking after ensuring invite exists (so we can read coinsDeducted reliably)
@@ -2972,18 +3010,23 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
       }
 
       const inviteEntry = (booking2.invitedVendors || []).find(
-        (iv) => String(iv.professionalId) === String(vendorId)
+        (iv) => String(iv.professionalId) === String(vendorId),
       );
       const alreadyDeducted = !!inviteEntry?.coinsDeducted;
 
       // 2) Compute required coins (✅ coinDeduction already includes quantity)
       let requiredCoins = 0;
       if (shouldChargeCoins) {
-        requiredCoins = (booking2.service || []).reduce((sum, s) => sum + n(s.coinDeduction), 0);
+        requiredCoins = (booking2.service || []).reduce(
+          (sum, s) => sum + n(s.coinDeduction),
+          0,
+        );
 
         // ✅ If coin deduction is not configured properly, do NOT allow Confirm/Accept
         if (requiredCoins <= 0) {
-          const err = new Error("Coin deduction not configured for this booking.");
+          const err = new Error(
+            "Coin deduction not configured for this booking.",
+          );
           err.statusCode = 400;
           throw err;
         }
@@ -2995,29 +3038,33 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
         const deductRes = await vendorAuthSchema.updateOne(
           { _id: vendorId, "wallet.coins": { $gte: requiredCoins } },
           { $inc: { "wallet.coins": -requiredCoins } },
-          { session }
+          { session },
         );
 
         // matchedCount === 0 => either vendor not found OR insufficient coins
         if (deductRes.matchedCount === 0) {
-          const vendorNow = await vendorAuthSchema.findById(vendorId).session(session);
+          const vendorNow = await vendorAuthSchema
+            .findById(vendorId)
+            .session(session);
           const available = n(vendorNow?.wallet?.coins);
 
           const err = new Error(
-            `Insufficient wallet coins. Required ${requiredCoins}, available ${available}.`
+            `Insufficient wallet coins. Required ${requiredCoins}, available ${available}.`,
           );
           err.statusCode = 400;
           throw err; // ✅ abort transaction => booking will NOT be confirmed
         }
 
         // Update canRespondLead after deduction
-        const vendorAfter = await vendorAuthSchema.findById(vendorId).session(session);
+        const vendorAfter = await vendorAuthSchema
+          .findById(vendorId)
+          .session(session);
         const newCoins = n(vendorAfter?.wallet?.coins);
 
         await vendorAuthSchema.updateOne(
           { _id: vendorId },
           { $set: { "wallet.canRespondLead": newCoins > 0 } },
-          { session }
+          { session },
         );
 
         // Log transaction
@@ -3040,7 +3087,7 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
               },
             },
           ],
-          { session }
+          { session },
         );
 
         // Mark coins deducted on invite entry
@@ -3057,9 +3104,12 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
         "invitedVendors.$[iv].respondedAt": new Date(),
       };
 
-      if (patch.responseStatus) setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
-      if (patch.cancelledAt) setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
-      if (patch.cancelledBy) setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
+      if (patch.responseStatus)
+        setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
+      if (patch.cancelledAt)
+        setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
+      if (patch.cancelledBy)
+        setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
 
       // If we charged coins in this call, mark deducted fields
       if (shouldChargeCoins && !alreadyDeducted) {
@@ -3078,7 +3128,7 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
           runValidators: true,
           session,
           arrayFilters: [{ "iv.professionalId": String(vendorId) }],
-        }
+        },
       );
 
       if (!updatedBooking) {
@@ -3104,7 +3154,6 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
   }
 };
 
-
 exports.getBookingExceptPendingAndCancelled = async (req, res) => {
   try {
     const { professionalId } = req.params;
@@ -3114,7 +3163,11 @@ exports.getBookingExceptPendingAndCancelled = async (req, res) => {
 
     const q = {
       "assignedProfessional.professionalId": professionalId,
-      "bookingDetails.status": { $ne: "Pending", $ne: "Cancelled", $ne: "Cancelled Rescheduled" },
+      "bookingDetails.status": {
+        $ne: "Pending",
+        $ne: "Cancelled",
+        $ne: "Cancelled Rescheduled",
+      },
     };
 
     // Descending by date (reverse: 29, 28, 27...), then most recent created
@@ -3209,7 +3262,7 @@ exports.startJob = async (req, res) => {
     const isHousePainter = booking.service.some(
       (s) =>
         s.category?.toLowerCase().includes("paint") ||
-        s.serviceName?.toLowerCase().includes("paint")
+        s.serviceName?.toLowerCase().includes("paint"),
     );
 
     // === Prepare hiring data (for Deep Cleaning only) ===
@@ -3220,7 +3273,7 @@ exports.startJob = async (req, res) => {
       const startMoment = moment(startDate, "YYYY-MM-DD");
       for (let i = 0; i < daysRequired; i++) {
         projectDates.push(
-          startMoment.clone().add(i, "days").format("YYYY-MM-DD")
+          startMoment.clone().add(i, "days").format("YYYY-MM-DD"),
         );
       }
 
@@ -3262,7 +3315,7 @@ exports.startJob = async (req, res) => {
     const updatedBooking = await UserBooking.findByIdAndUpdate(
       bookingId,
       { $set: updateFields },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     return res.status(200).json({
@@ -3301,7 +3354,7 @@ exports.completeSurvey = async (req, res) => {
     const updatedBooking = await UserBooking.findByIdAndUpdate(
       bookingId,
       { $set: updateFields },
-      { new: true }
+      { new: true },
     );
 
     res.status(200).json({ message: "Completed", booking: updatedBooking });
@@ -3461,7 +3514,7 @@ exports.requestPriceChange = async (req, res) => {
   if (!booking) return res.status(404).json({ error: "Booking not found" });
 
   const pendingChange = booking.bookingDetails.priceChanges.find(
-    (c) => c.status === "pending"
+    (c) => c.status === "pending",
   );
   if (pendingChange) {
     return res
@@ -3577,7 +3630,7 @@ exports.cancelJob = async (req, res) => {
     const updatedBooking = await UserBooking.findByIdAndUpdate(
       bookingId,
       { $set: updateFields },
-      { new: true }
+      { new: true },
     );
 
     res.status(200).json({ message: "Job Cancelled", booking: updatedBooking });
@@ -3625,7 +3678,7 @@ exports.updateStatus = async (req, res) => {
             responseStatus: "pending",
           },
         },
-      }
+      },
     );
 
     // build invite patch
@@ -3649,7 +3702,7 @@ exports.updateStatus = async (req, res) => {
         new: true,
         runValidators: true,
         arrayFilters: [{ "iv.professionalId": String(actingVendorId) }],
-      }
+      },
     );
 
     if (!updated)
@@ -3710,7 +3763,7 @@ exports.rescheduleBooking = async (req, res) => {
           "selectedSlot.slotTime": slotTime,
         },
       },
-      { new: true }
+      { new: true },
     );
 
     return res.status(200).json({
@@ -3735,10 +3788,14 @@ exports.cancelLeadFromWebsite = async (req, res) => {
     const { bookingId, status } = req.body;
 
     if (!bookingId)
-      return res.status(400).json({ success: false, message: "bookingId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "bookingId is required" });
 
     if (!status)
-      return res.status(400).json({ success: false, message: "status is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "status is required" });
 
     await session.withTransaction(async () => {
       const booking = await UserBooking.findById(bookingId).session(session);
@@ -3756,12 +3813,16 @@ exports.cancelLeadFromWebsite = async (req, res) => {
 
       // 2) Refund logic only when vendor already accepted (and booking is deep_cleaning if needed)
       // Decide which statuses should trigger refund
-      const refundTriggerStatuses = ["customer cancelled", "cancelled", "canceled"];
+      const refundTriggerStatuses = [
+        "customer cancelled",
+        "cancelled",
+        "canceled",
+      ];
       const shouldRefund = refundTriggerStatuses.includes(norm(status));
 
       // Find accepted vendor from invitedVendors
       const acceptedInvite = (booking.invitedVendors || []).find(
-        (v) => norm(v.responseStatus) === "accepted"
+        (v) => norm(v.responseStatus) === "accepted",
       );
 
       if (shouldRefund && acceptedInvite?.professionalId) {
@@ -3778,7 +3839,9 @@ exports.cancelLeadFromWebsite = async (req, res) => {
 
           if (coinsToRefund > 0) {
             // 4) Add coins back to vendor wallet
-            const vendor = await vendorAuthSchema.findById(vendorId).session(session);
+            const vendor = await vendorAuthSchema
+              .findById(vendorId)
+              .session(session);
             if (!vendor) {
               const err = new Error("Vendor not found for refund");
               err.statusCode = 404;
@@ -3812,14 +3875,15 @@ exports.cancelLeadFromWebsite = async (req, res) => {
                   },
                 },
               ],
-              { session }
+              { session },
             );
 
             // 6) Mark refunded in invitedVendors entry (idempotency)
             // We'll update via arrayFilters
             updateFields["invitedVendors.$[iv].coinsRefunded"] = true;
             updateFields["invitedVendors.$[iv].coinsRefundedAt"] = new Date();
-            updateFields["invitedVendors.$[iv].coinsRefundedValue"] = coinsToRefund;
+            updateFields["invitedVendors.$[iv].coinsRefundedValue"] =
+              coinsToRefund;
           }
         }
       }
@@ -3834,7 +3898,7 @@ exports.cancelLeadFromWebsite = async (req, res) => {
           arrayFilters: acceptedInvite?.professionalId
             ? [{ "iv.professionalId": String(acceptedInvite.professionalId) }]
             : undefined,
-        }
+        },
       );
 
       if (!updated) {
@@ -3864,7 +3928,7 @@ exports.cancelLeadFromWebsite = async (req, res) => {
             notifyTo: "admin",
           },
         ],
-        { session }
+        { session },
       );
 
       res.locals.updatedBooking = updated;
@@ -4136,7 +4200,7 @@ exports.markPendingHiring = async (req, res) => {
 
     // If we already have an approved total, keep it; else adopt the booking/quote amount
     const approvedTotal = Number(
-      d.finalTotal ?? d.currentTotalAmount ?? d.bookingAmount ?? 0
+      d.finalTotal ?? d.currentTotalAmount ?? d.bookingAmount ?? 0,
     );
 
     d.finalTotal = approvedTotal > 0 ? approvedTotal : Number(totalAmount || 0);
@@ -4154,13 +4218,14 @@ exports.markPendingHiring = async (req, res) => {
     d.firstPayment.amount = 0; //firstInstallment || Math.round(finalTotal * 0.4);
     d.firstPayment.status = "pending";
     // presever installment amt
-    d.firstPayment.requestedAmount = firstInstallment || Math.round(finalTotal * 0.4);
+    d.firstPayment.requestedAmount =
+      firstInstallment || Math.round(finalTotal * 0.4);
     d.firstPayment.remaining = firstInstallment;
     // ..........................
 
     const updatedQuote = await Quote.updateOne(
       { _id: quotationObjectId, status: "finalized" }, // Make sure you're selecting the finalized quote
-      { $set: { locked: true } } // Lock the quotation
+      { $set: { locked: true } }, // Lock the quotation
     );
 
     if (!mongoose.Types.ObjectId.isValid(quotationId)) {
@@ -4179,7 +4244,7 @@ exports.markPendingHiring = async (req, res) => {
 
     // 1. Build project dates (as before)
     const projectDate = Array.from({ length: noOfDays }, (_, i) =>
-      moment(startDate).add(i, "days").format("YYYY-MM-DD")
+      moment(startDate).add(i, "days").format("YYYY-MM-DD"),
     );
 
     // 2. Create a proper Date object for "first project day at 10:30 AM"
@@ -4211,7 +4276,7 @@ exports.markPendingHiring = async (req, res) => {
       markedDate: new Date(),
       markedTime: moment().format("LT"),
       projectDate: Array.from({ length: noOfDays }, (_, i) =>
-        moment(startDate).add(i, "days").format("YYYY-MM-DD")
+        moment(startDate).add(i, "days").format("YYYY-MM-DD"),
       ),
       noOfDay: noOfDays,
       teamMember: teamMembers.map((m) => ({
@@ -4257,18 +4322,18 @@ exports.markPendingHiring = async (req, res) => {
 
     if (process.env.NODE_ENV !== "production") {
       booking.assignedProfessional.hiring.autoCancelAt = new Date(
-        Date.now() + 2 * 60 * 1000
+        Date.now() + 2 * 60 * 1000,
       ); // +2 mins
     }
     const USE_REAL_AUTO_CANCEL = true; // 👈 set to true for real-time test
 
     if (!USE_REAL_AUTO_CANCEL && process.env.NODE_ENV !== "production") {
       booking.assignedProfessional.hiring.autoCancelAt = new Date(
-        Date.now() + 2 * 60 * 1000
+        Date.now() + 2 * 60 * 1000,
       );
       console.log(
         "DEV: autoCancelAt set to",
-        booking.assignedProfessional.hiring.autoCancelAt.toISOString()
+        booking.assignedProfessional.hiring.autoCancelAt.toISOString(),
       );
     } else {
       // Use real auto-cancel time
@@ -4338,7 +4403,7 @@ exports.requestStartProjectOtp = async (req, res) => {
 
     // ✅ Send OTP via SMS/WhatsApp (mock here)
     console.log(
-      `[OTP SENT] Booking ${bookingId} - OTP: ${otp} (expires at ${expiry})`
+      `[OTP SENT] Booking ${bookingId} - OTP: ${otp} (expires at ${expiry})`,
     );
     // In real: await sendSms(customer.phone, `Your project start OTP: ${otp}. Valid for 10 mins.`);
 
@@ -4452,7 +4517,7 @@ exports.requestSecondPayment = async (req, res) => {
 
     // 🔒 Block if there's a PENDING price change
     const hasPendingPriceChange = d.priceChanges.some(
-      (change) => change.status === "pending"
+      (change) => change.status === "pending",
     );
     if (hasPendingPriceChange) {
       return res.status(400).json({
@@ -4504,15 +4569,16 @@ exports.requestSecondPayment = async (req, res) => {
 
     // ✅ Update second payment milestone...........
     d.secondPayment.status = "pending";
-    d.secondPayment.amount = 0;//secondInstallment
+    d.secondPayment.amount = 0; //secondInstallment
     // presever installment amt
     d.secondPayment.requestedAmount = secondInstallment;
     d.secondPayment.remaining = secondInstallment;
     // ......................................
     // 🔗 Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
     d.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
@@ -4563,7 +4629,7 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
     // ✅ Only allow ending if job is ongoing
     if (
       !["project ongoing", "job ongoing"].includes(
-        String(details.status || "").toLowerCase()
+        String(details.status || "").toLowerCase(),
       )
     ) {
       return res.status(400).json({
@@ -4633,7 +4699,7 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
     // ✅ Set finalPayment fields (do NOT overwrite requestedAmount to reduced value)
     details.finalPayment.requestedAmount = finalTarget; // e.g., 2543 (fixed)
     details.finalPayment.prePayment = pre; // e.g., 3
-    details.finalPayment.amount = 0 // Number(details.finalPayment.amount || 0); // paid in final stage (usually 0)
+    details.finalPayment.amount = 0; // Number(details.finalPayment.amount || 0); // paid in final stage (usually 0)
     details.finalPayment.remaining = amountDue; // e.g., 2540
     // details.finalPayment.status = amountDue === 0 ? "paid" : "pending";
     details.finalPayment.status = pre === 0 ? "pending" : "partial";
@@ -4665,8 +4731,9 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
 
     // ✅ Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     details.paymentLink = {
       url: paymentLinkUrl,
@@ -4708,7 +4775,13 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
 // controllers/payment.controller.js
 exports.makePayment = async (req, res) => {
   try {
-    const { bookingId, paymentMethod, paidAmount, providerRef, installmentStage } = req.body;
+    const {
+      bookingId,
+      paymentMethod,
+      paidAmount,
+      providerRef,
+      installmentStage,
+    } = req.body;
 
     if (!bookingId || !paymentMethod || paidAmount == null) {
       return res.status(400).json({
@@ -4719,22 +4792,33 @@ exports.makePayment = async (req, res) => {
 
     const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
     if (!validPaymentMethods.includes(String(paymentMethod))) {
-      return res.status(400).json({ success: false, message: "Invalid payment method" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid payment method" });
     }
 
     const amount = Number(paidAmount);
     if (!(amount > 0)) {
-      return res.status(400).json({ success: false, message: "Paid amount must be greater than zero" });
+      return res
+        .status(400)
+        .json({
+          success: false,
+          message: "Paid amount must be greater than zero",
+        });
     }
 
     const booking = await UserBooking.findById(bookingId);
     if (!booking) {
-      return res.status(404).json({ success: false, message: "Booking not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     }
 
     const d = booking.bookingDetails;
     if (!d) {
-      return res.status(400).json({ success: false, message: "bookingDetails missing" });
+      return res
+        .status(400)
+        .json({ success: false, message: "bookingDetails missing" });
     }
 
     // ✅ IMPORTANT: providerRef must be unique per payment (razorpay_order_id)
@@ -4742,7 +4826,9 @@ exports.makePayment = async (req, res) => {
     if (providerRef) {
       booking.payments = booking.payments || [];
       d.paymentLink.providerRef = providerRef;
-      const already = booking.payments.some((p) => p.providerRef === providerRef);
+      const already = booking.payments.some(
+        (p) => p.providerRef === providerRef,
+      );
       if (already) {
         // Return current state (do NOT mutate again)
         return res.status(200).json({
@@ -4755,7 +4841,8 @@ exports.makePayment = async (req, res) => {
     }
 
     const serviceType = getServiceTypeFromBooking(booking);
-    const isDeepCleaningSvc = String(serviceType).toLowerCase() === "deep_cleaning";
+    const isDeepCleaningSvc =
+      String(serviceType).toLowerCase() === "deep_cleaning";
 
     // ---------- finalTotal ----------
     let finalTotal = Number(d.finalTotal || 0);
@@ -4775,7 +4862,11 @@ exports.makePayment = async (req, res) => {
     let stage = null;
 
     // 1) Strongest: gateway callback reference matches current link
-    if (providerRef && d.paymentLink?.providerRef && d.paymentLink.providerRef === providerRef) {
+    if (
+      providerRef &&
+      d.paymentLink?.providerRef &&
+      d.paymentLink.providerRef === providerRef
+    ) {
       stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
     }
     // 2) Website caller may send installmentStage (ok)
@@ -4820,7 +4911,8 @@ exports.makePayment = async (req, res) => {
     // ---------- Safe activate (does NOT wipe requestedAmount to 0) ----------
     const safeActivate = (milestone) => {
       const reqAmt = Number(milestone.requestedAmount || 0);
-      const paidSoFar = Number(milestone.amount || 0) + Number(milestone.prePayment || 0);
+      const paidSoFar =
+        Number(milestone.amount || 0) + Number(milestone.prePayment || 0);
       milestone.remaining = Math.max(0, reqAmt - paidSoFar);
 
       // status consistency
@@ -4879,7 +4971,11 @@ exports.makePayment = async (req, res) => {
     if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
 
     // ✅ Resync milestones from ledger (your function)
-    const { prevFinalStatus } = resyncMilestonesFromLedger(d, d.paymentMethod, serviceType);
+    const { prevFinalStatus } = resyncMilestonesFromLedger(
+      d,
+      d.paymentMethod,
+      serviceType,
+    );
 
     // derived fields (your function)
     syncDerivedFields(d, finalTotal);
@@ -4890,15 +4986,23 @@ exports.makePayment = async (req, res) => {
 
     if (finalJustPaidNow) {
       d.paymentStatus = "Paid";
-      if (["Waiting for final payment", "Project Ongoing", "Job Ongoing"].includes(String(d.status))) {
+      if (
+        [
+          "Waiting for final payment",
+          "Project Ongoing",
+          "Job Ongoing",
+        ].includes(String(d.status))
+      ) {
         d.status = "Project Completed";
         d.jobEndedAt = d.jobEndedAt || new Date();
       }
     } else {
       const ratio = finalTotal > 0 ? Number(d.paidAmount || 0) / finalTotal : 0;
-      d.paymentStatus = ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
+      d.paymentStatus =
+        ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
       const statusNorm = (d.status || "").trim().toLowerCase();
-      if (["pending hiring", "pending"].includes(statusNorm)) d.status = "Hired";
+      if (["pending hiring", "pending"].includes(statusNorm))
+        d.status = "Hired";
     }
 
     booking.isEnquiry = false;
@@ -4913,7 +5017,9 @@ exports.makePayment = async (req, res) => {
 
     return res.json({
       success: true,
-      message: finalJustPaidNow ? "Final payment completed. Job marked as ended." : "Payment received.",
+      message: finalJustPaidNow
+        ? "Final payment completed. Job marked as ended."
+        : "Payment received.",
       bookingId: booking._id,
       finalTotal,
       totalPaid: d.paidAmount,
@@ -4994,7 +5100,12 @@ exports.updateManualPayment = async (req, res) => {
     activateInstallmentStage(d, stage);
 
     // ✅ stage due lock
-    const key = stage === "first" ? "firstPayment" : stage === "second" ? "secondPayment" : "finalPayment";
+    const key =
+      stage === "first"
+        ? "firstPayment"
+        : stage === "second"
+          ? "secondPayment"
+          : "finalPayment";
     const due = Number(d[key]?.remaining || 0);
     if (!(due > 0)) {
       return res.status(400).json({
@@ -5045,7 +5156,7 @@ exports.updateManualPayment = async (req, res) => {
 
       const remainingBookingAmount = Math.max(
         0,
-        prevAmountYetToPay - currentPaid
+        prevAmountYetToPay - currentPaid,
       );
       d.amountYetToPay = remainingBookingAmount;
 
@@ -5091,7 +5202,7 @@ exports.updateManualPayment = async (req, res) => {
 
     // ---------- Total ----------
     const totalBookingAmt = Number(
-      d.finalTotal || existingPaid + prevAmountYetToPay || 0
+      d.finalTotal || existingPaid + prevAmountYetToPay || 0,
     );
     if (!(totalBookingAmt > 0)) {
       return res.status(400).json({
@@ -5107,7 +5218,7 @@ exports.updateManualPayment = async (req, res) => {
     const finalReq = Number(d.finalPayment.requestedAmount || 0);
 
     // ✅ Allocate existingPaid into milestone buckets
-    // IMPORTANT: prePayment already exists inside paidAmount, 
+    // IMPORTANT: prePayment already exists inside paidAmount,
     // subtract it to avoid double-counting in amount buckets.
     const prePay = Math.max(0, Number(d.finalPayment?.prePayment || 0));
     let remainingPaid = Math.max(0, existingPaid - prePay);
@@ -5135,11 +5246,11 @@ exports.updateManualPayment = async (req, res) => {
     // ---------- ADDITIONAL AMOUNT (round-off / extra) ----------
     const gateCompleted = isDeepCleaning
       ? firstReq > 0 &&
-      d.firstPayment.status === "paid" &&
-      isStageExactlyPaid(d.firstPayment)
+        d.firstPayment.status === "paid" &&
+        isStageExactlyPaid(d.firstPayment)
       : secondReq > 0 &&
-      d.secondPayment.status === "paid" &&
-      isStageExactlyPaid(d.secondPayment);
+        d.secondPayment.status === "paid" &&
+        isStageExactlyPaid(d.secondPayment);
 
     if (isAdditionalAmount === true && !gateCompleted) {
       return res.status(400).json({
@@ -5170,7 +5281,7 @@ exports.updateManualPayment = async (req, res) => {
       logPayment(
         isDeepCleaning
           ? "deep_cleaning_additional_amount_prePayment"
-          : "additional_amount_prePayment"
+          : "additional_amount_prePayment",
       );
       if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
       await booking.save();
@@ -5199,7 +5310,7 @@ exports.updateManualPayment = async (req, res) => {
       const finalPaidNow = Number(d.finalPayment.amount || 0);
       const pendingFinal = Math.max(
         0,
-        finalReq - (finalPaidNow + Number(d.finalPayment.prePayment || 0))
+        finalReq - (finalPaidNow + Number(d.finalPayment.prePayment || 0)),
       );
 
       const appliedToFinal = Math.min(currentPaid, pendingFinal);
@@ -5251,7 +5362,9 @@ exports.updateManualPayment = async (req, res) => {
 
     // if second installment is fully paid by cash/manual, deactivate payment link
     if (d.paymentLink?.isActive) {
-      const linkStage = String(d.paymentLink.installmentStage || "").toLowerCase();
+      const linkStage = String(
+        d.paymentLink.installmentStage || "",
+      ).toLowerCase();
 
       if (linkStage === "second" && isStageExactlyPaid(d.secondPayment)) {
         d.paymentLink.isActive = false;
@@ -5313,7 +5426,7 @@ exports.updateManualPayment = async (req, res) => {
       booking,
       bookingId,
       finalTotal: Number(
-        d.finalTotal || existingPaid + prevAmountYetToPay || 0
+        d.finalTotal || existingPaid + prevAmountYetToPay || 0,
       ),
     });
 
@@ -5514,7 +5627,7 @@ exports.updateManualPayment = async (req, res) => {
 //     const finalReq = Number(d.finalPayment.requestedAmount || 0);
 
 //     // ✅ Allocate existingPaid into milestone buckets
-//     // IMPORTANT: prePayment already exists inside paidAmount, 
+//     // IMPORTANT: prePayment already exists inside paidAmount,
 //     // subtract it to avoid double-counting in amount buckets.
 //     const prePay = Math.max(0, Number(d.finalPayment?.prePayment || 0));
 //     let remainingPaid = Math.max(0, existingPaid - prePay);
@@ -5832,7 +5945,7 @@ exports.adminToCustomerPayment = async (req, res) => {
     const stage = normalizeStage(
       d.paymentLink?.installmentStage,
       serviceType,
-      d
+      d,
     );
 
     booking.payments.push({
@@ -6275,7 +6388,7 @@ exports.updateUserBooking = async (req, res) => {
     const applyInstallmentUpdate = (
       inst,
       newRequestedAmount,
-      { isFinalStage = false } = {}
+      { isFinalStage = false } = {},
     ) => {
       if (!inst) return;
 
@@ -6361,6 +6474,7 @@ exports.updateUserBooking = async (req, res) => {
         teamMembersRequired: s.teamMembersRequired || 0,
         duration: s.duration || 0,
         packageId: s.packageId,
+        coinDeduction: Number(s.coinDeduction) || 0,
       }));
     }
 
@@ -6402,7 +6516,7 @@ exports.updateUserBooking = async (req, res) => {
       // HP site visit charges
       if (bookingDetails.siteVisitCharges !== undefined && isHousePainting) {
         booking.bookingDetails.siteVisitCharges = n(
-          bookingDetails.siteVisitCharges
+          bookingDetails.siteVisitCharges,
         );
       }
 
@@ -6419,7 +6533,7 @@ exports.updateUserBooking = async (req, res) => {
 
       booking.bookingDetails.amountYetToPay = Math.max(
         0,
-        finalTotalDB - paidAmountDB
+        finalTotalDB - paidAmountDB,
       );
 
       // only recalc installment requestedAmount if finalTotal changed
@@ -6444,7 +6558,10 @@ exports.updateUserBooking = async (req, res) => {
           // 2) Second installment due (first paid, second not paid)
           else if (fpStatus === "paid" && spStatus !== "paid") {
             const firstReqDB = n(fp.requestedAmount);
-            const req = Math.max(0, Math.round(finalTotalDB * 0.8) - firstReqDB);
+            const req = Math.max(
+              0,
+              Math.round(finalTotalDB * 0.8) - firstReqDB,
+            );
             applyInstallmentUpdate(sp, req, { isFinalStage: false });
           }
           // 3) Final installment due (first+second paid, final not paid)
@@ -6503,7 +6620,6 @@ exports.updateUserBooking = async (req, res) => {
       .json({ success: false, message: "Internal server error" });
   }
 };
-
 
 // new 08-01 requestedAmount
 exports.updateEnquiry = async (req, res) => {
@@ -6565,6 +6681,17 @@ exports.updateEnquiry = async (req, res) => {
 
       if (formName) booking.formName = formName;
 
+      // ✅ ADD THIS
+      const { bookingDetails = {} } = data;
+      booking.bookingDetails = booking.bookingDetails || {};
+      if (
+        bookingDetails.siteVisitCharges !== undefined &&
+        bookingDetails.siteVisitCharges !== null
+      ) {
+        booking.bookingDetails.siteVisitCharges = Number(
+          bookingDetails.siteVisitCharges || 0,
+        );
+      }
       await booking.save();
 
       return res.status(200).json({
@@ -6600,6 +6727,7 @@ exports.updateEnquiry = async (req, res) => {
         teamMembersRequired: Number(s.teamMembersRequired || 0),
         duration: s.duration || 0,
         packageId: s.packageId,
+        coinDeduction: Number(s.coinDeduction) || 0,
       }));
     }
 
@@ -6872,47 +7000,43 @@ exports.updateBookingField = async (req, res) => {
     const { bookingId } = req.params;
     const { field, value } = req.body;
 
-    // Validate bookingId
     if (!bookingId) {
       return res.status(400).json({
         success: false,
-        message: "Booking ID is required",
+        message: "bookingId is required",
       });
     }
 
-    // Validate field
-    const allowedFields = ["isRead", "isDismmised"];
+    // ✅ Allowed fields
+    const allowedFields = ["isRead", "isDismmised", "isEnquiry"];
     if (!field || !allowedFields.includes(field)) {
       return res.status(400).json({
         success: false,
-        message: `field is required and must be one of: ${allowedFields.join(
-          ", "
-        )}`,
+        message: `field must be one of: ${allowedFields.join(", ")}`,
       });
     }
 
-    // Validate value is boolean
+    // ✅ All must be boolean
     if (typeof value !== "boolean") {
       return res.status(400).json({
         success: false,
-        message: "value must be a boolean (true or false)",
+        message: "value must be boolean",
       });
     }
 
-    // Prepare update object
     const updateObj = { [field]: value };
 
-    // If dismissing, ensure isRead is also set true
+    // ✅ If dismissing, always mark read too
     if (field === "isDismmised" && value === true) {
       updateObj.isRead = true;
     }
 
-    const BookingModel = mongoose.model("UserBookings");
+    // ✅ If un-dismissing, do nothing extra (keep isRead as is)
 
-    const updatedBooking = await BookingModel.findByIdAndUpdate(
+    const updatedBooking = await UserBooking.findByIdAndUpdate(
       bookingId,
       { $set: updateObj },
-      { new: true, runValidators: true }
+      { new: true, runValidators: true },
     );
 
     if (!updatedBooking) {
@@ -6924,7 +7048,7 @@ exports.updateBookingField = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: `${field} set to ${value}`,
+      message: `Updated ${field}`,
       booking: updatedBooking,
     });
   } catch (error) {
