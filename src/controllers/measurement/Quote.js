@@ -109,6 +109,7 @@ const computeTotals = (
   };
 };
 
+
 exports.createQuote = async (req, res) => {
   try {
     const {
@@ -212,7 +213,7 @@ const norm = (s) => (s || "").trim().toLowerCase().replace(/\s+/g, " ");
 const sum = (arr, pick = (x) => x) =>
   arr.reduce((t, x) => t + Number(pick(x) || 0), 0);
 
-// old- need to be handle carefully*** REEVERT BACK If needed
+// old- need to be handle carefully*** REVERT BACK If needed
 exports.upsertQuoteRoomPricing = async (req, res) => {
   try {
     const { quoteId, roomName } = req.params;

@@ -24,10 +24,16 @@ router.get(
   "/get-bookings-by-customerid/:customerId",
   bookingController.getBookingsByCustomerId
 );
+// ----------near by bookings---------------
 router.get(
   "/get-nearest-booking-by-location-deep-cleaning/:lat/:long",
   bookingController.getBookingForNearByVendorsDeepCleaning
 );
+router.get(
+  "/get-nearest-booking-by-location-house-painting/:lat/:long",
+  bookingController.getBookingForNearByVendorsHousePainting
+);
+// ----------near by bookings---------------
 // .............metrics routes..................
 router.get(
   "/deep-cleaning-vendor-performance-metrics/:vendorId/:lat/:long/:timeframe",
@@ -46,10 +52,7 @@ router.get(
 
 router.get("/overall", bookingController.getOverallPerformance);
 // .............................................
-router.get(
-  "/get-nearest-booking-by-location-house-painting/:lat/:long",
-  bookingController.getBookingForNearByVendorsHousePainting
-);
+
 
 router.post(
   "/response-confirm-job",
@@ -63,6 +66,7 @@ router.get(
 router.post("/start-job", bookingController.startJob);
 router.post("/complete-survey", bookingController.completeSurvey);
 router.post("/update-price/:bookingId", bookingController.requestPriceChange);
+router.get("/customer-payments/money-dashboard/:vendorId", bookingController.getCustomerPaymentsFor$MD);
 router.post(
   "/approve-pricing/:bookingId",
   bookingController.approvePriceChange

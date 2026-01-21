@@ -125,8 +125,6 @@ router.put(
   vendorAuthController.updateTeamMember
 );
 
-
-
 router.post("/login-with-mobile", vendorAuthController.loginWithMobile);
 router.post("/verify-otp", vendorAuthController.verifyOTP);
 router.post("/resend-otp", vendorAuthController.resendOTP);
@@ -160,7 +158,7 @@ router.get(
 );
 
 router.get(
-  "/check/:vendorId/availability-range",
+  "/check-teammember-availability/:vendorId/availability-range",
   vendorAuthController.checkVendorAvailabilityRange
 );
 
@@ -182,7 +180,7 @@ router.post(
 
 router.get(
   "/overall-coin-sold",
- vendorAuthController.getOverallCoinPurchasedTotal
+  vendorAuthController.getOverallCoinPurchasedTotal
 );
 
 router.post("/get-available-vendor", vendorAuthController.getAvailableVendors)

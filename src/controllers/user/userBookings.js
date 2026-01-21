@@ -945,10 +945,10 @@ exports.createBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -974,9 +974,8 @@ exports.createBooking = async (req, res) => {
 
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -1534,10 +1533,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-            professionalId: assignedProfessional.professionalId,
-            name: assignedProfessional.name,
-            phone: assignedProfessional.phone,
-          }
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -1569,9 +1568,8 @@ exports.adminCreateBooking = async (req, res) => {
     // const redirectionUrl = "http://localhost:5173/checkout/payment";
     const pay_type = "auto-pay";
 
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -1832,7 +1830,7 @@ exports.getBookingsByBookingId = async (req, res) => {
     if (!booking) {
       return res.status(404).json({ message: "Booking not found" });
     }
-
+    // console.log("get-bookings-by-bookingid", booking)
     res.status(200).json({ booking });
   } catch (error) {
     console.error("Error fetching booking by bookingId:", error);
@@ -2808,9 +2806,98 @@ exports.getOverallPerformance = async (req, res) => {
   }
 };
 
+exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
+  try {
+    const { lat, long } = req.params;
+    const isLow = String(req.query.isPerformanceLow || "0") === "1";
+    if (isLow) {
+      return res.json({ success: true, bookings: [] });
+    }
+    if (!lat || !long) {
+      return res.status(400).json({ message: "Coordinates required" });
+    }
+
+    const now = new Date();
+
+    const todayStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    )
+      .toISOString()
+      .slice(0, 10);
+
+    const dayAfterTomorrow = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2)
+    );
+    const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().slice(0, 10);
+
+    const nearbyBookings = await UserBooking.find({
+      "address.location": {
+        $near: {
+          $geometry: {
+            type: "Point",
+            coordinates: [parseFloat(long), parseFloat(lat)],
+          },
+          $maxDistance: 10000, // 10 km
+        },
+      },
+      isEnquiry: false,
+      "service.category": "Deep Cleaning",
+      "bookingDetails.status": "Pending",
+      "selectedSlot.slotDate": {
+        $gte: todayStart,
+        $lt: dayAfterTomorrowStr,
+      },
+    }).sort({ createdAt: -1 });
+
+    const nowMoment = moment();
+    const filteredBookings = nearbyBookings.filter((booking) => {
+      const slotDateObj = booking.selectedSlot?.slotDate;
+      const slotTimeStr = booking.selectedSlot?.slotTime;
+      if (!slotDateObj || !slotTimeStr) return false;
+
+      const slotDateMoment = moment(slotDateObj);
+      const slotDateStr = slotDateMoment.format("YYYY-MM-DD");
+      const slotDateTime = moment(
+        `${slotDateStr} ${slotTimeStr}`,
+        "YYYY-MM-DD hh:mm A"
+      );
+
+      // Today: keep only future-times
+      if (slotDateMoment.isSame(nowMoment, "day")) {
+        return slotDateTime.isAfter(nowMoment);
+      }
+      // Tomorrow: keep all
+      if (slotDateMoment.isSame(nowMoment.clone().add(1, "day"), "day")) {
+        return true;
+      }
+      // Should not reach here due to date range, but just in case
+      return false;
+    });
+
+    if (!filteredBookings.length) {
+      return res
+        .status(404)
+        .json({ message: "No bookings found near this location" });
+    }
+
+    res.status(200).json({ bookings: filteredBookings });
+  } catch (error) {
+    console.error("Error finding nearby bookings:", error);
+    res.status(500).json({ message: "Server error" });
+  }
+};
+
 exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
   try {
     const { lat, long } = req.params;
+    const isLow = String(req.query.isPerformanceLow || "0") === "1";
+    if (isLow) {
+      return res.status(200).json({
+        success: true,
+        isPerformanceLow: true,
+        bookings: [],
+      });
+    }
     if (!lat || !long) {
       return res.status(400).json({ message: "Coordinates required" });
     }
@@ -2828,7 +2915,7 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
             type: "Point",
             coordinates: [parseFloat(long), parseFloat(lat)],
           },
-          $maxDistance: 5000, // meters
+          $maxDistance: 10000, // meters
         },
       },
       isEnquiry: false,
@@ -2865,7 +2952,11 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
         .json({ message: "No bookings found near this location" });
     }
 
-    res.status(200).json({ bookings: filteredBookings });
+    res.status(200).json({
+      success: true,
+      isPerformanceLow: false,
+      bookings: filteredBookings,
+    });
   } catch (error) {
     console.error("Error finding nearby bookings:", error);
     res.status(500).json({ message: "Server error" });
@@ -3635,6 +3726,59 @@ exports.cancelJob = async (req, res) => {
   } catch (error) {
     console.error("Error updating booking:", error);
     res.status(500).json({ message: "Server error", error: error.message });
+  }
+};
+
+exports.getCustomerPaymentsFor$MD = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    if (!vendorId) {
+      return res.status(400).json({ success: false, message: "Vendor ID required", payments: [] });
+    }
+
+    // Fetch the nearby bookings based on the assigned professional (vendorId)
+    const nearbyBookings = await UserBooking.find({
+      "assignedProfessional.professionalId": vendorId
+    }).sort({ createdAt: -1 });
+
+    // Extract and format only the payment details for the vendor
+    const paymentDetails = nearbyBookings.flatMap(booking => {
+      // Filter payments related to the vendor
+      return booking.payments.filter(payment => (payment.method && payment.providerRef)
+        && payment.purpose !== "site_visit"
+      ).map(payment => {
+        const paidDate = moment(payment.at).format("DD/MM/YYYY");  // e.g., 21/01/2026
+        const paidTime = moment(payment.at).format("hh:mm:ss A");
+        return {
+          customerName: booking.customer.name,
+          bookingId: booking.bookingDetails.booking_id,
+          leadId: booking._id,
+          paymentDate: `${paidDate} at ${paidTime}`,
+          paidDate, paidTime,
+          paymentType: payment.installment === "first"
+            ? "Booking Payment"
+            : payment.installment === "final"
+              ? "Final Payment"
+              : "Partial Payment",
+          amount: payment.amount,
+        };
+      });
+    });
+
+    // If no payments were found, return an empty array
+    if (!paymentDetails.length) {
+      return res.status(200).json({ success: true, payments: [] });
+    }
+
+    // Return the payment details only
+    return res.status(200).json({
+      success: true,
+      payments: paymentDetails,
+    });
+  } catch (error) {
+    console.error("Error finding payments for the vendor:", error);
+    return res.status(500).json({ success: false, message: "Server error", payments: [] });
   }
 };
 
@@ -4574,9 +4718,8 @@ exports.requestSecondPayment = async (req, res) => {
     // ......................................
     // 🔗 Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
     d.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
@@ -4729,9 +4872,8 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
 
     // ✅ Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${
-      booking._id
-    }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${booking._id
+      }/${Date.now()}/${pay_type}`;
 
     details.paymentLink = {
       url: paymentLinkUrl,
@@ -5242,11 +5384,11 @@ exports.updateManualPayment = async (req, res) => {
     // ---------- ADDITIONAL AMOUNT (round-off / extra) ----------
     const gateCompleted = isDeepCleaning
       ? firstReq > 0 &&
-        d.firstPayment.status === "paid" &&
-        isStageExactlyPaid(d.firstPayment)
+      d.firstPayment.status === "paid" &&
+      isStageExactlyPaid(d.firstPayment)
       : secondReq > 0 &&
-        d.secondPayment.status === "paid" &&
-        isStageExactlyPaid(d.secondPayment);
+      d.secondPayment.status === "paid" &&
+      isStageExactlyPaid(d.secondPayment);
 
     if (isAdditionalAmount === true && !gateCompleted) {
       return res.status(400).json({
