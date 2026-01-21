@@ -2948,12 +2948,10 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
         .status(400)
         .json({ success: false, message: "bookingId is required" });
     if (!vendorId)
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "vendorId (professionalId) is required",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "vendorId (professionalId) is required",
+      });
 
     const n = (v) => {
       const x = Number(v);
@@ -4799,12 +4797,10 @@ exports.makePayment = async (req, res) => {
 
     const amount = Number(paidAmount);
     if (!(amount > 0)) {
-      return res
-        .status(400)
-        .json({
-          success: false,
-          message: "Paid amount must be greater than zero",
-        });
+      return res.status(400).json({
+        success: false,
+        message: "Paid amount must be greater than zero",
+      });
     }
 
     const booking = await UserBooking.findById(bookingId);
@@ -5903,7 +5899,7 @@ exports.adminToCustomerPayment = async (req, res) => {
     if (!d.firstPayment) d.firstPayment = {};
 
     if (serviceType === "house_painting") {
-      d.firstPayment = {};
+      d.firstPayment = {}; // For house painting, no installments, clear first payment.
     } else {
       d.firstPayment.status = "paid";
       d.firstPayment.amount = amount;
@@ -5914,13 +5910,7 @@ exports.adminToCustomerPayment = async (req, res) => {
     // ======================================================
     // 🟢 2. UPDATE TOTALS
     // ======================================================
-    // const finalTotal = d.finalTotal || d.originalTotalAmount || 0;
-
-    // Update paid amount
     d.paidAmount = (d.paidAmount || 0) + amount;
-
-    // Remaining amount
-    // d.amountYetToPay = finalTotal - d.paidAmount;
 
     // ======================================================
     // 🟢 3. DISABLE PAYMENT LINKS
@@ -5936,26 +5926,30 @@ exports.adminToCustomerPayment = async (req, res) => {
     // 🟢 5. PUSH PAYMENT ENTRY INTO payments[] HISTORY
     // ======================================================
     if (!booking.payments) booking.payments = [];
-    // ======================================================
-    // 🟢 6. UPDATE STATUS
-    // ======================================================
-    if (d.paymentStatus) d.paymentStatus = "Partial Payment";
-    if (d.paymentMethod) d.paymentMethod = "UPI";
 
-    const stage = normalizeStage(
-      d.paymentLink?.installmentStage,
-      serviceType,
-      d,
-    );
-
-    booking.payments.push({
+    const paymentEntry = {
       at: new Date(),
       method: paymentMethod,
       amount,
-      providerRef: providerRef || undefined,
-      installment: stage || undefined,
-      purpose: "site_visit" || undefined,
-    });
+      providerRef: generateProviderRef() || undefined,
+    };
+
+    // 🟢 House Painting → purpose only
+    if (serviceType === "house_painting") {
+      paymentEntry.purpose = "site_visit"; // For house painting, add 'site_visit' purpose.
+    }
+
+    // 🟢 Deep Cleaning (or others) → installment only
+    if (serviceType === "deep_cleaning") {
+      const stage = normalizeStage(
+        d.paymentLink?.installmentStage,
+        serviceType,
+        d,
+      );
+      paymentEntry.installment = stage || undefined; // For deep cleaning, add the installment stage.
+    }
+
+    booking.payments.push(paymentEntry);
 
     await booking.save();
 
@@ -5975,6 +5969,7 @@ exports.adminToCustomerPayment = async (req, res) => {
     });
   }
 };
+
 
 // Update address and reset selected slots
 exports.updateAddressAndResetSlots = async (req, res) => {

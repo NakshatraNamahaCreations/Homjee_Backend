@@ -214,7 +214,7 @@
 // module.exports = { calculateAvailableSlots };
 
 // old working code
-const RADIUS_KM = 5;
+const RADIUS_KM = 10; // 10 km radius
 const TRAVEL_MIN = 30;
 
 const DAY_START = 8 * 60; // 08:00 AM
