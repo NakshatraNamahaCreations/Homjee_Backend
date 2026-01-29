@@ -733,6 +733,73 @@ exports.checkVendorAvailability = async (req, res) => {
   }
 };
 
+// exports.checkVendorAvailabilityRange = async (req, res) => {
+//   try {
+//     const { vendorId } = req.params;
+//     const { startDate, endDate, daysRequired } = req.query;
+
+//     if (!startDate || !endDate || !daysRequired) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "startDate, endDate and daysRequired are required",
+//       });
+//     }
+
+//     const vendor = await vendorAuthSchema.findById(vendorId).lean();
+//     if (!vendor) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Vendor not found" });
+//     }
+
+//     const results = {};
+//     const requiredMembers = 2;
+//     const capacity = vendor.vendor.capacity;
+
+//     let current = moment(startDate);
+//     const last = moment(endDate);
+
+//     while (current.isSameOrBefore(last)) {
+//       const projectDays = [];
+//       for (let i = 0; i < Number(daysRequired); i++) {
+//         projectDays.push(current.clone().add(i, "days").format("YYYY-MM-DD"));
+//       }
+
+//       const availableMembers = vendor.team.filter((member) => {
+//         return !member.markedLeaves?.some((leaveDate) =>
+//           projectDays.includes(leaveDate),
+//         );
+//       });
+
+//       const isAvailable = availableMembers.length >= requiredMembers;
+
+//       results[current.format("YYYY-MM-DD")] = {
+//         canStart: isAvailable,
+//         availableMembers: availableMembers.map((m) => ({
+//           _id: m._id,
+//           name: m.name,
+//           markedLeaves: m.markedLeaves || [],
+//         })),
+//       };
+
+//       current = current.add(1, "day");
+//     }
+
+//     return res.json({
+//       success: true,
+//       vendorId,
+//       daysRequired: Number(daysRequired),
+//       capacity,
+//       availability: results, // keyed by date
+//     });
+//   } catch (err) {
+//     console.error("Error checking availability:", err);
+//     res
+//       .status(500)
+//       .json({ success: false, message: "Server error", error: err.message });
+//   }
+// };
+
 exports.checkVendorAvailabilityRange = async (req, res) => {
   try {
     const { vendorId } = req.params;
@@ -764,11 +831,49 @@ exports.checkVendorAvailabilityRange = async (req, res) => {
       for (let i = 0; i < Number(daysRequired); i++) {
         projectDays.push(current.clone().add(i, "days").format("YYYY-MM-DD"));
       }
+      // find old bookings that overlap these project days
+      const existingBookings = await userBooking
+        .find({
+          "assignedProfessional.professionalId": vendorId,
+          "assignedProfessional.hiring.status": "active",
+          "assignedProfessional.hiring.projectDate": { $in: projectDays },
+        })
+        .lean();
 
+      const busyMemberIds = new Set();
+      existingBookings.forEach((booking) => {
+        const hiring = booking.assignedProfessional?.hiring;
+        if (!hiring) return;
+
+        const projectDates = hiring.projectDate || [];
+        const overlaps = projectDates.some((d) => projectDays.includes(d));
+        if (!overlaps) return;
+
+        (hiring.teamMember || []).forEach((tm) => {
+          busyMemberIds.add(String(tm.memberId));
+        });
+      });
+
+      // console.log("Checking availability for projectDays:", projectDays);
+
+      // console.log("Existing bookings count:", existingBookings.length);
+      // existingBookings.forEach(b => {
+      //   console.log("Booking projectDate:", b.assignedProfessional?.hiring?.projectDate);
+      //   console.log("Booking teamMember:", b.assignedProfessional?.hiring?.teamMember);
+      // });
+
+      // console.log("busyMemberIds:", Array.from(busyMemberIds));
       const availableMembers = vendor.team.filter((member) => {
-        return !member.markedLeaves?.some((leaveDate) =>
+        const memberId = String(member._id);
+
+        const hasLeaveOnProjectDays = member.markedLeaves?.some((leaveDate) =>
           projectDays.includes(leaveDate),
         );
+        if (hasLeaveOnProjectDays) return false;
+
+        if (busyMemberIds.has(memberId)) return false;
+
+        return true;
       });
 
       const isAvailable = availableMembers.length >= requiredMembers;

@@ -263,7 +263,12 @@ const selectedTeam = new mongoose.Schema(
   },
   { _id: false }
 );
-
+const backupSchema = new mongoose.Schema(
+  {
+    bookingDetails: mongoose.Schema.Types.Mixed,
+    selectedSlot: mongoose.Schema.Types.Mixed
+  }, { _id: false }
+);
 const assignedProfessionalSchema = new mongoose.Schema({
   professionalId: String,
   name: String,
@@ -275,8 +280,6 @@ const assignedProfessionalSchema = new mongoose.Schema({
   startedTime: String,
   endedDate: Date,
   endedTime: String,
-  completedDate: Date,
-  completedTime: String,
   completedDate: Date,
   completedTime: String,
   hiring: {
@@ -292,6 +295,8 @@ const assignedProfessionalSchema = new mongoose.Schema({
     cancelledAt: Date,
     cancelReason: String, // NEW ("auto-unpaid" | "admin-cancel" | "vendor-cancel")
     autoCancelAt: Date,
+    backup: backupSchema
+
   },
 });
 const selectedSlot = new mongoose.Schema({

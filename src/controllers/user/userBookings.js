@@ -1,6 +1,7 @@
 const UserBooking = require("../../models/user/userBookings");
 const Quote = require("../../models/measurement/Quote");
 const moment = require("moment");
+const momentTz = require("moment-timezone");
 const crypto = require("crypto");
 const bcrypt = require("bcrypt");
 const dayjs = require("dayjs");
@@ -135,9 +136,9 @@ function mapStatusToInvite(status, cancelledByFromClient) {
   }
 }
 
-function buildAutoCancelAtUTC(yyyyMmDd) {
+function buildAutoCancelAtUTC_1030IST(yyyyMmDd) {
   const [Y, M, D] = yyyyMmDd.split("-").map(Number);
-  return new Date(Date.UTC(Y, M - 1, D, 2, 0, 0)); // 07:30 IST == 02:00 UTC
+  return new Date(Date.UTC(Y, M - 1, D, 5, 0, 0)); // 10:30 IST == 05:00 UTC
 }
 
 function computeFinalTotal(details) {
@@ -3632,6 +3633,17 @@ exports.requestPriceChange = async (req, res) => {
   booking.bookingDetails.priceChanges.push(newChange);
   await booking.save();
 
+  const newNotification = {
+    bookingId: booking._id,
+    notificationType: "PRICE_CHANGES_REQUEST",
+    thumbnailTitle: "Scope Changes Requested",
+    notifyTo: "admin",
+    message: `Scope change requested with ₹${adjustmentAmount}`,
+    // metadata: { user_id, order_status },
+    status: "unread",
+    created_at: new Date(),
+  };
+  await notificationSchema.create(newNotification);
   res.json({
     success: true,
     message: "Price change requested",
@@ -4303,215 +4315,356 @@ exports.markPendingHiring = async (req, res) => {
   try {
     const { bookingId, startDate, teamMembers, noOfDays, quotationId } =
       req.body;
+
+    if (!mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res.status(400).json({ success: false, message: "Invalid bookingId" });
+    }
+    if (!mongoose.Types.ObjectId.isValid(quotationId)) {
+      return res.status(400).json({ success: false, message: "Invalid quotationId" });
+    }
+
     const quotationObjectId = new mongoose.Types.ObjectId(quotationId);
-    // Find booking
+
     const booking = await UserBooking.findById(bookingId);
     if (!booking) {
-      // console.log("Booking not found");
-      return res
-        .status(404)
-        .json({ success: false, message: "Booking not found" });
+      return res.status(404).json({ success: false, message: "Booking not found" });
     }
 
-    // Update bookingDetails status
-    booking.bookingDetails.status = "Pending Hiring";
-    booking.bookingDetails.startProject = true;
-
-    const quoteDoc = await Quote.findById(quotationId).lean();
+    const quoteDoc = await Quote.findById(quotationObjectId).lean();
     if (!quoteDoc) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Quotation not found" });
+      return res.status(400).json({ success: false, message: "Quotation not found" });
     }
 
-    console.log("Attempting to lock quotation:", quotationId);
+    const backup = {
+      bookingDetails: JSON.parse(JSON.stringify(booking.bookingDetails || {})),
+      selectedSlot: JSON.parse(JSON.stringify(booking.selectedSlot || {})),
+      // optional: if you want to restore older hiring too
+      // prevHiring: JSON.parse(
+      //   JSON.stringify(booking?.assignedProfessional?.hiring || null)
+      // ),
+    };
 
-    // ✅ Calculate TOTAL AMOUNT from quote (or fallback to service total)
-    const totalAmount = booking.bookingDetails.bookingAmount;
+    // Lock finalized quote
+    try {
+      await Quote.updateOne(
+        { _id: quotationObjectId, status: "finalized" },
+        { $set: { locked: true } }
+      );
+    } catch (e) {
+      // non-blocking
+      console.error("Quote lock failed:", e);
+    }
 
+    const d = booking.bookingDetails;
+
+    // Decide finalTotal
+    const totalAmount = Number(d.bookingAmount || 0);
     if (!totalAmount || totalAmount <= 0) {
       return res.status(400).json({
         success: false,
         message: "Booking amount not set. Finalize quote first.",
       });
     }
-    console.log("Finalized total amount:", totalAmount);
-    booking.bookingDetails.currentTotalAmount = totalAmount;
 
-    const d = booking.bookingDetails;
-
-    // If we already have an approved total, keep it; else adopt the booking/quote amount
-    const approvedTotal = Number(
-      d.finalTotal ?? d.currentTotalAmount ?? d.bookingAmount ?? 0,
-    );
-
-    d.finalTotal = approvedTotal > 0 ? approvedTotal : Number(totalAmount || 0);
-
-    // Keep mirror in sync
+    const approvedTotal = Number(d.finalTotal ?? d.currentTotalAmount ?? d.bookingAmount ?? 0);
+    d.finalTotal = approvedTotal > 0 ? approvedTotal : totalAmount;
     d.currentTotalAmount = d.finalTotal;
-    // booking.service[0].price = finalTotal;  added by sonali
+
+    // Payment init
+    const firstInstallment = Math.round(d.finalTotal * 0.4);
+
     d.paymentStatus = "Unpaid";
     d.paidAmount = 0;
     d.amountYetToPay = d.finalTotal;
-    // booking.bookingDetails.amountYetToPay =  firstInstallment; // old line check with below
 
-    // ✅ Calculate 40% for first installment...................
-    const firstInstallment = Math.round(d.finalTotal * 0.4);
-    d.firstPayment.amount = 0; //firstInstallment || Math.round(finalTotal * 0.4);
     d.firstPayment.status = "pending";
-    // presever installment amt
-    d.firstPayment.requestedAmount =
-      firstInstallment || Math.round(finalTotal * 0.4);
+    d.firstPayment.amount = 0;
+    d.firstPayment.method = "None";
+    d.firstPayment.requestedAmount = firstInstallment;
     d.firstPayment.remaining = firstInstallment;
-    // ..........................
+    d.firstPayment.prePayment = 0;
 
-    const updatedQuote = await Quote.updateOne(
-      { _id: quotationObjectId, status: "finalized" }, // Make sure you're selecting the finalized quote
-      { $set: { locked: true } }, // Lock the quotation
+    // Build project dates (YYYY-MM-DD)
+    const projectDate = Array.from({ length: Number(noOfDays) }, (_, i) =>
+      moment(startDate).add(i, "days").format("YYYY-MM-DD")
     );
 
-    if (!mongoose.Types.ObjectId.isValid(quotationId)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid quotation ID" });
-    }
+    const firstDay = projectDate[0];
 
-    // console.log("Updated quotation:", updatedQuote);
+    // Business rule start time fixed to 10:30 AM
+    booking.selectedSlot = booking.selectedSlot || {};
+    booking.selectedSlot.slotDate = firstDay;
+    booking.selectedSlot.slotTime = "10:30 AM";
 
-    if (updatedQuote.nModified === 0) {
-      console.log("Failed to lock the quotation, no rows modified.");
-    } else {
-      console.log("Quotation locked successfully.");
-    }
+    // Store projectStartDate as a Date (UTC instant representing 10:30 IST)
+    const autoCancelAt = buildAutoCancelAtUTC_1030IST(firstDay);
+    d.projectStartDate = autoCancelAt; // same instant
 
-    // 1. Build project dates (as before)
-    const projectDate = Array.from({ length: noOfDays }, (_, i) =>
-      moment(startDate).add(i, "days").format("YYYY-MM-DD"),
-    );
+    // Booking status
+    d.status = "Pending Hiring";
+    d.startProject = true;
+    d.isJobStarted = false;
 
-    // 2. Create a proper Date object for "first project day at 10:30 AM"
-    const projectStartDateTime = moment(projectDate[0], "YYYY-MM-DD")
-      .set({ hour: 10, minute: 30, second: 0, millisecond: 0 })
-      .toDate();
+    // Payment link
+    const pay_type = "auto-pay";
+    const paymentLinkUrl = `${redirectionUrl}${bookingId}/${Date.now()}/${pay_type}`;
+    d.paymentLink = {
+      url: paymentLinkUrl,
+      isActive: true,
+      providerRef: generateProviderRef(),
+      installmentStage: "first",
+    };
 
-    // 3. Update selectedSlot to reflect the project start (not booking time)
-    booking.selectedSlot.slotDate = projectDate[0]; // e.g., "2025-09-25"
-    booking.selectedSlot.slotTime = "10:30 AM"; // Fixed per client requirement
-
-    // 4. Store the full datetime in bookingDetails for UI display (if needed)
-    booking.bookingDetails.projectStartDate = projectStartDateTime; // This should be a Date
-
-    // 5. Auto-cancel logic (unchanged)
-    const firstDay = projectDate[0]; // no need to sort — it's already in order
-    const autoCancelAt = buildAutoCancelAtUTC(firstDay);
-    booking.assignedProfessional.hiring.autoCancelAt = autoCancelAt;
-
-    // 4) Auto-cancel time = 07:30 IST of first project day (store UTC Date)
-    // "firstDay" is 'YYYY-MM-DD' in IST
-    // const autoCancelAt = moment(`${firstDay} 07:30`, 'YYYY-MM-DD HH:mm')
-    //   .subtract(5, 'hours')
-    //   .subtract(30, 'minutes')
-    //   .toDate(); // this Date represents the same instant (02:00 UTC)
-
-    // 5) Hiring block
+    // ✅ ONE final assignment only
+    booking.assignedProfessional = booking.assignedProfessional || {};
     booking.assignedProfessional.hiring = {
       markedDate: new Date(),
       markedTime: moment().format("LT"),
-      projectDate: Array.from({ length: noOfDays }, (_, i) =>
-        moment(startDate).add(i, "days").format("YYYY-MM-DD"),
-      ),
-      noOfDay: noOfDays,
-      teamMember: teamMembers.map((m) => ({
+      projectDate,
+      noOfDay: Number(noOfDays),
+      teamMember: (teamMembers || []).map((m) => ({
         memberId: m._id,
         memberName: m.name,
       })),
       quotationId: quotationObjectId,
       status: "active",
-      autoCancelAt,
+      autoCancelAt, backup,
     };
 
-    if (!booking?.assignedProfessional?.hiring?.quotationId) {
-      console.warn("[unlockQuotes] No quotationId found, skipping unlock");
-      return;
-    }
-    // Carry over leadId if missing
-    if (!booking.leadId && quoteDoc.leadId) {
-      booking.leadId = quoteDoc.leadId;
-    }
-
-    console.log("firstInstallment", firstInstallment);
-
-    // ✅ UPDATE PAYMENT FIELDS FOR 40% INSTALLMENT
-    booking.bookingDetails.status = "Pending Hiring";
-    booking.bookingDetails.startProject = true;
-
-    booking.bookingDetails.paymentStatus = "Unpaid";
-    booking.bookingDetails.paidAmount = 0; // nothing paid yet
-    // booking.bookingDetails.amountYetToPay = firstInstallment; // 40% due now
-    booking.bookingDetails.amountYetToPay = d.finalTotal; // 40% due now
-
-    // 6) Payment link (change to razor pay)
-    const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${bookingId}/${Date.now()}/${pay_type}`;
-    booking.bookingDetails.paymentLink = {
-      url: paymentLinkUrl,
-      isActive: true,
-      providerRef: generateProviderRef(), // fill if you have gateway id
-      installmentStage: "first",
-    };
-
-    // console.log("paymentLinkUrl", paymentLinkUrl);
-
-    if (process.env.NODE_ENV !== "production") {
-      booking.assignedProfessional.hiring.autoCancelAt = new Date(
-        Date.now() + 2 * 60 * 1000,
-      ); // +2 mins
-    }
-    const USE_REAL_AUTO_CANCEL = true; // 👈 set to true for real-time test
-
-    if (!USE_REAL_AUTO_CANCEL && process.env.NODE_ENV !== "production") {
-      booking.assignedProfessional.hiring.autoCancelAt = new Date(
-        Date.now() + 2 * 60 * 1000,
-      );
-      console.log(
-        "DEV: autoCancelAt set to",
-        booking.assignedProfessional.hiring.autoCancelAt.toISOString(),
-      );
-    } else {
-      // Use real auto-cancel time
-      const firstDay = projectDate[0]; // e.g., "2025-09-25"
-      const autoCancelAt = buildAutoCancelAtUTC(firstDay);
-      booking.assignedProfessional.hiring.autoCancelAt = autoCancelAt;
-    }
+    // Carry leadId if missing
+    if (!booking.leadId && quoteDoc.leadId) booking.leadId = quoteDoc.leadId;
 
     await booking.save();
-    // await unlockRelatedQuotesByHiring(booking, "auto-unpaid");
 
-    // await booking.save();
-    // await Quote.updateMany(
-    //   { _id: { $in: booking.quotationId }, locked: true },
-    //   { $set: { locked: false } }
-    // );
-
-    // TODO: Send SMS/Email/WhatsApp to customer with paymentLink
-
-    res.json({
+    return res.json({
       success: true,
-      message:
-        "Booking updated to Pending Hiring. Payment link sent to customer.",
+      message: "Booking updated to Pending Hiring. Payment link sent to customer.",
       bookingId,
       paymentLink: paymentLinkUrl,
       amountDue: firstInstallment,
-      totalAmount: totalAmount,
-      firstPayment: d.firstPayment.status,
+      totalAmount: d.finalTotal,
     });
   } catch (err) {
     console.error("Error marking pending hiring:", err);
-    res
+    return res
       .status(500)
       .json({ success: false, message: "Server error", error: err.message });
   }
 };
+// exports.markPendingHiring = async (req, res) => {
+//   try {
+//     const { bookingId, startDate, teamMembers, noOfDays, quotationId } =
+//       req.body;
+//     const quotationObjectId = new mongoose.Types.ObjectId(quotationId);
+//     // Find booking
+//     const booking = await UserBooking.findById(bookingId);
+//     if (!booking) {
+//       // console.log("Booking not found");
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Booking not found" });
+//     }
+
+//     // Update bookingDetails status
+//     booking.bookingDetails.status = "Pending Hiring";
+//     booking.bookingDetails.startProject = true;
+
+//     const quoteDoc = await Quote.findById(quotationId).lean();
+//     if (!quoteDoc) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Quotation not found" });
+//     }
+
+//     console.log("Attempting to lock quotation:", quotationId);
+
+//     // ✅ Calculate TOTAL AMOUNT from quote (or fallback to service total)
+//     const totalAmount = booking.bookingDetails.bookingAmount;
+
+//     if (!totalAmount || totalAmount <= 0) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Booking amount not set. Finalize quote first.",
+//       });
+//     }
+//     console.log("Finalized total amount:", totalAmount);
+//     booking.bookingDetails.currentTotalAmount = totalAmount;
+
+//     const d = booking.bookingDetails;
+
+//     // If we already have an approved total, keep it; else adopt the booking/quote amount
+//     const approvedTotal = Number(
+//       d.finalTotal ?? d.currentTotalAmount ?? d.bookingAmount ?? 0,
+//     );
+
+//     d.finalTotal = approvedTotal > 0 ? approvedTotal : Number(totalAmount || 0);
+
+//     // Keep mirror in sync
+//     d.currentTotalAmount = d.finalTotal;
+//     // booking.service[0].price = finalTotal;  added by sonali
+//     d.paymentStatus = "Unpaid";
+//     d.paidAmount = 0;
+//     d.amountYetToPay = d.finalTotal;
+//     // booking.bookingDetails.amountYetToPay =  firstInstallment; // old line check with below
+
+//     // ✅ Calculate 40% for first installment...................
+//     const firstInstallment = Math.round(d.finalTotal * 0.4);
+//     d.firstPayment.amount = 0; //firstInstallment || Math.round(finalTotal * 0.4);
+//     d.firstPayment.status = "pending";
+//     // presever installment amt
+//     d.firstPayment.requestedAmount =
+//       firstInstallment || Math.round(finalTotal * 0.4);
+//     d.firstPayment.remaining = firstInstallment;
+//     // ..........................
+
+//     const updatedQuote = await Quote.updateOne(
+//       { _id: quotationObjectId, status: "finalized" }, // Make sure you're selecting the finalized quote
+//       { $set: { locked: true } }, // Lock the quotation
+//     );
+
+//     if (!mongoose.Types.ObjectId.isValid(quotationId)) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Invalid quotation ID" });
+//     }
+
+//     // console.log("Updated quotation:", updatedQuote);
+
+//     if (updatedQuote.nModified === 0) {
+//       console.log("Failed to lock the quotation, no rows modified.");
+//     } else {
+//       console.log("Quotation locked successfully.");
+//     }
+
+//     // 1. Build project dates (as before)
+//     const projectDate = Array.from({ length: noOfDays }, (_, i) =>
+//       moment(startDate).add(i, "days").format("YYYY-MM-DD"),
+//     );
+
+//     // 2. Create a proper Date object for "first project day at 10:30 AM"
+//     const projectStartDateTime = moment(projectDate[0], "YYYY-MM-DD")
+//       .set({ hour: 10, minute: 30, second: 0, millisecond: 0 })
+//       .toDate();
+
+//     // 3. Update selectedSlot to reflect the project start (not booking time)
+//     booking.selectedSlot.slotDate = projectDate[0]; // e.g., "2025-09-25"
+//     booking.selectedSlot.slotTime || "10:30 AM"; // Fixed per client requirement
+
+//     // 4. Store the full datetime in bookingDetails for UI display (if needed)
+//     booking.bookingDetails.projectStartDate = projectStartDateTime; // This should be a Date
+
+//     // 5. Auto-cancel logic (unchanged)
+//     const firstDay = projectDate[0]; // no need to sort — it's already in order
+//     const slotTime = booking.selectedSlot.slotTime || "10:30 AM";
+//     const autoCancelAt = buildAutoCancelAtUTC(firstDay,slotTime);
+//     booking.assignedProfessional.hiring.autoCancelAt = autoCancelAt;
+
+//     // 4) Auto-cancel time = 07:30 IST of first project day (store UTC Date)
+//     // "firstDay" is 'YYYY-MM-DD' in IST
+//     // const autoCancelAt = moment(`${firstDay} 07:30`, 'YYYY-MM-DD HH:mm')
+//     //   .subtract(5, 'hours')
+//     //   .subtract(30, 'minutes')
+//     //   .toDate(); // this Date represents the same instant (02:00 UTC)
+
+//     // 5) Hiring block
+//     booking.assignedProfessional.hiring = {
+//       markedDate: new Date(),
+//       markedTime: moment().format("LT"),
+//       projectDate: Array.from({ length: noOfDays }, (_, i) =>
+//         moment(startDate).add(i, "days").format("YYYY-MM-DD"),
+//       ),
+//       noOfDay: noOfDays,
+//       teamMember: teamMembers.map((m) => ({
+//         memberId: m._id,
+//         memberName: m.name,
+//       })),
+//       quotationId: quotationObjectId,
+//       status: "active",
+//       autoCancelAt,
+//     };
+
+//     if (!booking?.assignedProfessional?.hiring?.quotationId) {
+//       console.warn("[unlockQuotes] No quotationId found, skipping unlock");
+//       return;
+//     }
+//     // Carry over leadId if missing
+//     if (!booking.leadId && quoteDoc.leadId) {
+//       booking.leadId = quoteDoc.leadId;
+//     }
+
+//     console.log("firstInstallment", firstInstallment);
+
+//     // ✅ UPDATE PAYMENT FIELDS FOR 40% INSTALLMENT
+//     booking.bookingDetails.status = "Pending Hiring";
+//     booking.bookingDetails.startProject = true;
+
+//     booking.bookingDetails.paymentStatus = "Unpaid";
+//     booking.bookingDetails.paidAmount = 0; // nothing paid yet
+//     // booking.bookingDetails.amountYetToPay = firstInstallment; // 40% due now
+//     booking.bookingDetails.amountYetToPay = d.finalTotal; // 40% due now
+
+//     // 6) Payment link (change to razor pay)
+//     const pay_type = "auto-pay";
+//     const paymentLinkUrl = `${redirectionUrl}${bookingId}/${Date.now()}/${pay_type}`;
+//     booking.bookingDetails.paymentLink = {
+//       url: paymentLinkUrl,
+//       isActive: true,
+//       providerRef: generateProviderRef(), // fill if you have gateway id
+//       installmentStage: "first",
+//     };
+
+//     // console.log("paymentLinkUrl", paymentLinkUrl);
+
+//     if (process.env.NODE_ENV !== "production") {
+//       booking.assignedProfessional.hiring.autoCancelAt = new Date(
+//         Date.now() + 2 * 60 * 1000,
+//       ); // +2 mins
+//     }
+//     const USE_REAL_AUTO_CANCEL = true; // 👈 set to true for real-time test
+
+//     if (!USE_REAL_AUTO_CANCEL && process.env.NODE_ENV !== "production") {
+//       booking.assignedProfessional.hiring.autoCancelAt = new Date(
+//         Date.now() + 2 * 60 * 1000,
+//       );
+//       console.log(
+//         "DEV: autoCancelAt set to",
+//         booking.assignedProfessional.hiring.autoCancelAt.toISOString(),
+//       );
+//     } else {
+//       // Use real auto-cancel time
+//       const firstDay = projectDate[0]; // e.g., "2025-09-25"
+//       const autoCancelAt = buildAutoCancelAtUTC(firstDay);
+//       booking.assignedProfessional.hiring.autoCancelAt = autoCancelAt;
+//     }
+
+//     await booking.save();
+//     // await unlockRelatedQuotesByHiring(booking, "auto-unpaid");
+
+//     // await booking.save();
+//     // await Quote.updateMany(
+//     //   { _id: { $in: booking.quotationId }, locked: true },
+//     //   { $set: { locked: false } }
+//     // );
+
+//     // TODO: Send SMS/Email/WhatsApp to customer with paymentLink
+
+//     res.json({
+//       success: true,
+//       message:
+//         "Booking updated to Pending Hiring. Payment link sent to customer.",
+//       bookingId,
+//       paymentLink: paymentLinkUrl,
+//       amountDue: firstInstallment,
+//       totalAmount: totalAmount,
+//       firstPayment: d.firstPayment.status,
+//     });
+//   } catch (err) {
+//     console.error("Error marking pending hiring:", err);
+//     res
+//       .status(500)
+//       .json({ success: false, message: "Server error", error: err.message });
+//   }
+// };
 
 exports.requestStartProjectOtp = async (req, res) => {
   try {

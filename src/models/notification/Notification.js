@@ -60,4 +60,5 @@ module.exports = mongoose.model("InAppNotification", notificationSchema);
 // NEW_LEAD_CREATED - from website
 // CUSTOMER_CANCEL_REQUESTED - from website
 //  VENDOR_CANCEL_REQUESTED - from VA
-// CANCEL_REQUEST_ACCEPTED 
+// CANCEL_REQUEST_ACCEPTED
+// PRICE_CHANGES_REQUEST - from VA
