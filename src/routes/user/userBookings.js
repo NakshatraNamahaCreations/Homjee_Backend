@@ -66,7 +66,7 @@ router.get(
 router.post("/start-job", bookingController.startJob);
 router.post("/complete-survey", bookingController.completeSurvey);
 router.post("/update-price/:bookingId", bookingController.requestPriceChange);
-router.get("/customer-payments/money-dashboard/:vendorId", bookingController.getCustomerPaymentsFor$MD);
+router.get("/customer-payments/money-dashboard/:vendorId", bookingController.getCustomerPaymentsForMD);
 router.post(
   "/approve-pricing/:bookingId",
   bookingController.approvePriceChange

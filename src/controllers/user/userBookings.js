@@ -840,7 +840,7 @@ exports.createBooking = async (req, res) => {
         paidAt: paidAmount > 0 ? new Date() : null,
         method: "UPI",
         requestedAmount: paidAmount || bookingAmount,
-        remaining: paidAmount || bookingAmount,
+        remaining: 0,//paidAmount || bookingAmount,
         prePayment: 0,
       };
       finalPayment = {
@@ -3741,56 +3741,82 @@ exports.cancelJob = async (req, res) => {
   }
 };
 
-exports.getCustomerPaymentsFor$MD = async (req, res) => {
+exports.getCustomerPaymentsForMD = async (req, res) => {
   try {
     const { vendorId } = req.params;
 
     if (!vendorId) {
-      return res.status(400).json({ success: false, message: "Vendor ID required", payments: [] });
+      return res.status(400).json({
+        success: false,
+        message: "Vendor ID required",
+        payments: [],
+      });
     }
 
-    // Fetch the nearby bookings based on the assigned professional (vendorId)
-    const nearbyBookings = await UserBooking.find({
-      "assignedProfessional.professionalId": vendorId
-    }).sort({ createdAt: -1 });
-
-    // Extract and format only the payment details for the vendor
-    const paymentDetails = nearbyBookings.flatMap(booking => {
-      // Filter payments related to the vendor
-      return booking.payments.filter(payment => (payment.method && payment.providerRef)
-        && payment.purpose !== "site_visit"
-      ).map(payment => {
-        const paidDate = moment(payment.at).format("DD/MM/YYYY");  // e.g., 21/01/2026
-        const paidTime = moment(payment.at).format("hh:mm:ss A");
-        return {
-          customerName: booking.customer.name,
-          bookingId: booking.bookingDetails.booking_id,
-          leadId: booking._id,
-          paymentDate: `${paidDate} at ${paidTime}`,
-          paidDate, paidTime,
-          paymentType: payment.installment === "first"
-            ? "Booking Payment"
-            : payment.installment === "final"
-              ? "Final Payment"
-              : "Partial Payment",
-          amount: payment.amount,
-        };
-      });
+    const bookings = await UserBooking.find({
+      "assignedProfessional.professionalId": vendorId,
     });
 
-    // If no payments were found, return an empty array
-    if (!paymentDetails.length) {
-      return res.status(200).json({ success: true, payments: [] });
-    }
+    const paymentDetails = bookings.flatMap((booking) => {
+      return (booking.payments || [])
+        .filter((p) => {
+          // ignore site visit
+          if (p?.purpose === "site_visit") return false;
 
-    // Return the payment details only
+          // must have method + amount
+          if (!p?.method || !Number(p?.amount)) return false;
+
+          // ✅ allow CASH without providerRef
+          // for ONLINE payments, providerRef should exist (optional strictness)
+          if (String(p.method).toLowerCase() !== "cash" && !p?.providerRef) return false;
+
+          return true;
+        })
+        .map((p) => {
+          const paidAt = p.at ? new Date(p.at) : null;
+          const paidDate = paidAt ? moment(paidAt).format("DD/MM/YYYY") : "";
+          const paidTime = paidAt ? moment(paidAt).format("hh:mm:ss A") : "";
+
+          const installment = p.installment || "";
+          const paymentType =
+            installment === "first"
+              ? "Booking Payment"
+              : installment === "final"
+                ? "Final Payment"
+                : installment === "second"
+                  ? "Second Payment"
+                  : "Partial Payment";
+
+          return {
+            customerName: booking?.customer?.name || "-",
+            bookingId: booking?.bookingDetails?.booking_id || "-",
+            leadId: booking?._id,
+            paymentDate: paidAt ? paidAt.toISOString() : null,
+            paidDate,
+            paidTime,
+            paymentType,
+            amount: Number(p.amount),
+            method: p.method,
+            providerRef: p.providerRef || null, // ✅ cash will be null
+            formattedPaymentDate: paidAt ? `${paidDate} ${paidTime}` : "",
+          };
+        });
+    });
+
+    // ✅ Sort by latest payment time (final payment will appear)
+    paymentDetails.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+
     return res.status(200).json({
       success: true,
       payments: paymentDetails,
     });
   } catch (error) {
     console.error("Error finding payments for the vendor:", error);
-    return res.status(500).json({ success: false, message: "Server error", payments: [] });
+    return res.status(500).json({
+      success: false,
+      message: "Server error",
+      payments: [],
+    });
   }
 };
 
@@ -5664,7 +5690,7 @@ exports.updateManualPayment = async (req, res) => {
 
     const remainingBookingAmount = updateBookingLevel();
 
-    // ✅ Stage auto-move
+    // ✅ Stage auto - move
     if (d.paymentLink?.installmentStage) {
       if (isDeepCleaning) {
         if (d.firstPayment.remaining === 0 && firstReq > 0) {
@@ -5676,6 +5702,14 @@ exports.updateManualPayment = async (req, res) => {
         }
       }
     }
+
+    // if (d.paymentLink?.isActive) {
+    //   const linkStage = String(d.paymentLink.installmentStage || "").toLowerCase();
+    //   if (!linkStage || linkStage === stage) {
+    //     d.paymentLink.isActive = false;
+    //   }
+    // }
+
 
     // ✅ COMPLETE ONLY WHEN FINAL is exactly paid (amount + prePayment)
     const finalIsExactlyPaid =
@@ -5745,413 +5779,6 @@ exports.updateManualPayment = async (req, res) => {
     });
   }
 };
-
-// exports.updateManualPayment = async (req, res) => {
-//   try {
-//     const {
-//       bookingId,
-//       paymentMethod,
-//       paidAmount,
-//       providerRef,
-//       isAdditionalAmount,
-//     } = req.body;
-
-//     if (!bookingId || !paymentMethod || paidAmount == null) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "bookingId, paymentMethod, and paidAmount are required",
-//       });
-//     }
-
-//     const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
-//     if (!validPaymentMethods.includes(String(paymentMethod))) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Invalid payment method",
-//       });
-//     }
-
-//     const currentPaid = Number(paidAmount || 0);
-//     if (!(currentPaid > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "paidAmount must be greater than 0",
-//       });
-//     }
-
-//     const booking = await UserBooking.findById(bookingId);
-//     if (!booking) {
-//       return res.status(404).json({
-//         success: false,
-//         message: "Booking not found",
-//       });
-//     }
-
-//     const serviceType = getServiceTypeFromBooking(booking);
-//     const isDeepCleaning =
-//       String(serviceType).toLowerCase() === "deep_cleaning";
-
-//     const d = booking.bookingDetails || (booking.bookingDetails = {});
-//     const finalTotal = Number(d.finalTotal || 0);
-
-//     // ensureInstallmentTargets(d, finalTotal, serviceType);
-
-//     // const stage = normalizeStage(
-//     //   req.body.installmentStage, serviceType, d
-//     // );
-//     // activateInstallmentStage(d, stage);
-//     ensureInstallmentTargets(d, finalTotal, serviceType);
-//     const stage = normalizeStage(req.body.installmentStage, serviceType, d);
-//     activateInstallmentStage(d, stage);
-
-//     // ✅ stage due lock
-//     const key = stage === "first" ? "firstPayment" : stage === "second" ? "secondPayment" : "finalPayment";
-//     const due = Number(d[key]?.remaining || 0);
-//     if (!(due > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `No payable amount found for ${stage} installment.`,
-//       });
-//     }
-
-//     if (currentPaid > due) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `Paid amount cannot exceed remaining for ${stage} installment (${due}).`,
-//       });
-//     }
-//     // ---------- BOOKING-LEVEL NUMBERS (BEFORE THIS PAYMENT) ----------
-//     const existingPaid = Number(d.paidAmount || 0);
-//     const prevAmountYetToPay = Number(d.amountYetToPay || 0);
-
-//     if (currentPaid > prevAmountYetToPay) {
-//       return res.status(400).json({
-//         success: false,
-//         message: `Amount exceeds total pending amount (${prevAmountYetToPay})`,
-//       });
-//     }
-
-//     // ---------- Helpers ----------
-//     const disablePaymentLinkIfFullyPaid = () => {
-//       if (Number(d.amountYetToPay || 0) === 0 && d.paymentLink?.isActive) {
-//         d.paymentLink.isActive = false;
-//       }
-//     };
-
-//     const logPayment = (note) => {
-//       booking.payments = booking.payments || [];
-//       booking.payments.push({
-//         at: new Date(),
-//         method: String(paymentMethod),
-//         amount: currentPaid,
-//         providerRef: providerRef || undefined,
-//         ...(note ? { note } : {}),
-//         installment: stage || undefined,
-//       });
-//     };
-
-//     const updateBookingLevel = () => {
-//       d.paidAmount = existingPaid + currentPaid;
-//       d.paymentMethod = String(paymentMethod);
-
-//       const remainingBookingAmount = Math.max(
-//         0,
-//         prevAmountYetToPay - currentPaid
-//       );
-//       d.amountYetToPay = remainingBookingAmount;
-
-//       d.paymentStatus =
-//         remainingBookingAmount === 0 ? "Paid" : "Partial Payment";
-
-//       disablePaymentLinkIfFullyPaid();
-//       return remainingBookingAmount;
-//     };
-
-//     // ✅ amount = paid so far, prePayment = extra collected, requestedAmount = target
-//     const syncMilestone = (m) => {
-//       const req = Number(m.requestedAmount || 0);
-//       const amt = Math.max(0, Number(m.amount || 0));
-//       const pre = Math.max(0, Number(m.prePayment || 0));
-
-//       const effectivePaid = Math.min(req, amt + pre);
-//       m.remaining = Math.max(0, req - effectivePaid);
-
-//       if (req <= 0) m.status = "pending";
-//       else if (effectivePaid === 0) m.status = "pending";
-//       else if (m.remaining === 0) m.status = "paid";
-//       else m.status = "partial";
-//     };
-
-//     // ---------- ENSURE PAYMENT OBJECTS ----------
-//     d.firstPayment = d.firstPayment || {};
-//     d.secondPayment = d.secondPayment || {};
-//     d.finalPayment = d.finalPayment || {};
-
-//     const ensureDefaults = (m) => {
-//       m.status = m.status || "pending";
-//       m.amount = Number(m.amount || 0);
-//       m.requestedAmount = Number(m.requestedAmount || 0);
-//       m.remaining = Number(m.remaining || 0);
-//       m.method = m.method || "None";
-//       m.prePayment = Number(m.prePayment || 0);
-//     };
-
-//     ensureDefaults(d.firstPayment);
-//     ensureDefaults(d.secondPayment);
-//     ensureDefaults(d.finalPayment);
-
-//     // ---------- Total ----------
-//     const totalBookingAmt = Number(
-//       d.finalTotal || existingPaid + prevAmountYetToPay || 0
-//     );
-//     if (!(totalBookingAmt > 0)) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Final total not set. Finalize quote first.",
-//       });
-//     }
-
-//     const firstReq = Number(d.firstPayment.requestedAmount || 0);
-//     const secondReq = isDeepCleaning
-//       ? 0
-//       : Number(d.secondPayment.requestedAmount || 0);
-//     const finalReq = Number(d.finalPayment.requestedAmount || 0);
-
-//     // ✅ Allocate existingPaid into milestone buckets
-//     // IMPORTANT: prePayment already exists inside paidAmount,
-//     // subtract it to avoid double-counting in amount buckets.
-//     const prePay = Math.max(0, Number(d.finalPayment?.prePayment || 0));
-//     let remainingPaid = Math.max(0, existingPaid - prePay);
-
-//     const firstPaidSoFar = Math.max(0, Math.min(firstReq, remainingPaid));
-//     remainingPaid -= firstPaidSoFar;
-
-//     let secondPaidSoFar = 0;
-//     if (!isDeepCleaning) {
-//       secondPaidSoFar = Math.max(0, Math.min(secondReq, remainingPaid));
-//       remainingPaid -= secondPaidSoFar;
-//     }
-
-//     const finalPaidSoFar = Math.max(0, Math.min(finalReq, remainingPaid));
-
-//     d.firstPayment.amount = firstPaidSoFar;
-//     if (!isDeepCleaning) d.secondPayment.amount = secondPaidSoFar;
-//     else d.secondPayment.amount = 0; // ✅ deep cleaning hard-lock
-//     d.finalPayment.amount = finalPaidSoFar;
-
-//     syncMilestone(d.firstPayment);
-//     syncMilestone(d.secondPayment);
-//     syncMilestone(d.finalPayment);
-
-//     // ---------- ADDITIONAL AMOUNT (round-off / extra) ----------
-//     const gateCompleted = isDeepCleaning
-//       ? firstReq > 0 &&
-//       d.firstPayment.status === "paid" &&
-//       isStageExactlyPaid(d.firstPayment)
-//       : secondReq > 0 &&
-//       d.secondPayment.status === "paid" &&
-//       isStageExactlyPaid(d.secondPayment);
-
-//     if (isAdditionalAmount === true && !gateCompleted) {
-//       return res.status(400).json({
-//         success: false,
-//         message: isDeepCleaning
-//           ? "Extra amount can be added only after First installment is fully paid."
-//           : "Extra amount can be added only after Second installment is fully paid.",
-//         stage,
-//         firstPayment: d.firstPayment,
-//         secondPayment: d.secondPayment,
-//         finalPayment: d.finalPayment,
-//       });
-//     }
-
-//     if (isAdditionalAmount === true && gateCompleted) {
-//       const extra = currentPaid;
-
-//       d.finalPayment.prePayment =
-//         Number(d.finalPayment.prePayment || 0) + extra;
-
-//       if (!d.finalPayment.method || d.finalPayment.method === "None") {
-//         d.finalPayment.method = String(paymentMethod);
-//       }
-
-//       syncMilestone(d.finalPayment);
-
-//       const remainingBookingAmount = updateBookingLevel();
-//       logPayment(
-//         isDeepCleaning
-//           ? "deep_cleaning_additional_amount_prePayment"
-//           : "additional_amount_prePayment"
-//       );
-//       if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
-//       await booking.save();
-
-//       return res.status(200).json({
-//         success: true,
-//         message:
-//           "Additional amount stored in finalPayment.prePayment (requestedAmount preserved).",
-//         paidAmount: d.paidAmount,
-//         amountYetToPay: d.amountYetToPay,
-//         stage,
-//         firstPayment: d.firstPayment,
-//         secondPayment: d.secondPayment,
-//         finalPayment: d.finalPayment,
-//         extraStoredAsPrePayment: extra,
-//         remainingBookingAmount,
-//       });
-//     }
-
-//     // ---------- NORMAL PAYMENT APPLY ----------
-//     const prevFinalStatus = d.finalPayment.status;
-//     let overflowAppliedToFinal = 0;
-
-//     if (stage === "final") {
-//       // Pay FINAL directly
-//       const finalPaidNow = Number(d.finalPayment.amount || 0);
-//       const pendingFinal = Math.max(
-//         0,
-//         finalReq - (finalPaidNow + Number(d.finalPayment.prePayment || 0))
-//       );
-
-//       const appliedToFinal = Math.min(currentPaid, pendingFinal);
-//       overflowAppliedToFinal = appliedToFinal;
-
-//       if (appliedToFinal > 0) {
-//         d.finalPayment.amount = finalPaidNow + appliedToFinal;
-
-//         if (!d.finalPayment.method || d.finalPayment.method === "None") {
-//           d.finalPayment.method = String(paymentMethod);
-//         }
-//         syncMilestone(d.finalPayment);
-//       }
-//     } else if (isDeepCleaning) {
-//       // ✅ Deep cleaning: pay FIRST (NOT second)
-//       const firstPaidNow = Number(d.firstPayment.amount || 0);
-//       const pendingFirst = Math.max(0, firstReq - firstPaidNow);
-
-//       const appliedToFirst = Math.min(currentPaid, pendingFirst);
-
-//       if (appliedToFirst > 0) {
-//         d.firstPayment.amount = firstPaidNow + appliedToFirst;
-
-//         if (!d.firstPayment.method || d.firstPayment.method === "None") {
-//           d.firstPayment.method = String(paymentMethod);
-//         }
-//         syncMilestone(d.firstPayment);
-//       }
-
-//       overflowAppliedToFinal = 0;
-//     } else {
-//       // House painting: pay SECOND
-//       const secondPaidNow = Number(d.secondPayment.amount || 0);
-//       const pendingSecond = Math.max(0, secondReq - secondPaidNow);
-
-//       const appliedToSecond = Math.min(currentPaid, pendingSecond);
-
-//       if (appliedToSecond > 0) {
-//         d.secondPayment.amount = secondPaidNow + appliedToSecond;
-
-//         if (!d.secondPayment.method || d.secondPayment.method === "None") {
-//           d.secondPayment.method = String(paymentMethod);
-//         }
-//         syncMilestone(d.secondPayment);
-//       }
-
-//       overflowAppliedToFinal = 0;
-//     }
-
-//     // if second installment is fully paid by cash/manual, deactivate payment link
-//     if (d.paymentLink?.isActive) {
-//       const linkStage = String(d.paymentLink.installmentStage || "").toLowerCase();
-
-//       if (linkStage === "second" && isStageExactlyPaid(d.secondPayment)) {
-//         d.paymentLink.isActive = false;
-//       }
-//     }
-
-//     const remainingBookingAmount = updateBookingLevel();
-
-//     // ✅ Stage auto-move
-//     if (d.paymentLink?.installmentStage) {
-//       if (isDeepCleaning) {
-//         if (d.firstPayment.remaining === 0 && firstReq > 0) {
-//           d.paymentLink.installmentStage = "final";
-//         }
-//       } else {
-//         if (d.secondPayment.remaining === 0 && secondReq > 0) {
-//           d.paymentLink.installmentStage = "final";
-//         }
-//       }
-//     }
-
-//     // ✅ COMPLETE ONLY WHEN FINAL is exactly paid (amount + prePayment)
-//     const finalIsExactlyPaid =
-//       stage === "final" && isStageExactlyPaid(d.finalPayment);
-//     const finalJustPaidNow = prevFinalStatus !== "paid" && finalIsExactlyPaid;
-
-//     if (finalJustPaidNow) {
-//       const customerId = booking.customer?.customerId;
-//       const vendorId = booking.assignedProfessional?.professionalId;
-//       const vendorName = booking.assignedProfessional?.name;
-//       const vendorPhoto = booking.assignedProfessional?.profile;
-
-//       d.paymentStatus = "Paid";
-//       booking.vendorRatingUrl = `${vendorRatingURL}?vendorId=${vendorId}&bookingId=${bookingId}&customerId=${customerId}&vendorName=${vendorName}&vendorPhoto=${vendorPhoto}`;
-
-//       if (
-//         [
-//           "Waiting for final payment",
-//           "Project Ongoing",
-//           "Job Ongoing",
-//         ].includes(String(d.status))
-//       ) {
-//         d.status = "Project Completed";
-//         const now = new Date();
-
-//         if (booking.assignedProfessional) {
-//           booking.assignedProfessional.completedDate = now;
-//           booking.assignedProfessional.completedTime = moment().format("LT");
-//         }
-//         d.jobEndedAt = now;
-//       }
-//     }
-
-//     logPayment();
-//     disablePaymentLinkIfFullyPaid();
-
-//     // idempotent finalize (keeps Paid + Project Completed consistent, settles prePayment too)
-//     finalizeIfFullyPaid({
-//       booking,
-//       bookingId,
-//       finalTotal: Number(
-//         d.finalTotal || existingPaid + prevAmountYetToPay || 0
-//       ),
-//     });
-
-//     await booking.save();
-
-//     return res.status(200).json({
-//       success: true,
-//       message: "Payment updated successfully",
-//       paidAmount: d.paidAmount,
-//       amountYetToPay: d.amountYetToPay,
-//       stage,
-//       firstPayment: d.firstPayment,
-//       secondPayment: d.secondPayment,
-//       finalPayment: d.finalPayment,
-//       overflowAppliedToFinal,
-//       remainingBookingAmount,
-//       finalJustPaidNow,
-//     });
-//   } catch (error) {
-//     console.log("updateManualPayment error:", error);
-//     return res.status(500).json({
-//       success: false,
-//       message: "Server error",
-//       error: error.message,
-//     });
-//   }
-// };
 
 exports.adminToCustomerPayment = async (req, res) => {
   try {
