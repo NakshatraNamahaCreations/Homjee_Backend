@@ -1034,15 +1034,17 @@ exports.getVendorByVendorId = async (req, res) => {
 
 exports.getAllVendors = async (req, res) => {
   try {
-    const page = parseInt(req.query.page);
-    const limit = parseInt(req.query.limit);
+    const page = Number.parseInt(req.query.page, 10);
+    const limit = Number.parseInt(req.query.limit, 10);
 
-    // ✅ No pagination → old behavior
+    // ✅ No pagination → return all (latest first)
     if (!page || !limit) {
-      const vendor = await vendorAuthSchema.find();
+      const vendor = await vendorAuthSchema
+        .find()
+        .sort({ createdAt: -1, _id: -1 });
 
       if (!vendor.length) {
-        return res.status(400).json({ message: "Vendor Not Found" });
+        return res.status(404).json({ message: "Vendor Not Found" });
       }
 
       return res.status(200).json({
@@ -1053,37 +1055,44 @@ exports.getAllVendors = async (req, res) => {
       });
     }
 
-    // ✅ Pagination enabled
-    const skip = (page - 1) * limit;
+    // ✅ Pagination enabled (latest first)
+    const safePage = Math.max(1, page);
+    const safeLimit = Math.max(1, limit);
+    const skip = (safePage - 1) * safeLimit;
 
     const [vendor, total] = await Promise.all([
-      vendorAuthSchema.find().skip(skip).limit(limit),
+      vendorAuthSchema
+        .find()
+        .sort({ createdAt: -1, _id: -1 }) // ✅ IMPORTANT: sort before skip/limit
+        .skip(skip)
+        .limit(safeLimit),
       vendorAuthSchema.countDocuments(),
     ]);
 
     if (!vendor.length) {
-      return res.status(400).json({ message: "Vendor Not Found" });
+      return res.status(404).json({ message: "Vendor Not Found" });
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       status: true,
       message: "Vendor Found",
       vendor,
       pagination: {
-        page,
-        limit,
+        page: safePage,
+        limit: safeLimit,
         total,
-        totalPages: Math.ceil(total / limit),
+        totalPages: Math.ceil(total / safeLimit),
       },
     });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({
+    console.error("getAllVendors error:", error);
+    return res.status(500).json({
       message: "Server error",
       error: error.message,
     });
   }
 };
+
 
 // ... (Other existing endpoints like loginWithMobile, verifyOTP, etc. remain unchanged)
 // ✅ ADD COIN
@@ -1115,7 +1124,7 @@ exports.addCoin = async (req, res) => {
           "wallet.overallCoinPurchased": coinVal,
         },
       },
-      { new: true }
+      { new: true },
     );
 
     if (!updatedVendor) {

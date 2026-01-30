@@ -165,7 +165,11 @@ const vendorAuthSchema = new mongoose.Schema({
       5: { type: Number, default: 0 },
     },
   },
-});
+},
+  {
+    timestamps: true, // ✅ added for vendor document (createdAt, updatedAt)
+  }
+);
 
 // ✅ GEO index for location search (5km radius)
 vendorAuthSchema.index({ "address.geo": "2dsphere" });
