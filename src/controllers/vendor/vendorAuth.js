@@ -1032,41 +1032,108 @@ exports.getVendorByVendorId = async (req, res) => {
   }
 };
 
+// exports.getAllVendors = async (req, res) => {
+//   try {
+//     const page = Number.parseInt(req.query.page, 10);
+//     const limit = Number.parseInt(req.query.limit, 10);
+
+//     // ✅ No pagination → return all (latest first)
+//     if (!page || !limit) {
+//       const vendor = await vendorAuthSchema
+//         .find()
+//         .sort({ createdAt: -1, _id: -1 });
+
+//       if (!vendor.length) {
+//         return res.status(404).json({ message: "Vendor Not Found" });
+//       }
+
+//       return res.status(200).json({
+//         status: true,
+//         message: "Vendor Found",
+//         vendor,
+//         pagination: null,
+//       });
+//     }
+
+//     // ✅ Pagination enabled (latest first)
+//     const safePage = Math.max(1, page);
+//     const safeLimit = Math.max(1, limit);
+//     const skip = (safePage - 1) * safeLimit;
+
+//     const [vendor, total] = await Promise.all([
+//       vendorAuthSchema
+//         .find()
+//         .sort({ createdAt: -1, _id: -1 }) // ✅ IMPORTANT: sort before skip/limit
+//         .skip(skip)
+//         .limit(safeLimit),
+//       vendorAuthSchema.countDocuments(),
+//     ]);
+
+//     if (!vendor.length) {
+//       return res.status(404).json({ message: "Vendor Not Found" });
+//     }
+
+//     return res.status(200).json({
+//       status: true,
+//       message: "Vendor Found",
+//       vendor,
+//       pagination: {
+//         page: safePage,
+//         limit: safeLimit,
+//         total,
+//         totalPages: Math.ceil(total / safeLimit),
+//       },
+//     });
+//   } catch (error) {
+//     console.error("getAllVendors error:", error);
+//     return res.status(500).json({
+//       message: "Server error",
+//       error: error.message,
+//     });
+//   }
+// };
+
+
+// GET /api/vendor/get-all-vendor?page=1&limit=10&serviceType=Deep%20Cleaning&city=Bengaluru&search=whitefield
 exports.getAllVendors = async (req, res) => {
   try {
-    const page = Number.parseInt(req.query.page, 10);
-    const limit = Number.parseInt(req.query.limit, 10);
+    const page = Number.parseInt(req.query.page, 10) || 1;
+    const limit = Number.parseInt(req.query.limit, 10) || 10;
 
-    // ✅ No pagination → return all (latest first)
-    if (!page || !limit) {
-      const vendor = await vendorAuthSchema
-        .find()
-        .sort({ createdAt: -1, _id: -1 });
+    const serviceType = (req.query.serviceType || "").trim();
+    const city = (req.query.city || "").trim();
 
-      if (!vendor.length) {
-        return res.status(404).json({ message: "Vendor Not Found" });
-      }
+    // search can match serviceArea OR address.location OR vendor name (optional)
+    const search = (req.query.search || "").trim();
 
-      return res.status(200).json({
-        status: true,
-        message: "Vendor Found",
-        vendor,
-        pagination: null,
-      });
+    const filter = {};
+
+    if (serviceType && serviceType !== "All Services") {
+      filter["vendor.serviceType"] = serviceType;
     }
 
-    // ✅ Pagination enabled (latest first)
-    const safePage = Math.max(1, page);
-    const safeLimit = Math.max(1, limit);
-    const skip = (safePage - 1) * safeLimit;
+    if (city && city !== "All Cities") {
+      filter["vendor.city"] = city;
+    }
+
+    if (search) {
+      const rx = new RegExp(search, "i");
+      filter.$or = [
+        { "vendor.vendorName": rx },
+        // { "vendor.serviceArea": rx },
+        // { "address.location": rx },
+      ];
+    }
+
+    const skip = (page - 1) * limit;
 
     const [vendor, total] = await Promise.all([
       vendorAuthSchema
-        .find()
-        .sort({ createdAt: -1, _id: -1 }) // ✅ IMPORTANT: sort before skip/limit
+        .find(filter)
+        .sort({ createdAt: -1, _id: -1 })
         .skip(skip)
-        .limit(safeLimit),
-      vendorAuthSchema.countDocuments(),
+        .limit(limit),
+      vendorAuthSchema.countDocuments(filter),
     ]);
 
     if (!vendor.length) {
@@ -1078,10 +1145,10 @@ exports.getAllVendors = async (req, res) => {
       message: "Vendor Found",
       vendor,
       pagination: {
-        page: safePage,
-        limit: safeLimit,
+        page,
+        limit,
         total,
-        totalPages: Math.ceil(total / safeLimit),
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
@@ -1092,7 +1159,6 @@ exports.getAllVendors = async (req, res) => {
     });
   }
 };
-
 
 // ... (Other existing endpoints like loginWithMobile, verifyOTP, etc. remain unchanged)
 // ✅ ADD COIN
