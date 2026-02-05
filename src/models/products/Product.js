@@ -72,6 +72,7 @@ const paintSchema = new mongoose.Schema({
     default: false,
   },
   productType: { type: String },
+  city: { type: String },
 });
 
 const packageList = new mongoose.Schema({
@@ -79,11 +80,7 @@ const packageList = new mongoose.Schema({
   paintName: String,
   paintPrice: Number,
   category: String,
-  paintType: {
-    type: String,
-    enum: ["Normal", "Special"],
-    default: "Normal",
-  },
+ 
   includePuttyOnFresh: {
     type: Boolean,
     default: true,
@@ -92,6 +89,7 @@ const packageList = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  city:{type:String}
 });
 
 const packageSchema = new mongoose.Schema({
@@ -104,10 +102,6 @@ const packageSchema = new mongoose.Schema({
 const finishingType = new mongoose.Schema({
   paintName: String,
   paintPrice: Number,
-  paintType: {
-    type: String,
-    default: "Normal",
-  },
   description: String,
   productType: {
     type: String,
@@ -120,6 +114,7 @@ const finishingType = new mongoose.Schema({
       "Wood Polish",
     ],
   },
+  city:{type:String}
 });
 
 const ProductSchema = new mongoose.Schema(
@@ -128,7 +123,7 @@ const ProductSchema = new mongoose.Schema(
     package: [packageSchema],
     additionalPaints: [finishingType],
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 module.exports = mongoose.model("Product", ProductSchema);

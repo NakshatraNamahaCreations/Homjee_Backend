@@ -22,6 +22,7 @@ const InAppNotification = require("../routes/notification/Notification");
 const slotForVendorReschedule = require("./vendor/slot");
 const vendorWalletSystem = require("./vendor/wallet");
 const cleaningCatalogRoutes = require("./servicePackage/cleaningCatalog.routes");
+const cityRoutes = require("./city/city.routes.js");
 
 router.use("/slots", slotRoutes);
 
@@ -47,6 +48,7 @@ router.use("/in-app-notify", InAppNotification);
 router.use("/slot", slotForVendorReschedule);
 router.use("/wallet", vendorWalletSystem);
 router.use("/admin", cleaningCatalogRoutes);
+router.use("/city", cityRoutes);
 
 router.get("/hello-world/testing", (req, res) => {
   res.json({ message: "Hi Jimmy!" });
