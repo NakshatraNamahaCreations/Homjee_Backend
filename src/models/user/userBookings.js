@@ -129,6 +129,7 @@ const bookingDetailsSchema = new mongoose.Schema(
         "Waiting for final payment",
         "Project Completed", // project completed
         "Negotiation",
+        "Customer Denied",
         "Set Remainder",
       ],
       default: "Pending",
@@ -202,6 +203,7 @@ const bookingDetailsSchema = new mongoose.Schema(
 
     // 📅 Project Timing
     startProject: { type: Boolean, default: false },
+    isSurveyStarted: { type: Boolean, default: false },
     projectStartDate: Date,
     startProjectRequestedAt: Date,
     startProjectApprovedAt: Date,

@@ -3355,6 +3355,8 @@ exports.startJob = async (req, res) => {
         s.serviceName?.toLowerCase().includes("paint"),
     );
 
+    console.log("isHousePainter", isHousePainter)
+
     // === Prepare hiring data (for Deep Cleaning only) ===
     const hiringUpdate = {};
     if (!isHousePainter && teamMembers.length > 0 && startDate) {
@@ -3388,6 +3390,7 @@ exports.startJob = async (req, res) => {
 
       "bookingDetails.isJobStarted": isHousePainter ? false : true,
       "bookingDetails.startProject": isHousePainter ? false : true,
+      "bookingDetails.isSurveyStarted": isHousePainter ? true : false,
 
       "assignedProfessional.professionalId":
         assignedProfessional.professionalId,
@@ -4693,6 +4696,7 @@ exports.markPendingHiring = async (req, res) => {
 // };
 
 exports.requestStartProjectOtp = async (req, res) => {
+  // House painting
   try {
     const { bookingId } = req.params;
 
@@ -4701,13 +4705,23 @@ exports.requestStartProjectOtp = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Booking not found" });
+    const bookingStatus = booking.bookingDetails.status
 
-    if (booking.bookingDetails.status !== "Hired") {
+    const allowedStatuses = ["Hired", "Customer Cancelled", "Customer Unreachable"];
+    if (!allowedStatuses.includes(bookingStatus)) {
       return res.status(400).json({
         success: false,
-        message: "Only 'Hired' bookings can request to start project",
+        message:
+          "Only 'Hired', 'Customer Cancelled', or 'Customer Unreachable' bookings can request to start project [requestStartProjectOtp]",
       });
     }
+
+    // if (bookingStatus !== "Hired" ) {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Only 'Hired' bookings can request to start project [requestStartProjectOtp]",
+    //   });
+    // }
 
     // Generate 4-digit OTP
     const otp = Math.floor(1000 + Math.random() * 9000).toString();
@@ -4739,6 +4753,7 @@ exports.requestStartProjectOtp = async (req, res) => {
   }
 };
 
+// House painting
 exports.verifyStartProjectOtp = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -4751,13 +4766,23 @@ exports.verifyStartProjectOtp = async (req, res) => {
         .json({ success: false, message: "Booking not found" });
 
     const details = booking.bookingDetails;
+    const allowedStatuses = ["Hired", "Customer Cancelled", "Customer Unreachable"];
 
-    if (details.status !== "Hired") {
+    if (!allowedStatuses.includes(details.status)) {
       return res.status(400).json({
         success: false,
-        message: "Booking must be 'Hired' to start project",
+        message:
+          "Only 'Hired', 'Customer Cancelled', or 'Customer Unreachable' bookings can start project [verifyStartProjectOtp]",
       });
     }
+
+    // if (details.status !== "Hired") {
+    //   return res.status(400).json({
+    //     success: false,
+    //     message: "Booking must be 'Hired' to start project",
+    //   });
+    // }
+
 
     if (!details.startProjectOtp || !details.startProjectOtpExpiry) {
       return res
