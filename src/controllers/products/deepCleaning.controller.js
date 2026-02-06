@@ -115,7 +115,7 @@ exports.listPackages = async (req, res) => {
       Number(page) > 0 &&
       Number(limit) > 0;
 
-    const query = DeepCleaningPackage.find(filter).sort({ createdAt: -1 });
+    const query = DeepCleaningPackage.find(filter);
 
     let items = [];
     let total = 0;

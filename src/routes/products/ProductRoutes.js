@@ -37,6 +37,7 @@ const {
   getAllFinishingPaints,
   updateFinishingPaint,
   deleteFinishingPaint,
+    reorderProducts 
 } = require("../../controllers/products/ProductController");
 
 router.post("/add-paint", addPaint);
@@ -53,5 +54,6 @@ router.get("/list-finishing-paints", listFinishingPaintsByProductType);
 router.get("/get-all-finishing-paints", getAllFinishingPaints);
 router.put("/update-finishing-paint/:id", updateFinishingPaint);
 router.delete("/delete-finishing-paint/:id", deleteFinishingPaint);
+router.put("/reorder", reorderProducts);
 
 module.exports = router;
