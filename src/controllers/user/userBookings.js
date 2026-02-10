@@ -1899,18 +1899,22 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       },
     }).sort({ createdAt: -1 });
 
-    const nowMoment = moment();
+    const nowMoment = moment.tz(TZ);
+
     const filteredBookings = nearbyBookings.filter((booking) => {
       const slotDateObj = booking.selectedSlot?.slotDate;
       const slotTimeStr = booking.selectedSlot?.slotTime;
       if (!slotDateObj || !slotTimeStr) return false;
 
-      const slotDateMoment = moment(slotDateObj);
+      const slotDateMoment = moment.tz(slotDateStr, "YYYY-MM-DD", TZ);
+      const slotDateTime = moment.tz(`${slotDateStr} ${slotTimeStr}`, "YYYY-MM-DD hh:mm A", TZ);
+
+      // const slotDateMoment = moment(slotDateObj);
       const slotDateStr = slotDateMoment.format("YYYY-MM-DD");
-      const slotDateTime = moment(
-        `${slotDateStr} ${slotTimeStr}`,
-        "YYYY-MM-DD hh:mm A",
-      );
+      // const slotDateTime = moment(
+      //   `${slotDateStr} ${slotTimeStr}`,
+      //   "YYYY-MM-DD hh:mm A",
+      // );
 
       // Today: keep only future-times
       if (slotDateMoment.isSame(nowMoment, "day")) {
@@ -1925,9 +1929,7 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     });
 
     if (!filteredBookings.length) {
-      return res
-        .status(404)
-        .json({ message: "No bookings found near this location" });
+      return res.status(200).json({ success: true, bookings: [] });
     }
 
     res.status(200).json({ bookings: filteredBookings });
@@ -2963,6 +2965,269 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
+//   try {
+//     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+//     res.set("Pragma", "no-cache");
+//     res.set("Expires", "0");
+//     res.set("Surrogate-Control", "no-store");
+
+//     const { lat, long } = req.params;
+
+//     const vendorId =
+//       (req.user && (req.user._id || req.user.id) && String(req.user._id || req.user.id)) ||
+//       (req.query.vendorId ? String(req.query.vendorId) : null);
+
+//     const isLow = String(req.query.isPerformanceLow || "0") === "1";
+//     if (isLow) {
+//       return res.status(200).json({
+//         success: true,
+//         isPerformanceLow: true,
+//         bookings: [],
+//       });
+//     }
+
+//     if (!vendorId) {
+//       return res.status(400).json({ message: "vendorId required" });
+//     }
+
+//     if (!lat || !long) {
+//       return res.status(400).json({ message: "Coordinates required" });
+//     }
+
+//     // ✅ STATIC SETTINGS (for now)
+//     const waveDelaySeconds = 50 // 30 * 60; // 30 mins
+//     const broadcastWithinHours = 2; // 2 hours 
+//     const waveBatchSize = 1;
+
+//     const now = new Date();
+
+//     // ✅ Use IST timezone everywhere (important!)
+//     const TZ = "Asia/Kolkata";
+//     const nowMoment = moment.tz(TZ);
+
+//     const todayStr = ymdLocal(now);
+//     const tomorrowStr = ymdLocal(
+//       new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
+//     );
+
+//     const me = await vendorAuthSchema
+//       .findById(vendorId)
+//       .select("_id vendor.city vendor.serviceType wallet markedLeaves")
+//       .lean();
+
+//     if (!me) {
+//       return res.status(200).json({
+//         success: true,
+//         isPerformanceLow: false,
+//         bookings: [],
+//       });
+//     }
+
+//     const leaveSet = new Set(Array.isArray(me.markedLeaves) ? me.markedLeaves : []);
+
+//     const nearbyBookings = await UserBooking.find({
+//       "address.location": {
+//         $near: {
+//           $geometry: {
+//             type: "Point",
+//             coordinates: [parseFloat(long), parseFloat(lat)],
+//           },
+//           $maxDistance: 10000,
+//         },
+//       },
+//       isEnquiry: false,
+//       "service.category": "House Painting",
+//       "bookingDetails.status": "Pending",
+//       "selectedSlot.slotDate": { $gte: todayStr, $lte: tomorrowStr },
+//     }).sort({ createdAt: -1 });
+
+//     // ✅ Time + Leave filter
+//     let baseFiltered = nearbyBookings.filter((booking) => {
+//       const slotDateStr = booking.selectedSlot?.slotDate;
+//       const slotTimeStr = booking.selectedSlot?.slotTime;
+//       if (!slotDateStr || !slotTimeStr) return false;
+
+//       // Leave rule
+//       if (leaveSet.has(slotDateStr)) return false;
+
+//       const slotDateMoment = moment.tz(slotDateStr, "YYYY-MM-DD", TZ);
+//       const slotDateTime = moment.tz(
+//         `${slotDateStr} ${slotTimeStr}`,
+//         "YYYY-MM-DD hh:mm A",
+//         TZ,
+//       );
+
+//       // future times today, all tomorrow
+//       if (slotDateMoment.isSame(nowMoment, "day")) {
+//         return slotDateTime.isAfter(nowMoment);
+//       }
+//       if (slotDateMoment.isSame(nowMoment.clone().add(1, "day"), "day")) {
+//         return true;
+//       }
+//       return false;
+//     });
+
+//     if (!baseFiltered.length) {
+//       return res.status(200).json({
+//         success: true,
+//         isPerformanceLow: false,
+//         bookings: [],
+//       });
+//     }
+
+//     // ✅ keep only vendors within 10km
+//     const eligibleVendors = await vendorAuthSchema.find({
+//       "wallet.canRespondLead": true,
+//       "vendor.serviceType": "House Painting",
+//       "vendor.city": me.vendor.city,
+//       "address.geo": {
+//         $near: {
+//           $geometry: { type: "Point", coordinates: [parseFloat(long), parseFloat(lat)] },
+//           $maxDistance: 10000,
+//         },
+//       },
+//     }).select("_id").lean();
+//     console.log("eligibleVendorsNearby:", eligibleVendors.length);
+
+//     const eligibleIds = eligibleVendors.map((v) => v._id);
+
+//     // ✅ last responded time from historical accepted/response logs
+//     const lastRespAgg = await UserBooking.aggregate([
+//       { $match: { "invitedVendors.professionalId": { $in: eligibleIds } } },
+//       { $unwind: "$invitedVendors" },
+//       {
+//         $match: {
+//           "invitedVendors.professionalId": { $in: eligibleIds },
+//           "invitedVendors.respondedAt": { $type: "date" },
+//         },
+//       },
+//       {
+//         $group: {
+//           _id: "$invitedVendors.professionalId",
+//           lastRespondedAt: { $max: "$invitedVendors.respondedAt" },
+//         },
+//       },
+//     ]);
+
+//     const lastMap = new Map(
+//       lastRespAgg.map((x) => [String(x._id), new Date(x.lastRespondedAt).getTime()]),
+//     );
+
+//     const vendorOrder = eligibleVendors
+//       .map((v) => ({
+//         id: String(v._id),
+//         t: lastMap.has(String(v._id)) ? lastMap.get(String(v._id)) : 0,
+//       }))
+//       .sort((a, b) => a.t - b.t) // oldest response first
+//       .map((x) => x.id);
+
+//     const myIndex = vendorOrder.indexOf(String(vendorId));
+//     if (myIndex === -1) {
+//       return res.status(200).json({
+//         success: true,
+//         isPerformanceLow: false,
+//         bookings: [],
+//       });
+//     }
+
+//     console.log("totalEligible:", vendorOrder.length, "myIndex:", myIndex);
+//     if (baseFiltered[0]) {
+//       const b = baseFiltered[0];
+//       const createdAtMs = b.createdDate ? new Date(b.createdDate).getTime() : Date.now();
+//       const visibleAtMs = createdAtMs + myIndex * waveDelaySeconds * 1000;
+//       console.log("bookingCreated:", new Date(createdAtMs).toISOString());
+//       console.log("visibleAt:", new Date(visibleAtMs).toISOString());
+//     }
+
+//     console.log("vendorId", vendorId);
+//     console.log("eligibleIds", eligibleIds.map(String));
+//     console.log("vendorOrder", vendorOrder);
+//     console.log("myIndex", myIndex);
+
+//     // ✅ Wave visibility (Rapido-like waves)
+//     const finalBookings = [];
+
+//     for (const booking of baseFiltered) {
+//       const bCoords = booking.address?.location?.coordinates; // [lng, lat]
+//       if (!Array.isArray(bCoords) || bCoords.length !== 2) continue;
+
+//       const bookingLng = bCoords[0];
+//       const bookingLat = bCoords[1];
+
+//       // ✅ build SAME eligible pool for this booking (based on booking location)
+//       const eligibleVendorsForBooking = await vendorAuthSchema.find({
+//         "wallet.canRespondLead": true,
+//         "vendor.serviceType": "House Painting",
+//         "vendor.city": me.vendor.city,
+//         "address.geo": {
+//           $near: {
+//             $geometry: { type: "Point", coordinates: [bookingLng, bookingLat] },
+//             $maxDistance: 10000,
+//           },
+//         },
+//       }).select("_id").lean();
+
+//       const ids = eligibleVendorsForBooking.map(v => String(v._id));
+
+//       // If this vendor isn't in the pool, skip
+//       if (!ids.includes(String(vendorId))) continue;
+
+//       // last response ordering (same as your current logic)
+//       const lastRespAgg = await UserBooking.aggregate([
+//         { $match: { "invitedVendors.professionalId": { $in: eligibleVendorsForBooking.map(v => v._id) } } },
+//         { $unwind: "$invitedVendors" },
+//         { $match: { "invitedVendors.professionalId": { $in: eligibleVendorsForBooking.map(v => v._id) }, "invitedVendors.respondedAt": { $type: "date" } } },
+//         { $group: { _id: "$invitedVendors.professionalId", lastRespondedAt: { $max: "$invitedVendors.respondedAt" } } },
+//       ]);
+
+//       const lastMap = new Map(lastRespAgg.map(x => [String(x._id), new Date(x.lastRespondedAt).getTime()]));
+
+//       const vendorOrder = eligibleVendorsForBooking
+//         .map(v => ({ id: String(v._id), t: lastMap.get(String(v._id)) ?? 0 }))
+//         .sort((a, b) => a.t - b.t)
+//         .map(x => x.id);
+
+//       const myIndex = vendorOrder.indexOf(String(vendorId));
+//       if (myIndex === -1) continue;
+
+//       // broadcast within 2 hours
+//       const slotDateStr = booking.selectedSlot?.slotDate;
+//       const slotTimeStr = booking.selectedSlot?.slotTime;
+
+//       const slotDateTime = moment.tz(`${slotDateStr} ${slotTimeStr}`, "YYYY-MM-DD hh:mm A", TZ);
+//       const diffHours = slotDateTime.diff(nowMoment, "hours", true);
+//       if (diffHours <= broadcastWithinHours) {
+//         finalBookings.push(booking);
+//         continue;
+//       }
+
+//       // waves
+//       const createdAtMs = booking.createdDate ? new Date(booking.createdDate).getTime() : Date.now();
+//       const waveNumber = Math.floor(myIndex / waveBatchSize);
+//       const visibleAtMs = createdAtMs + waveNumber * waveDelaySeconds * 1000;
+
+//       if (Date.now() >= visibleAtMs) finalBookings.push(booking);
+//     }
+
+//     return res.status(200).json({
+//       success: true,
+//       isPerformanceLow: false,
+//       bookings: finalBookings,
+//       meta: {
+//         waveDelaySeconds,
+//         broadcastWithinHours,
+//         waveBatchSize,
+//         myIndex,
+//         totalEligible: vendorOrder.length,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Error finding nearby bookings:", error);
+//     return res.status(500).json({ message: "Server error" });
+//   }
+// };
 
 // exports.respondConfirmJobVendorLine = async (req, res) => {
 //   try {
@@ -5312,12 +5577,36 @@ exports.makePayment = async (req, res) => {
     // ✅ deactivate link because payment is recorded
     if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
 
+    // making backup empty
+    const prevFirstStatus = String(d.firstPayment?.status || "pending");
+
     // ✅ Resync milestones from ledger (your function)
     const { prevFinalStatus } = resyncMilestonesFromLedger(
       d,
       d.paymentMethod,
       serviceType,
     );
+    // Clear hiring backup once FIRST payment is confirmed paid
+    try {
+      const firstNowPaid = String(d.firstPayment?.status || "pending") === "paid";
+      const firstJustPaidNow = prevFirstStatus !== "paid" && firstNowPaid;
+
+      if (firstJustPaidNow) {
+        // if your structure is booking.assignedProfessional.hiring.backup
+        if (booking?.assignedProfessional?.hiring?.backup) {
+          booking.assignedProfessional.hiring.backup = null; // or {} based on your schema
+          booking.markModified("assignedProfessional");
+        }
+
+        // if your structure is booking.bookingDetails.assignedProfessional.hiring.backup
+        if (d?.assignedProfessional?.hiring?.backup) {
+          d.assignedProfessional.hiring.backup = null; // or {}
+          booking.markModified("bookingDetails");
+        }
+      }
+    } catch (e) {
+      console.log("clear backup error:", e);
+    }
 
     // derived fields (your function)
     syncDerivedFields(d, finalTotal);
@@ -7000,6 +7289,57 @@ exports.updateBookingField = async (req, res) => {
       message: "Internal server error",
       error: error.message,
     });
+  }
+};
+
+exports.setLeadReminder = async (req, res) => {
+  try {
+    const { leadId, reminderAt } = req.body;
+
+    if (!leadId || !reminderAt) {
+      return res.status(400).json({
+        success: false,
+        message: "leadId and reminderAt required",
+      });
+    }
+
+    const dt = new Date(reminderAt);
+    if (Number.isNaN(dt.getTime())) {
+      return res.status(400).json({ success: false, message: "Invalid reminderAt" });
+    }
+
+    // ✅ find latest booking for this lead (if vendorId passed, filter it)
+
+
+    const booking = await UserBooking.findOne({
+      _id: leadId
+    }).sort({ createdAt: -1 });
+
+    if (!booking) {
+      return res.status(404).json({
+        success: false,
+        message: "Booking not found for this lead",
+      });
+    }
+
+    // ✅ set reminder inside booking
+    booking.leadReminder = {
+      reminderAt: dt,
+      status: "pending",
+      sentAt: null,
+    };
+
+    await booking.save();
+
+    return res.json({
+      success: true,
+      message: "Reminder set successfully",
+      data: booking.leadReminder,
+      bookingId: booking._id, // helpful for debug
+    });
+  } catch (e) {
+    console.log("setLeadReminder error:", e);
+    return res.status(500).json({ success: false, message: "Server error" });
   }
 };
 

@@ -202,6 +202,44 @@ exports.updateVendor = async (req, res) => {
   }
 };
 
+exports.updateVendorLeaves = async (req, res) => {
+  try {
+    const { vendorId, markedLeaves } = req.body;
+
+    if (!vendorId) {
+      return res.status(400).json({ success: false, message: "vendorId is required" });
+    }
+
+    if (!Array.isArray(markedLeaves)) {
+      return res.status(400).json({ success: false, message: "markedLeaves must be an array" });
+    }
+
+    // clean + dedupe + sort
+    const cleanedLeaves = [...new Set(markedLeaves.map((d) => String(d).trim()))]
+      .filter(Boolean)
+      .sort();
+
+    const vendor = await vendorAuthSchema.findByIdAndUpdate(
+      vendorId,
+      { $set: { markedLeaves: cleanedLeaves } }, // ✅ overwrite
+      { new: true }
+    );
+
+    if (!vendor) {
+      return res.status(404).json({ success: false, message: "Vendor not found" });
+    }
+
+    return res.json({
+      success: true,
+      message: "Leaves updated successfully",
+      results: vendor,
+    });
+  } catch (err) {
+    console.error("Error updating leaves:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+};
+
 exports.addTeamMember = async (req, res) => {
   try {
     const vendorId = req.body.vendorId;

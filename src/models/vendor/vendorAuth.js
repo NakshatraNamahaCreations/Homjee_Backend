@@ -1,63 +1,3 @@
-// const mongoose = require("mongoose");
-
-// const vendorInfo = new mongoose.Schema({
-//   vendorName: String,
-//   mobileNumber: Number,
-//   profileImage: String,
-//   dateOfBirth: String,
-//   yearOfWorking: String,
-//   city: String,
-//   serviceType: String,
-//   capacity: Number,
-//   serviceArea: String,
-// });
-
-// const documentInfo = new mongoose.Schema({
-//   aadhaarNumber: String,
-//   panNumber: String,
-//   aadhaarImage: String,
-//   panImage: String,
-//   otherPolicy: String,
-// });
-
-// const accountInfo = new mongoose.Schema({
-//   accountNumber: String,
-//   ifscCode: String,
-//   bankName: String,
-//   branchName: String,
-//   holderName: String,
-//   accountType: String,
-//   gstNumber: String,
-// });
-// const addressDetails = new mongoose.Schema({
-//   location: String,
-//   latitude: Number,
-//   longitude: Number,
-// });
-
-// const vendorAuthSchema = new mongoose.Schema({
-//   vendor: vendorInfo,
-//   documents: documentInfo,
-//   address: addressDetails,
-//   bankDetails: accountInfo,
-//   activeStatus: Boolean,
-
-//    wallet: {
-//     coins: {
-//       type: Number,
-//       default: 0,
-//     },
-//   },
-
-//   team: {
-//     type: [{ type: mongoose.Schema.Types.ObjectId, ref: "Vendor" }],
-//     default: [],
-//   },
-
-// });
-
-// module.exports = mongoose.model("vendor", vendorAuthSchema);
-
 const mongoose = require("mongoose");
 
 const vendorInfo = new mongoose.Schema({
@@ -95,6 +35,10 @@ const addressDetails = new mongoose.Schema({
   location: String,
   latitude: Number,
   longitude: Number,
+  geo: {
+    type: { type: String, enum: ["Point"], default: "Point" },
+    coordinates: { type: [Number], default: [0, 0] }, // [lng, lat]
+  },
 });
 
 // Define team member schema to match vendor structure
@@ -154,6 +98,7 @@ const vendorAuthSchema = new mongoose.Schema({
     type: [teamMemberInfo], // Embed team member objects
     default: [],
   },
+  markedLeaves: [{ type: String }],
   ratings: {
     average: { type: Number, default: 0, min: 0, max: 5 },
     totalReviews: { type: Number, default: 0 },
@@ -173,6 +118,17 @@ const vendorAuthSchema = new mongoose.Schema({
 
 // ✅ GEO index for location search (5km radius)
 vendorAuthSchema.index({ "address.geo": "2dsphere" });
+
+vendorAuthSchema.pre("save", function (next) {
+  try {
+    const lat = this.address?.latitude;
+    const lng = this.address?.longitude;
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      this.address.geo = { type: "Point", coordinates: [lng, lat] };
+    }
+  } catch (e) { }
+  next();
+});
 
 // ✅ Service type + active filter
 vendorAuthSchema.index({ "vendor.serviceType": 1, activeStatus: 1 });

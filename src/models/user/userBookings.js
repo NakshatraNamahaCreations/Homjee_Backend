@@ -305,6 +305,21 @@ const selectedSlot = new mongoose.Schema({
   slotTime: String,
   slotDate: String,
 });
+
+const leadReminderSchema = new mongoose.Schema(
+  {
+    reminderAt: { type: Date, required: true, index: true },
+    status: {
+      type: String,
+      enum: ["pending", "sent", "cancelled"],
+      default: "pending",
+      index: true,
+    },
+    sentAt: { type: Date },
+  },
+  { timestamps: true, _id: false } // ✅ correct place
+);
+
 const userBookingSchema = new mongoose.Schema({
   customer: customerSchema,
   service: [serviceSchema],
@@ -353,6 +368,7 @@ const userBookingSchema = new mongoose.Schema({
   isDismmised: { type: Boolean, default: false }, //New Field
   invitedVendors: [invitedVendorSchema],
   vendorRatingUrl: String,
+  leadReminder: leadReminderSchema,
   // vendorRating: {
   //   rating: { type: Number, min: 1, max: 5 },
   //   review: String,

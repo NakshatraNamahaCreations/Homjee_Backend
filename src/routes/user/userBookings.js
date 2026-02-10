@@ -120,6 +120,8 @@ router.put('/update-user-enquiry/:bookingId', bookingController.updateEnquiry);
 
 
 router.patch("/:bookingId/status", bookingController.updateBookingField);
+router.post("/set-reminder/lead/vendor", bookingController.setLeadReminder);
+
 
 // router.put(
 //   "/update-assigned-professional/:bookingId",

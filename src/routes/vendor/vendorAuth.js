@@ -90,6 +90,7 @@ router.put(
   vendorAuthController.updateVendor
 );
 
+router.put("/vendor-leave", vendorAuthController.updateVendorLeaves);
 
 router.post(
   "/team/add",
