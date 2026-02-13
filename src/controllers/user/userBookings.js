@@ -11,8 +11,10 @@ const notificationSchema = require("../../models/notification/Notification");
 const userSchema = require("../../models/user/userAuth");
 const VendorRating = require("../../models/vendor/vendorRating");
 
-const vendorAuthSchema = require("../../models/vendor/vendorAuth"); // adjust path
-const walletTransaction = require("../../models/vendor/wallet"); // adjust path
+const vendorAuthSchema = require("../../models/vendor/vendorAuth");
+const walletTransaction = require("../../models/vendor/wallet");
+const vendorNotification = require("../../models/notification/vendorNotification");
+
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
 const redirectionUrl = "https://websitehomjee.netlify.app/checkout/payment/";
@@ -517,6 +519,94 @@ const activateInstallmentStage = (d, stage) => {
 //     console.error("error:", e);
 //   }
 // };
+
+const isAssignedToVendor = (booking) => {
+  try {
+    // ✅ adjust if your assignment is stored elsewhere
+    return !!booking.assignedProfessional?.professionalId;
+  } catch (e) {
+    console.log(e);
+    return false;
+  }
+};
+
+const storeVendorPaymentNotification = async ({
+  vendorId,
+  booking,
+  stage,
+  amount,
+  method,
+  providerRef
+}) => {
+  // try {
+  //   if (!vendorId) return;
+
+  //   const customerName = booking?.customer?.name
+
+  //   const msg = `₹${Number(amount).toLocaleString()} paid by customer ${customerName} via ${method}`;
+
+  //   await vendorNotification.create({
+  //     vendorId: String(vendorId),
+  //     notificationType: "PAYMENT",
+  //     thumbnailTitle: "Payment Received",
+  //     message: msg,
+  //     status: "unread",
+  //     metaData: {
+  //       customerName: booking?.customer?.name || "-",
+  //       bookingId: booking?.bookingDetails?.booking_id || "-",
+  //       leadId: booking?._id,
+  //       paymentDate: paidAt ? paidAt.toISOString() : null,
+  //       paidDate,
+  //       paidTime,
+  //       paymentType: String(stage),
+  //       amount: Number(amount),
+  //       method: String(method),
+  //       providerRef: p.providerRef || null, // ✅ cash will be null
+  //       formattedPaymentDate: paidAt ? `${paidDate} ${paidTime}` : "",
+  //     },
+  //   });
+  // } catch (e) {
+  //   console.log("storeVendorPaymentNotification error:", e?.message || e);
+  // }
+  try {
+    const paidAt = new Date();
+    const paidDate = moment(paidAt).format("DD/MM/YYYY"); // dd/mm/yyyy in most cases
+    const paidTime = moment(paidAt).format("hh:mm:ss A");
+
+    const customerName = booking?.customer?.name || "-";
+
+    const bookingUniqueId =
+      booking?.bookingDetails?.booking_id || "-";
+
+    const msg = `₹${Number(amount).toLocaleString()} paid by customer ${customerName} via ${String(
+      method
+    )}`;
+
+    await vendorNotification.create({
+      vendorId: String(vendorId),
+      notificationType: "PAYMENT",
+      thumbnailTitle: "Payment Received",
+      message: msg,
+      status: "unread",
+      metaData: {
+        customerName,
+        bookingId: bookingUniqueId,
+        leadId: String(booking?._id || ""), // as you want
+        paymentDate: paidAt.toISOString(),
+        paidDate,
+        paidTime,
+        paymentType: String(stage), // first/second/final
+        amount: Number(amount),
+        method: String(method), //upi or cash
+        providerRef: providerRef || null, // ✅ cash will be null
+        formattedPaymentDate: `${paidDate} ${paidTime}`,
+      },
+    });
+  } catch (e) {
+    console.log("vendor payment notification create error:", e?.message || e);
+  }
+};
+
 
 const resyncMilestonesFromLedger = (
   d,
@@ -5646,6 +5736,31 @@ exports.makePayment = async (req, res) => {
 
     await booking.save();
 
+    try {
+      const assigned = isAssignedToVendor(booking);
+
+      if (assigned) {
+        const isDeepCleaning =
+          String(serviceType).toLowerCase() === "deep_cleaning";
+
+        const shouldSkipForDeepCleaning =
+          isDeepCleaning && String(stage) === "first";
+
+        if (!shouldSkipForDeepCleaning) {
+          await storeVendorPaymentNotification({
+            vendorId: booking.assignedProfessional?.professionalId, // ✅ your booking vendorId
+            booking,
+            stage,
+            amount,
+            method: d.paymentMethod,
+            providerRef: providerRef
+          });
+        }
+      }
+    } catch (e) {
+      console.log("payment notification block error:", e);
+    }
+
     return res.json({
       success: true,
       message: finalJustPaidNow
@@ -6070,6 +6185,31 @@ exports.updateManualPayment = async (req, res) => {
     });
 
     await booking.save();
+
+    try {
+      const assigned = isAssignedToVendor(booking);
+
+      if (assigned) {
+        const isDeepCleaning =
+          String(serviceType).toLowerCase() === "deep_cleaning";
+
+        const shouldSkipForDeepCleaning =
+          isDeepCleaning && String(stage) === "first";
+
+        if (!shouldSkipForDeepCleaning) {
+          await storeVendorPaymentNotification({
+            vendorId: booking.assignedProfessional?.professionalId, // ✅ your booking vendorId
+            booking,
+            stage,
+            amount,
+            method: d.paymentMethod,
+            providerRef: providerRef
+          });
+        }
+      }
+    } catch (e) {
+      console.log("payment notification block error:", e);
+    }
 
     return res.status(200).json({
       success: true,
@@ -7294,7 +7434,7 @@ exports.updateBookingField = async (req, res) => {
 
 exports.setLeadReminder = async (req, res) => {
   try {
-    const { leadId, reminderAt } = req.body;
+    const { leadId, vendorId, reminderAt } = req.body;
 
     if (!leadId || !reminderAt) {
       return res.status(400).json({
@@ -7330,6 +7470,23 @@ exports.setLeadReminder = async (req, res) => {
     };
 
     await booking.save();
+
+    const newNotification = {
+      vendorId: String(vendorId),
+      notificationType: "REMINDER",
+      thumbnailTitle: "Lead Reminder",
+      message: "You have a reminder for a lead",
+      status: "unread",
+      metaData: { bookingId: String(leadId), },
+    };
+
+    try {
+      const created = await vendorNotification.create(newNotification);
+      console.log("✅ vendorNotification saved:", created._id);
+    } catch (e) {
+      console.log("❌ vendorNotification create failed:", e?.message);
+      if (e?.errors) console.log("validation errors:", Object.keys(e.errors));
+    }
 
     return res.json({
       success: true,

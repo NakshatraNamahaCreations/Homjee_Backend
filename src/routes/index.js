@@ -23,6 +23,7 @@ const slotForVendorReschedule = require("./vendor/slot");
 const vendorWalletSystem = require("./vendor/wallet");
 const cleaningCatalogRoutes = require("./servicePackage/cleaningCatalog.routes");
 const cityRoutes = require("./city/city.routes.js");
+const vendorNotification = require("../routes/notification/vendorNotification.js");
 
 router.use("/slots", slotRoutes);
 
@@ -49,6 +50,7 @@ router.use("/slot", slotForVendorReschedule);
 router.use("/wallet", vendorWalletSystem);
 router.use("/admin", cleaningCatalogRoutes);
 router.use("/city", cityRoutes);
+router.use("/notification", vendorNotification);
 
 router.get("/hello-world/testing", (req, res) => {
   res.json({ message: "Hi Jimmy!" });

@@ -2,6 +2,7 @@ import cron from "node-cron";
 import UserBooking from "../models/user/userBookings.js"; // ✅ change path/name
 import Vendor from "../models/vendor/vendorAuth.js"; // ✅ change path/name
 // import { sendPushToVendor } from "../utils/push.js"; // ✅ you create this
+import vendorNotification from "../models/notification/vendorNotification.js";
 
 export const startLeadReminderCron = () => {
     try {
@@ -46,15 +47,22 @@ export const startLeadReminderCron = () => {
                             continue;
                         }
 
-                        // ✅ Send push
-                        // await sendPushToVendor(vendor, {
-                        //   title: "Lead Reminder",
-                        //   body: "You have a reminder for a lead. Please check the app.",
-                        //   data: {
-                        //     bookingId: String(booking._id),
-                        //     leadId: String(booking.leadId || ""),
-                        //   },
-                        // });
+                        const newNotification = {
+                            vendorId: String(vendorId), // schema expects String
+                            notificationType: "REMINDER",
+                            thumbnailTitle: "Lead Reminder",
+                            message: "You have a reminder for a lead",
+                            status: "unread", // optional, default is unread
+                            metaData: { bookingId: String(booking._id), leadId: String(booking.leadId || "") }, // ✅ correct key
+                        };
+
+                        try {
+                            const created = await vendorNotification.create(newNotification);
+                            console.log("✅ vendorNotification saved:", created._id);
+                        } catch (e) {
+                            console.log("❌ vendorNotification create failed:", e?.message);
+                            if (e?.errors) console.log("validation errors:", Object.keys(e.errors));
+                        }
 
                         // ✅ Mark as sent
                         await UserBooking.updateOne(
