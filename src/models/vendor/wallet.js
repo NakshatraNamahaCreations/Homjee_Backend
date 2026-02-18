@@ -33,7 +33,7 @@ const vendorTransactionSchema = new mongoose.Schema(
         },
         transactionType: {
             type: String,
-            enum: ['wallet recharge', 'lead response', 'cancellation refund', 'reschedule refund'],
+            enum: ['wallet recharge', 'lead response', 'cancellation refund', 'reschedule refund', 'change vendor refund'],
             required: true,
         },
         type: {

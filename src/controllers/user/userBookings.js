@@ -2258,6 +2258,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     let respondedLeads = 0;
     let cancelledLeads = 0;
     let totalGsv = 0;
+    let totalNotifiedGsv = 0;
 
     // -------------------------------
     //  PROCESS EACH BOOKING
@@ -2268,6 +2269,9 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
         (sum, s) => sum + (s.price || 0) * (s.quantity || 0),
         0,
       );
+      // optional, if you want to keep total leads GSV separately
+      totalNotifiedGsv += bookingGsv;
+
       totalGsv += bookingGsv;
 
       // 2️⃣ Get vendor invitation
@@ -2282,8 +2286,11 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       // 3️⃣ Responded logic:
       // accepted = responded
       // customer_cancelled = vendor cancelled (this counts as responded)
-      if (status === "accepted" || status === "customer_cancelled") {
+      const isResponded = status === "accepted" || status === "customer_cancelled";
+
+      if (isResponded) {
         respondedLeads += 1;
+        totalGsv += bookingGsv;
       }
 
       // 4️⃣ Vendor cancellation KPI logic
@@ -2319,7 +2326,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     const cancellationRate =
       respondedLeads > 0 ? (cancelledLeads / respondedLeads) * 100 : 0;
 
-    const averageGsv = totalLeads > 0 ? totalGsv / totalLeads : 0;
+    const averageGsv = respondedLeads > 0 ? totalGsv / respondedLeads : 0;
 
     // -------------------------------
     //  RESPONSE
@@ -2369,7 +2376,6 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       });
     }
 
-    // Geo, category, enquiry filter
     const baseQuery = {
       "address.location": {
         $near: {
@@ -2383,39 +2389,28 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       "service.category": "House Painting",
       isEnquiry: false,
     };
+
     let query = { ...baseQuery };
 
-    // .................Average Rating..........star
+    // ---------------- Ratings (same as your code) ----------------
     let ratingMatch = { vendorId: new mongoose.Types.ObjectId(vendorId) };
 
-    // timeframe filter for ratings
     if (timeframe === "month") {
       const startOfMonth = moment().startOf("month").toDate();
       ratingMatch.createdAt = { $gte: startOfMonth };
+      query.createdDate = { $gte: startOfMonth }; // month filter for bookings
     }
 
-    // pipeline for "month" (all ratings in month) or "last" (last 50 ratings)
-    let ratingPipeline = [
-      { $match: ratingMatch },
-      { $sort: { createdAt: -1 } },
-    ];
+    let ratingPipeline = [{ $match: ratingMatch }, { $sort: { createdAt: -1 } }];
 
-    if (timeframe === "last") {
-      ratingPipeline.push({ $limit: 50 }); // last 50 ratings
-    }
+    if (timeframe === "last") ratingPipeline.push({ $limit: 50 });
 
-    // then group to compute average and countx`
     ratingPipeline.push({
       $group: {
         _id: null,
         totalRatings: { $sum: 1 },
         sumRatings: { $sum: "$rating" },
-        // NEW: strikes count (1-star or 2-star)
-        strikes: {
-          $sum: {
-            $cond: [{ $lte: ["$rating", 2] }, 1, 0],
-          },
-        },
+        strikes: { $sum: { $cond: [{ $lte: ["$rating", 2] }, 1, 0] } },
       },
     });
 
@@ -2431,26 +2426,16 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       strikes = ratingStats[0].strikes || 0;
     }
 
-    // .................................
-    // Month filter
-    if (timeframe === "month") {
-      const startOfMonth = moment().startOf("month").toDate();
-      query.createdDate = { $gte: startOfMonth };
-    }
+    // ---------------- Fetch bookings ----------------
+    // IMPORTANT:
+    // For "last", we can't just limit 50 bookings because we need last 50 HIRED leads.
+    // We'll fetch a bigger window and stop once we collect 50 hired.
+    let bookingsQuery = UserBooking.find(query).sort({ createdDate: -1 });
 
-    let bookingsQuery = UserBooking.find(query);
-    if (timeframe === "last") {
-      bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
-    }
-    const bookings = await bookingsQuery.exec();
+    const fetchLimit = timeframe === "last" ? 300 : 0; // tune if needed
+    const bookings = fetchLimit ? await bookingsQuery.limit(fetchLimit).exec() : await bookingsQuery.exec();
 
-    // Metrics
-    let totalLeads = bookings.length;
-    let surveyLeads = 0;
-    let hiredLeads = 0;
-    let totalGsv = 0;
-
-    if (totalLeads === 0) {
+    if (!bookings.length) {
       return res.status(200).json({
         surveyRate: 0,
         hiringRate: 0,
@@ -2459,74 +2444,261 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
         surveyLeads: 0,
         hiredLeads: 0,
         timeframe,
-        // new fields
         averageRating: 0,
         totalRatings: 0,
         strikes: 0,
       });
     }
 
+    // ---------------- Metrics ----------------
+    let totalLeads = 0;     // ✅ leads relevant to vendor (notified/assigned)
+    let surveyLeads = 0;    // ✅ among vendor leads
+    let hiredLeads = 0;     // ✅ among vendor leads
+    let totalHiredGsv = 0;  // ✅ sum of finalTotal for hired leads only
+
     for (const booking of bookings) {
-      // Only count leads for THIS vendor (use invitedVendors or assignedProfessional)
       const invited = (booking.invitedVendors || []).find(
-        (v) => String(v.professionalId) === String(vendorId),
+        (v) => String(v.professionalId) === String(vendorId)
       );
-      if (!invited) continue;
+
+      const assignedToVendor =
+        String(booking?.assignedProfessional?.professionalId || "") === String(vendorId);
+
+      // ✅ This lead is considered for this vendor if invited OR assigned
+      if (!invited && !assignedToVendor) continue;
+
+      totalLeads += 1;
 
       // ------ SURVEY LOGIC ------
-      // "vendor has actually started the job"
-      if (
-        booking.bookingDetails &&
-        (booking.bookingDetails.status === "Project Ongoing" || // actively started
-          booking.bookingDetails.status === "Survey Ongoing" || // survey started
-          (booking.assignedProfessional &&
-            booking.assignedProfessional.startedDate))
-      ) {
-        surveyLeads++;
-      }
+      const isSurvey =
+        booking?.bookingDetails &&
+        (booking.bookingDetails.status === "Project Ongoing" ||
+          booking.bookingDetails.status === "Survey Ongoing" ||
+          booking.bookingDetails.status === "Survey Completed" ||
+          !!booking?.assignedProfessional?.startedDate ||
+          !!booking?.bookingDetails?.isSurveyStarted);
+
+      if (isSurvey) surveyLeads += 1;
 
       // ------ HIRING LOGIC ------
-      // "customer paid, project confirmed"
-      if (
-        booking.bookingDetails &&
-        (booking.bookingDetails.status === "Hired" || // status marks hired
-          booking.bookingDetails.status === "Project Ongoing" || // project in progress
+      const isHired =
+        booking?.bookingDetails &&
+        (booking.bookingDetails.status === "Hired" ||
+          booking.bookingDetails.status === "Project Ongoing" ||
+          booking.bookingDetails.status === "Waiting for final payment" ||
+          booking.bookingDetails.status === "Project Completed" ||
           (booking.bookingDetails.firstPayment &&
-            booking.bookingDetails.firstPayment.status === "paid")) // milestone paid
-      ) {
-        hiredLeads++;
-      }
+            booking.bookingDetails.firstPayment.status === "paid") ||
+          !!booking?.assignedProfessional?.hiring?.hiredDate); // ✅ best signal from your sample
 
-      // ------ GSV LOGIC ------
-      // Use finalTotal (the actual job value)
-      totalGsv += booking.bookingDetails
-        ? booking.bookingDetails.finalTotal || 0
-        : 0;
+      if (isHired) {
+        hiredLeads += 1;
+
+        const gsv = Number(booking?.bookingDetails?.finalTotal || 0);
+        totalHiredGsv += gsv;
+
+        // ✅ for timeframe=last: stop after last 50 hired leads
+        if (timeframe === "last" && hiredLeads >= 50) break;
+      }
     }
 
-    // KPIs
+    // KPIs (use vendor-relevant totalLeads)
     const surveyRate = totalLeads > 0 ? (surveyLeads / totalLeads) * 100 : 0;
     const hiringRate = totalLeads > 0 ? (hiredLeads / totalLeads) * 100 : 0;
-    const averageGsv = totalLeads > 0 ? totalGsv / totalLeads : 0;
 
-    res.status(200).json({
+    // ✅ Average GSV based on hired leads ONLY
+    // If you strictly want "/50" for last 50 hired leads, denom is 50 once you reach it.
+    const denom =
+      timeframe === "last" ? Math.min(hiredLeads, 50) : hiredLeads;
+
+    const averageGsv = denom > 0 ? totalHiredGsv / denom : 0;
+
+    return res.status(200).json({
       surveyRate: parseFloat(surveyRate.toFixed(2)),
       hiringRate: parseFloat(hiringRate.toFixed(2)),
       averageGsv: parseFloat(averageGsv.toFixed(2)),
-      totalLeads,
+      totalLeads,       // ✅ vendor-relevant leads
       surveyLeads,
       hiredLeads,
       timeframe,
-      // ava.rating..
       averageRating: parseFloat(averageRating.toFixed(2)),
       totalRatings,
-      strikes, // total 1★ + 2★ ratings in the selected timeframe
+      strikes,
     });
   } catch (error) {
     console.error("Error calculating house painters vendor metrics:", error);
-    res.status(500).json({ message: "Server error calculating performance" });
+    return res.status(500).json({ message: "Server error calculating performance" });
   }
 };
+// calculating GSV with total lead not hired. -- wrong
+// exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
+//   try {
+//     const { vendorId, lat, long, timeframe } = req.params;
+
+//     if (!vendorId || !lat || !long || !timeframe) {
+//       return res.status(400).json({
+//         message: "Vendor ID, Latitude, Longitude, and Timeframe are required",
+//       });
+//     }
+
+//     // Geo, category, enquiry filter
+//     const baseQuery = {
+//       "address.location": {
+//         $near: {
+//           $geometry: {
+//             type: "Point",
+//             coordinates: [parseFloat(long), parseFloat(lat)],
+//           },
+//           $maxDistance: 5000,
+//         },
+//       },
+//       "service.category": "House Painting",
+//       isEnquiry: false,
+//     };
+//     let query = { ...baseQuery };
+
+//     // .................Average Rating..........star
+//     let ratingMatch = { vendorId: new mongoose.Types.ObjectId(vendorId) };
+
+//     // timeframe filter for ratings
+//     if (timeframe === "month") {
+//       const startOfMonth = moment().startOf("month").toDate();
+//       ratingMatch.createdAt = { $gte: startOfMonth };
+//     }
+
+//     // pipeline for "month" (all ratings in month) or "last" (last 50 ratings)
+//     let ratingPipeline = [
+//       { $match: ratingMatch },
+//       { $sort: { createdAt: -1 } },
+//     ];
+
+//     if (timeframe === "last") {
+//       ratingPipeline.push({ $limit: 50 }); // last 50 ratings
+//     }
+
+//     // then group to compute average and countx`
+//     ratingPipeline.push({
+//       $group: {
+//         _id: null,
+//         totalRatings: { $sum: 1 },
+//         sumRatings: { $sum: "$rating" },
+//         // NEW: strikes count (1-star or 2-star)
+//         strikes: {
+//           $sum: {
+//             $cond: [{ $lte: ["$rating", 2] }, 1, 0],
+//           },
+//         },
+//       },
+//     });
+
+//     const ratingStats = await VendorRating.aggregate(ratingPipeline);
+
+//     let averageRating = 0;
+//     let totalRatings = 0;
+//     let strikes = 0;
+
+//     if (ratingStats.length > 0 && ratingStats[0].totalRatings > 0) {
+//       totalRatings = ratingStats[0].totalRatings;
+//       averageRating = ratingStats[0].sumRatings / ratingStats[0].totalRatings;
+//       strikes = ratingStats[0].strikes || 0;
+//     }
+
+//     // .................................
+//     // Month filter
+//     if (timeframe === "month") {
+//       const startOfMonth = moment().startOf("month").toDate();
+//       query.createdDate = { $gte: startOfMonth };
+//     }
+
+//     let bookingsQuery = UserBooking.find(query);
+//     if (timeframe === "last") {
+//       bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
+//     }
+//     const bookings = await bookingsQuery.exec();
+
+//     // Metrics
+//     let totalLeads = bookings.length;
+//     let surveyLeads = 0;
+//     let hiredLeads = 0;
+//     let totalGsv = 0;
+
+//     if (totalLeads === 0) {
+//       return res.status(200).json({
+//         surveyRate: 0,
+//         hiringRate: 0,
+//         averageGsv: 0,
+//         totalLeads: 0,
+//         surveyLeads: 0,
+//         hiredLeads: 0,
+//         timeframe,
+//         // new fields
+//         averageRating: 0,
+//         totalRatings: 0,
+//         strikes: 0,
+//       });
+//     }
+
+//     for (const booking of bookings) {
+//       // Only count leads for THIS vendor (use invitedVendors or assignedProfessional)
+//       const invited = (booking.invitedVendors || []).find(
+//         (v) => String(v.professionalId) === String(vendorId),
+//       );
+//       if (!invited) continue;
+
+//       // ------ SURVEY LOGIC ------
+//       // "vendor has actually started the job"
+//       if (
+//         booking.bookingDetails &&
+//         (booking.bookingDetails.status === "Project Ongoing" || // actively started
+//           booking.bookingDetails.status === "Survey Ongoing" || // survey started
+//           (booking.assignedProfessional &&
+//             booking.assignedProfessional.startedDate))
+//       ) {
+//         surveyLeads++;
+//       }
+
+//       // ------ HIRING LOGIC ------
+//       // "customer paid, project confirmed"
+//       if (
+//         booking.bookingDetails &&
+//         (booking.bookingDetails.status === "Hired" || // status marks hired
+//           booking.bookingDetails.status === "Project Ongoing" || // project in progress
+//           (booking.bookingDetails.firstPayment &&
+//             booking.bookingDetails.firstPayment.status === "paid")) // milestone paid
+//       ) {
+//         hiredLeads++;
+//       }
+
+//       // ------ GSV LOGIC ------
+//       // Use finalTotal (the actual job value)
+//       totalGsv += booking.bookingDetails
+//         ? booking.bookingDetails.finalTotal || 0
+//         : 0;
+//     }
+
+//     // KPIs
+//     const surveyRate = totalLeads > 0 ? (surveyLeads / totalLeads) * 100 : 0;
+//     const hiringRate = totalLeads > 0 ? (hiredLeads / totalLeads) * 100 : 0;
+//     const averageGsv = totalLeads > 0 ? totalGsv / totalLeads : 0;
+
+//     res.status(200).json({
+//       surveyRate: parseFloat(surveyRate.toFixed(2)),
+//       hiringRate: parseFloat(hiringRate.toFixed(2)),
+//       averageGsv: parseFloat(averageGsv.toFixed(2)),
+//       totalLeads,
+//       surveyLeads,
+//       hiredLeads,
+//       timeframe,
+//       // ava.rating..
+//       averageRating: parseFloat(averageRating.toFixed(2)),
+//       totalRatings,
+//       strikes, // total 1★ + 2★ ratings in the selected timeframe
+//     });
+//   } catch (error) {
+//     console.error("Error calculating house painters vendor metrics:", error);
+//     res.status(500).json({ message: "Server error calculating performance" });
+//   }
+// };
 
 // Helper function to calculate ratings for a vendor
 const calculateVendorRatings = async (vendorId, timeframe) => {
@@ -6253,6 +6425,7 @@ exports.adminToCustomerPayment = async (req, res) => {
     }
 
     const amount = Number(paidAmount);
+
     if (amount <= 0) {
       return res.status(400).json({
         success: false,
@@ -6345,7 +6518,6 @@ exports.adminToCustomerPayment = async (req, res) => {
     });
   }
 };
-
 
 // Update address and reset selected slots
 exports.updateAddressAndResetSlots = async (req, res) => {
@@ -7499,6 +7671,303 @@ exports.setLeadReminder = async (req, res) => {
     return res.status(500).json({ success: false, message: "Server error" });
   }
 };
+
+exports.changeVendor = async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { bookingId, oldVendorId, newVendorId, changedBy, reason } = req.body;
+
+    if (!bookingId)
+      return res.status(400).json({ success: false, message: "bookingId is required" });
+    if (!oldVendorId)
+      return res.status(400).json({ success: false, message: "oldVendorId is required" });
+    if (!newVendorId)
+      return res.status(400).json({ success: false, message: "newVendorId is required" });
+
+    if (String(oldVendorId) === String(newVendorId)) {
+      return res.status(400).json({
+        success: false,
+        message: "oldVendorId and newVendorId cannot be same",
+      });
+    }
+
+    const n = (v) => {
+      const x = Number(v);
+      return Number.isFinite(x) ? x : 0;
+    };
+
+    const pad2 = (x) => String(x).padStart(2, "0");
+    const nowStr = () => {
+      const d = new Date();
+      return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+    };
+
+    let updatedBooking = null;
+
+    await session.withTransaction(async () => {
+      // 1) Load booking
+      const booking = await UserBooking.findById(bookingId).session(session);
+      if (!booking) {
+        const err = new Error("Booking not found");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      // 2) Required coins (coinDeduction already includes qty)
+      const requiredCoins = (booking.service || []).reduce(
+        (sum, s) => sum + n(s?.coinDeduction),
+        0
+      );
+
+      if (requiredCoins <= 0) {
+        const err = new Error("Coin deduction not configured for this booking.");
+        err.statusCode = 400;
+        throw err;
+      }
+
+      // 3) Old vendor invite entry
+      const oldInvite = (booking.invitedVendors || []).find(
+        (iv) => String(iv.professionalId) === String(oldVendorId)
+      );
+
+      const oldHadDeduction = !!oldInvite?.coinsDeducted;
+      const refundCoins = oldHadDeduction ? n(oldInvite?.coinsDeductedValue) : 0;
+
+      // 4) Ensure new vendor invite exists
+      await UserBooking.updateOne(
+        {
+          _id: bookingId,
+          "invitedVendors.professionalId": { $ne: String(newVendorId) },
+        },
+        {
+          $addToSet: {
+            invitedVendors: {
+              professionalId: String(newVendorId),
+              invitedAt: new Date(),
+              responseStatus: "pending",
+              coinsDeducted: false,
+              coinsDeductedValue: 0,
+              coinsRefunded: false,
+              coinsRefundedValue: 0,
+            },
+          },
+        },
+        { session }
+      );
+
+      // Re-fetch for latest invites
+      const booking2 = await UserBooking.findById(bookingId).session(session);
+      if (!booking2) {
+        const err = new Error("Booking not found");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const newInvite = (booking2.invitedVendors || []).find(
+        (iv) => String(iv.professionalId) === String(newVendorId)
+      );
+      const newAlreadyDeducted = !!newInvite?.coinsDeducted;
+
+      // 5) Deduct from NEW vendor (only if not already deducted)
+      if (!newAlreadyDeducted) {
+        const deductRes = await vendorAuthSchema.updateOne(
+          { _id: newVendorId, "wallet.coins": { $gte: requiredCoins } },
+          { $inc: { "wallet.coins": -requiredCoins } },
+          { session }
+        );
+
+        if (deductRes.matchedCount === 0) {
+          const vendorNow = await vendorAuthSchema.findById(newVendorId).session(session);
+          const available = n(vendorNow?.wallet?.coins);
+
+          const err = new Error(
+            `New vendor has insufficient wallet coins. Required ${requiredCoins}, available ${available}.`
+          );
+          err.statusCode = 400;
+          throw err;
+        }
+
+        const newVendorAfter = await vendorAuthSchema.findById(newVendorId).session(session);
+        const newCoins = n(newVendorAfter?.wallet?.coins);
+
+        await vendorAuthSchema.updateOne(
+          { _id: newVendorId },
+          { $set: { "wallet.canRespondLead": newCoins > 0 } },
+          { session }
+        );
+
+        // new vendor respond (assigned) so deduct
+        await walletTransaction.create(
+          [
+            {
+              vendorId: String(newVendorId),
+              title: "Lead Responded",
+              coin: requiredCoins,
+              transactionType: "lead response",
+              amount: 0,
+              gst18Perc: 0,
+              totalPaid: 0,
+              type: "deduct",
+              date: new Date(),
+              metaData: {
+                bookingId,
+                bookingCode: booking2?.bookingDetails?.booking_id,
+                serviceType: booking2?.serviceType,
+                oldVendorId: String(oldVendorId),
+                newVendorId: String(newVendorId),
+                reason: reason || "Change vendor so coin deducted",
+                changedBy: changedBy || "admin",
+              },
+            },
+          ],
+          { session }
+        );
+      }
+
+      // 6) Refund OLD vendor (only if deducted before and not already refunded)
+      // optional safety: prevent double refund
+      const oldAlreadyRefunded = !!oldInvite?.coinsRefunded;
+
+      if (refundCoins > 0 && !oldAlreadyRefunded) {
+        await vendorAuthSchema.updateOne(
+          { _id: oldVendorId },
+          { $inc: { "wallet.coins": refundCoins } },
+          { session }
+        );
+
+        const oldVendorAfter = await vendorAuthSchema.findById(oldVendorId).session(session);
+        const oldCoins = n(oldVendorAfter?.wallet?.coins);
+
+        await vendorAuthSchema.updateOne(
+          { _id: oldVendorId },
+          { $set: { "wallet.canRespondLead": oldCoins > 0 } },
+          { session }
+        );
+        // refund to old vendor so add
+        await walletTransaction.create(
+          [
+            {
+              vendorId: String(oldVendorId),
+              title: "Vendor change (refund)",
+              coin: refundCoins,
+              transactionType: "change vendor refund",
+              amount: 0,
+              gst18Perc: 0,
+              totalPaid: 0,
+              type: "added",
+              date: new Date(),
+              metaData: {
+                bookingId,
+                bookingCode: booking2?.bookingDetails?.booking_id,
+                serviceType: booking2?.serviceType,
+                oldVendorId: String(oldVendorId),
+                newVendorId: String(newVendorId),
+                reason: reason || "vendor changed so coin refunded",
+                changedBy: changedBy || "admin",
+              },
+            },
+          ],
+          { session }
+        );
+      }
+
+      // 7) Build assignedProfessional OBJECT (✅ matches schema)
+      const newVendorDoc = await vendorAuthSchema
+        .findById(newVendorId)
+        .select("_id name phone mobileNumber phoneNumber profile")
+        .session(session);
+
+      if (!newVendorDoc) {
+        const err = new Error("New vendor not found");
+        err.statusCode = 404;
+        throw err;
+      }
+
+      const assignedProfessionalObj = {
+        professionalId: String(newVendorDoc._id),
+        name: newVendorDoc.name || "-",
+        phone:
+          newVendorDoc.mobileNumber ||
+          newVendorDoc.phoneNumber ||
+          newVendorDoc.phone ||
+          "",
+        profile: newVendorDoc.profile || "",
+        acceptedDate: new Date(),
+        acceptedTime: nowStr(),
+        // keep other fields empty; schema allows them
+      };
+
+      // 8) Update booking + invited vendor entries
+      const now = new Date();
+
+      const setOps = {
+        assignedProfessional: assignedProfessionalObj,
+
+        // old vendor status must be one of enum values
+        "invitedVendors.$[old].responseStatus": "declined",
+        "invitedVendors.$[old].cancelledAt": now,
+        "invitedVendors.$[old].cancelledBy": "external",
+
+        // mark refund flags on old invite if refunded
+        ...(refundCoins > 0 && !oldAlreadyRefunded
+          ? {
+            "invitedVendors.$[old].coinsRefunded": true,
+            "invitedVendors.$[old].coinsRefundedAt": now,
+            "invitedVendors.$[old].coinsRefundedValue": refundCoins,
+          }
+          : {}),
+
+        // new vendor invite status (must be enum) - "accepted" works
+        "invitedVendors.$[new].responseStatus": "accepted",
+        "invitedVendors.$[new].respondedAt": now,
+      };
+
+      if (!newAlreadyDeducted) {
+        setOps["invitedVendors.$[new].coinsDeducted"] = true;
+        setOps["invitedVendors.$[new].coinsDeductedAt"] = now;
+        setOps["invitedVendors.$[new].coinsDeductedValue"] = requiredCoins;
+      }
+
+      updatedBooking = await UserBooking.findOneAndUpdate(
+        { _id: bookingId },
+        { $set: setOps },
+        {
+          new: true,
+          runValidators: true,
+          session,
+          arrayFilters: [
+            { "old.professionalId": String(oldVendorId) }, // ✅ correct key
+            { "new.professionalId": String(newVendorId) }, // ✅ correct key
+          ],
+        }
+      );
+
+      if (!updatedBooking) {
+        const err = new Error("Booking not found");
+        err.statusCode = 404;
+        throw err;
+      }
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Vendor changed successfully",
+      booking: updatedBooking,
+    });
+  } catch (error) {
+    console.error("Error in changing Vendor:", error);
+    return res.status(error.statusCode || 500).json({
+      success: false,
+      message: error?.message || "Server error",
+    });
+  } finally {
+    session.endSession();
+  }
+};
+
+
+
 
 // > { issues while updating remaining amt after successful partial payment [cash/UPI]
 // makePayment API not updating remaining amt to the second installment.amt.
