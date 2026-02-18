@@ -2225,7 +2225,6 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
   }
 };
 
-
 // house painting performance metrics
 exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
   try {
@@ -2253,17 +2252,21 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
 
     let query = { ...baseQuery };
 
-    // ---------------- Ratings (same as your code) ----------------
+    // ---------------- Ratings ----------------
     let ratingMatch = { vendorId: new mongoose.Types.ObjectId(vendorId) };
 
     if (timeframe === "month") {
       const startOfMonth = moment().startOf("month").toDate();
       ratingMatch.createdAt = { $gte: startOfMonth };
-      query.createdDate = { $gte: startOfMonth }; // month filter for bookings
+      query.createdDate = { $gte: startOfMonth };
     }
 
-    let ratingPipeline = [{ $match: ratingMatch }, { $sort: { createdAt: -1 } }];
+    let ratingPipeline = [
+      { $match: ratingMatch },
+      { $sort: { createdAt: -1 } },
+    ];
 
+    // as per your existing behavior
     if (timeframe === "last") ratingPipeline.push({ $limit: 50 });
 
     ratingPipeline.push({
@@ -2288,13 +2291,13 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     }
 
     // ---------------- Fetch bookings ----------------
-    // IMPORTANT:
-    // For "last", we can't just limit 50 bookings because we need last 50 HIRED leads.
-    // We'll fetch a bigger window and stop once we collect 50 hired.
+    // We need to compute "recent 50 hired leads" (or fewer),
+    // so fetch a window and stop once we collected 50 HIRED.
     let bookingsQuery = UserBooking.find(query).sort({ createdDate: -1 });
 
-    const fetchLimit = timeframe === "last" ? 300 : 0; // tune if needed
-    const bookings = fetchLimit ? await bookingsQuery.limit(fetchLimit).exec() : await bookingsQuery.exec();
+    // month can also exceed 50, so still fetch enough
+    const fetchLimit = 500; // safe window; adjust if your volume is huge
+    const bookings = await bookingsQuery.limit(fetchLimit).exec();
 
     if (!bookings.length) {
       return res.status(200).json({
@@ -2312,10 +2315,11 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     }
 
     // ---------------- Metrics ----------------
-    let totalLeads = 0;     // ✅ leads relevant to vendor (notified/assigned)
-    let surveyLeads = 0;    // ✅ among vendor leads
-    let hiredLeads = 0;     // ✅ among vendor leads
-    let totalHiredGsv = 0;  // ✅ sum of finalTotal for hired leads only
+    let totalLeads = 0;        // vendor relevant leads (invited OR assigned)
+    let surveyLeads = 0;
+    let hiredLeads = 0;        // total hired in fetched window (we cap selection at 50)
+    let selectedHiredCount = 0; // ✅ used for Avg GSV denominator (<= 50)
+    let totalSelectedHiredGsv = 0;
 
     for (const booking of bookings) {
       const invited = (booking.invitedVendors || []).find(
@@ -2325,7 +2329,7 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       const assignedToVendor =
         String(booking?.assignedProfessional?.professionalId || "") === String(vendorId);
 
-      // ✅ This lead is considered for this vendor if invited OR assigned
+      // lead relevant to this vendor
       if (!invited && !assignedToVendor) continue;
 
       totalLeads += 1;
@@ -2350,48 +2354,52 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
           booking.bookingDetails.status === "Project Completed" ||
           (booking.bookingDetails.firstPayment &&
             booking.bookingDetails.firstPayment.status === "paid") ||
-          !!booking?.assignedProfessional?.hiring?.hiredDate); // ✅ best signal from your sample
+          !!booking?.assignedProfessional?.hiring?.hiredDate);
 
       if (isHired) {
         hiredLeads += 1;
 
-        const gsv = Number(booking?.bookingDetails?.finalTotal || 0);
-        totalHiredGsv += gsv;
+        // ✅ select only the most recent 50 hired leads (or fewer)
+        if (selectedHiredCount < 50) {
+          const gsv = Number(booking?.bookingDetails?.finalTotal || 0);
+          totalSelectedHiredGsv += gsv;
+          selectedHiredCount += 1;
+        }
 
-        // ✅ for timeframe=last: stop after last 50 hired leads
-        if (timeframe === "last" && hiredLeads >= 50) break;
+        // If we've selected 50 hired leads, we can stop early (since sorted desc)
+        if (selectedHiredCount >= 50) break;
       }
     }
 
-    // KPIs (use vendor-relevant totalLeads)
+    // KPIs
     const surveyRate = totalLeads > 0 ? (surveyLeads / totalLeads) * 100 : 0;
     const hiringRate = totalLeads > 0 ? (hiredLeads / totalLeads) * 100 : 0;
 
-    // ✅ Average GSV based on hired leads ONLY
-    // If you strictly want "/50" for last 50 hired leads, denom is 50 once you reach it.
-    const denom =
-      timeframe === "last" ? Math.min(hiredLeads, 50) : hiredLeads;
-
-    const averageGsv = denom > 0 ? totalHiredGsv / denom : 0;
+    // ✅ Avg GSV = (sum of selected hired lead values) / (count of selected hired leads)
+    // selectedHiredCount is <= 50, could be below 50
+    const averageGsv =
+      selectedHiredCount > 0 ? totalSelectedHiredGsv / selectedHiredCount : 0;
 
     return res.status(200).json({
       surveyRate: parseFloat(surveyRate.toFixed(2)),
       hiringRate: parseFloat(hiringRate.toFixed(2)),
       averageGsv: parseFloat(averageGsv.toFixed(2)),
-      totalLeads,       // ✅ vendor-relevant leads
+      totalLeads,
       surveyLeads,
       hiredLeads,
       timeframe,
       averageRating: parseFloat(averageRating.toFixed(2)),
       totalRatings,
       strikes,
+      // helpful for debugging/validation
+      selectedHiredCount, // ✅ shows whether we used 50 or less
+      totalSelectedHiredGsv: parseFloat(totalSelectedHiredGsv.toFixed(2)),
     });
   } catch (error) {
     console.error("Error calculating house painters vendor metrics:", error);
     return res.status(500).json({ message: "Server error calculating performance" });
   }
 };
-
 
 // calculating GSV with total lead not hired. -- wrong
 
