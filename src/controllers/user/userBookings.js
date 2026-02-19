@@ -7867,8 +7867,10 @@ exports.changeVendor = async (req, res) => {
       // 7) Build assignedProfessional OBJECT (✅ matches schema)
       const newVendorDoc = await vendorAuthSchema
         .findById(newVendorId)
-        .select("_id name phone mobileNumber phoneNumber profile")
+        .select("_id vendor.vendorName vendor.mobileNumber vendor.profileImage")
         .session(session);
+
+      console.log("vendorAuthSchema", newVendorDoc)
 
       if (!newVendorDoc) {
         const err = new Error("New vendor not found");
@@ -7878,13 +7880,9 @@ exports.changeVendor = async (req, res) => {
 
       const assignedProfessionalObj = {
         professionalId: String(newVendorDoc._id),
-        name: newVendorDoc.name || "-",
-        phone:
-          newVendorDoc.mobileNumber ||
-          newVendorDoc.phoneNumber ||
-          newVendorDoc.phone ||
-          "",
-        profile: newVendorDoc.profile || "",
+        name: newVendorDoc.vendor.vendorName || "-",
+        phone: newVendorDoc.vendor.mobileNumber || "-",
+        profile: newVendorDoc.vendor.profileImage || "",
         acceptedDate: new Date(),
         acceptedTime: nowStr(),
         // keep other fields empty; schema allows them
