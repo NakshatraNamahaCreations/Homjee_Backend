@@ -4,6 +4,7 @@ const quoteController = require("../../controllers/measurement/Quote");
 
 router.post("/create-quote", quoteController.createQuote);
 router.get("/get-quotes/:id", quoteController.getQuoteById);
+router.get("/get-quotation-by/quotationId/:id", quoteController.getQuoteByQuoteId);
 router.get(
   "/quotes-list-by-id",
   quoteController.listQuotesByLeadAndMeasurement

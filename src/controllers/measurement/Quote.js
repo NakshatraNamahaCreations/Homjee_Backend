@@ -9,10 +9,6 @@ const toNum = (v) => (Number.isFinite(+v) ? +v : 0);
 
 const round2 = (n) => +Number(n || 0).toFixed(2);
 
-function generateQuoteNo() {
-  return `Q${Date.now()}`;
-}
-
 function toListItem(q) {
   return {
     id: String(q._id),
@@ -1100,6 +1096,25 @@ exports.getFinalizedQuoteByLeadId = async (req, res) => {
   } catch (err) {
     console.error("getFinalizedQuoteByLeadId error:", err);
     return res.status(500).json({ message: "Server error" });
+  }
+};
+
+exports.getQuoteByQuoteId = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const data = await Quote.findById(id);
+
+    if (!data) {
+      return res
+        .status(404)
+        .json({ message: "No Quotation found" });
+    }
+
+    res.status(200).json({ quote: data });
+  } catch (error) {
+    console.error("Error fetching Quotation by Quotation ID:", error);
+    res.status(500).json({ message: "Server error" });
   }
 };
 
