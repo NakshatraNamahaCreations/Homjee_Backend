@@ -114,9 +114,9 @@ exports.getAvailableSlots = async (req, res) => {
       reason: result.slots.length
         ? null
         : {
-            ...result.reasons,
-            message: getReasonMessage(result.reasons),
-          },
+          ...result.reasons,
+          message: getReasonMessage(result.reasons),
+        },
     });
   } catch (err) {
     console.error("❌ SLOT ERROR:", err);
@@ -132,8 +132,8 @@ exports.getWebsiteAvailableSlots = async (req, res) => {
   try {
     const { serviceType, services, date, lat, lng } = req.body;
 
-    console.log("\n================ WEBSITE SLOT API HIT ================");
-    console.log("REQUEST:", req.body);
+    // console.log("\n================ WEBSITE SLOT API HIT ================");
+    // console.log("REQUEST:", req.body);
 
     if (!serviceType || !date || lat == null || lng == null) {
       return res.status(400).json({
@@ -171,8 +171,8 @@ exports.getWebsiteAvailableSlots = async (req, res) => {
         ...services.map(s => Number(s.teamMembers || 1))
       );
 
-      console.log("DEEP CLEANING DURATION:", serviceDuration);
-      console.log("DEEP CLEANING TEAM:", minTeamMembers);
+      // console.log("DEEP CLEANING DURATION:", serviceDuration);
+      // console.log("DEEP CLEANING TEAM:", minTeamMembers);
     }
 
     /* ================= WEBSITE HOUSE PAINTING ================= */
@@ -181,13 +181,13 @@ exports.getWebsiteAvailableSlots = async (req, res) => {
       serviceDuration = 30;
       minTeamMembers = 1;
 
-      console.log("HOUSE PAINTING SLOT CHECK (ADMIN LOGIC)");
+      // console.log("HOUSE PAINTING SLOT CHECK (ADMIN LOGIC)");
     }
 
     /* ================= FETCH DATA ================= */
 
     const vendors = await Vendor.find({}).lean();
-    console.log("FETCHED VENDORS:", vendors.length);
+    // console.log("FETCHED VENDORS:", vendors.length);
 
     const bookings = await Booking.find({
       isEnquiry: false,
@@ -198,7 +198,7 @@ exports.getWebsiteAvailableSlots = async (req, res) => {
       },
     }).lean();
 
-    console.log("FETCHED BOOKINGS:", bookings.length);
+    // console.log("FETCHED BOOKINGS:", bookings.length);
 
     /* ================= SLOT ENGINE ================= */
 
@@ -220,7 +220,7 @@ exports.getWebsiteAvailableSlots = async (req, res) => {
       reason: result.slots.length ? null : result.reasons,
     });
   } catch (err) {
-    console.error("❌ WEBSITE SLOT ERROR:", err);
+    // console.error("❌ WEBSITE SLOT ERROR:", err);
     return res.status(500).json({
       success: false,
       message: "Website slot calculation failed",
@@ -230,7 +230,7 @@ exports.getWebsiteAvailableSlots = async (req, res) => {
 
 
 
-// old code 
+// old code
 // const Vendor = require("../models/vendor/vendorAuth");
 // const Booking = require("../models/user/userBookings");
 // const DeepCleaningPackage = require("../models/products/DeepCleaningPackage");

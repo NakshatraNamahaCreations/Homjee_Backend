@@ -14,6 +14,7 @@ const VendorRating = require("../../models/vendor/vendorRating");
 const vendorAuthSchema = require("../../models/vendor/vendorAuth");
 const walletTransaction = require("../../models/vendor/wallet");
 const vendorNotification = require("../../models/notification/vendorNotification");
+const { createRazorpayOrderForBooking } = require("../../payments/payment.service");
 
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
@@ -839,7 +840,352 @@ const CANCELLED_STATUSES = Object.freeze([
 
 // ..........................API's.......................................
 // BOOKED FROM THE WEBSITE
+
 exports.createBooking = async (req, res) => {
+  try {
+    const {
+      customer,
+      service,
+      bookingDetails,
+      assignedProfessional,
+      address,
+      selectedSlot,
+      isEnquiry,
+      formName,
+    } = req.body;
+
+    // ------------------------------
+    // Basic validations
+    // ------------------------------
+    if (!customer?.phone) {
+      return res.status(400).json({ message: "customer.phone is required" });
+    }
+
+    if (!customer?.name) {
+      return res.status(400).json({ message: "customer.name is required" });
+    }
+
+    if (!service || !Array.isArray(service) || service.length === 0) {
+      return res.status(400).json({ message: "Service list cannot be empty." });
+    }
+
+    // ------------------------------
+    // Address coords validation
+    // ------------------------------
+    let coords = [0, 0];
+    if (
+      address?.location?.coordinates &&
+      Array.isArray(address.location.coordinates) &&
+      address.location.coordinates.length === 2 &&
+      typeof address.location.coordinates[0] === "number" &&
+      typeof address.location.coordinates[1] === "number"
+    ) {
+      coords = address.location.coordinates;
+    } else {
+      return res
+        .status(400)
+        .json({ message: "Invalid or missing address coordinates." });
+    }
+
+    // ------------------------------
+    // Ensure user exists (create if not)
+    // ------------------------------
+    let checkUserIsExistOrNot = await userSchema.findOne({
+      mobileNumber: customer.phone,
+    });
+
+    if (!checkUserIsExistOrNot) {
+      checkUserIsExistOrNot = new userSchema({
+        userName: customer.name,
+        mobileNumber: customer.phone,
+        savedAddress: {
+          uniqueCode: `ADDR-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          address: address?.streetArea || "",
+          houseNumber: address?.houseFlatNumber || "",
+          landmark: address?.landMark || "",
+          latitude: coords[1],
+          longitude: coords[0],
+          city: address?.city || "",
+        },
+      });
+      await checkUserIsExistOrNot.save();
+    }
+
+    // ------------------------------
+    // Detect service type
+    // ------------------------------
+    const serviceType = detectServiceType(formName, service);
+
+    // ------------------------------
+    // Compute amounts + milestones (IMPORTANT: do not mark paid here)
+    // ------------------------------
+    let bookingAmount = 0; // initial online pay amount (dc_first 20% or site_visit)
+    let originalTotalAmount = 0;
+    let paidAmount = 0;
+    let amountYetToPay = 0;
+    let siteVisitCharges = 0;
+
+    let firstPayment = {};
+    let secondPayment = {};
+    let finalPayment = {};
+
+    if (serviceType === "deep_cleaning") {
+      originalTotalAmount = service.reduce(
+        (sum, itm) => sum + Number(itm.price) * (Number(itm.quantity) || 1),
+        0
+      );
+
+      bookingAmount = Math.round(originalTotalAmount * 0.2); // 20% first installment
+
+      // ✅ until payment verify -> paid is 0
+      paidAmount = 0;
+      amountYetToPay = originalTotalAmount;
+
+      firstPayment = {
+        status: "pending",
+        amount: 0,
+        paidAt: null,
+        method: "None",
+        requestedAmount: bookingAmount,
+        remaining: bookingAmount,
+        prePayment: 0,
+      };
+
+      finalPayment = {
+        status: "pending",
+        amount: 0,
+        paidAt: null,
+        method: "None",
+        requestedAmount: 0,
+        remaining: 0,
+        prePayment: 0,
+      };
+    } else if (serviceType === "house_painting") {
+      // siteVisitCharges might be zero in admin panel
+      siteVisitCharges = Number(bookingDetails?.siteVisitCharges || 0);
+
+      // ✅ online amount = siteVisitCharges (if > 0)
+      bookingAmount = 0; // keep 0 as per your earlier rule for website/admin differences
+      originalTotalAmount = 0;
+      paidAmount = 0;
+      amountYetToPay = 0;
+
+      firstPayment = { status: "pending", amount: 0 };
+      secondPayment = { status: "pending", amount: 0 };
+      finalPayment = { status: "pending", amount: 0 };
+    } else {
+      // other service types (if any) - keep safe defaults
+      originalTotalAmount = service.reduce(
+        (sum, itm) => sum + Number(itm.price) * (Number(itm.quantity) || 1),
+        0
+      );
+      bookingAmount = 0;
+      paidAmount = 0;
+      amountYetToPay = originalTotalAmount;
+      firstPayment = { status: "pending", amount: 0 };
+      finalPayment = { status: "pending", amount: 0 };
+    }
+
+    // ------------------------------
+    // Decide if online payment needed (purpose)
+    // ------------------------------
+    let purpose = null;
+
+    if (serviceType === "deep_cleaning") {
+      // always collect first installment online (as per your flow)
+      purpose = "dc_first";
+    } else if (serviceType === "house_painting") {
+      // collect site visit only if > 0
+      const sv = Number(siteVisitCharges || 0);
+      if (sv > 0) purpose = "site_visit";
+    }
+
+    const willPayOnline = Boolean(purpose);
+
+    // ✅ key rule: if online payment needed -> store as enquiry until verify success
+    const finalIsEnquiry = willPayOnline ? true : Boolean(isEnquiry);
+
+    // ------------------------------
+    // Build bookingDetails config
+    // ------------------------------
+    const bookingDetailsConfig = {
+      booking_id: generateBookingId(),
+      bookingDate: bookingDetails?.bookingDate
+        ? new Date(bookingDetails.bookingDate)
+        : new Date(),
+      bookingTime: bookingDetails?.bookingTime || "10:30 AM",
+
+      status: "Pending",
+
+      bookingAmount,
+      originalTotalAmount,
+      finalTotal: originalTotalAmount,
+
+      paidAmount,
+      amountYetToPay,
+
+      paymentMethod: bookingDetails?.paymentMethod || "Cash",
+
+      // ✅ since we did not verify payment yet:
+      paymentStatus: "Unpaid",
+
+      otp: generateOTP(),
+
+      siteVisitCharges,
+
+      paymentLink: {
+        isActive: false,
+      },
+
+      firstPayment,
+      finalPayment,
+
+      ...(serviceType === "house_painting" ? { secondPayment } : {}),
+    };
+
+    // ✅ IMPORTANT: do NOT push payments[] now
+    const payments = [];
+
+    // ------------------------------
+    // Create booking
+    // ------------------------------
+    const booking = new UserBooking({
+      customer: {
+        customerId: customer?.customerId,
+        name: customer?.name,
+        phone: customer?.phone,
+      },
+
+      service: service.map((s) => ({
+        category: s.category,
+        subCategory: s.subCategory,
+        serviceName: s.serviceName,
+        price: Number(s.price),
+        quantity: Number(s.quantity) || 1,
+        teamMembersRequired: Number(s.teamMembersRequired) || 0,
+        duration: Number(s.duration) || 0,
+        coinDeduction: Number(s.coinsForVendor) || 0,
+        packageId: s.packageId || undefined,
+      })),
+
+      serviceType,
+
+      bookingDetails: bookingDetailsConfig,
+
+      assignedProfessional: assignedProfessional
+        ? {
+          professionalId: assignedProfessional.professionalId,
+          name: assignedProfessional.name,
+          phone: assignedProfessional.phone,
+        }
+        : undefined,
+
+      address: {
+        houseFlatNumber: address?.houseFlatNumber || "",
+        streetArea: address?.streetArea || "",
+        landMark: address?.landMark || "",
+        city: address?.city || "",
+        location: {
+          type: "Point",
+          coordinates: coords,
+        },
+      },
+
+      selectedSlot: {
+        slotDate: selectedSlot?.slotDate || moment().format("YYYY-MM-DD"),
+        slotTime: selectedSlot?.slotTime || "10:00 AM",
+      },
+
+      payments,
+
+      isEnquiry: finalIsEnquiry,
+
+      formName: formName || "Unknown",
+
+      createdDate: new Date(),
+    });
+
+    await booking.save();
+
+    // ------------------------------
+    // Create Razorpay order (if needed)
+    // ------------------------------
+    let razorpayOrder = null;
+
+    if (purpose) {
+      razorpayOrder = await createRazorpayOrderForBooking({
+        bookingId: booking._id,
+        purpose,
+      });
+
+      const pay_type = "auto-pay";
+      const paymentLinkUrl = `${redirectionUrl}${booking._id}/${Date.now()}/${pay_type}`;
+
+      // ✅ store payment link + razorpay order info
+      await UserBooking.findByIdAndUpdate(
+        booking._id,
+        {
+          $set: {
+            "bookingDetails.paymentLink": {
+              url: paymentLinkUrl,
+              isActive: true, // ✅ active until payment or expiry
+              providerRef: generateProviderRef(),
+              installmentStage: purpose === "dc_first" ? "first" : "site_visit",
+              razorpayOrderId: razorpayOrder?.orderId,
+              amount: razorpayOrder?.amount,
+              currency: razorpayOrder?.currency || "INR",
+              purpose,
+            },
+          },
+        },
+        { new: true }
+      );
+    }
+
+    // ------------------------------
+    // Notification
+    // ------------------------------
+    try {
+      const newBookingNotification = {
+        bookingId: booking._id,
+        notificationType: "NEW_LEAD_CREATED",
+        thumbnailTitle: "New Booking Scheduled",
+        notifyTo: "admin",
+        message: `New ${service[0]?.category} booking scheduled for ${moment(
+          selectedSlot?.slotDate
+        ).format("DD-MM-YYYY")} at ${selectedSlot?.slotTime}`,
+        status: "unread",
+        created_at: new Date(),
+      };
+      await notificationSchema.create(newBookingNotification);
+    } catch (e) {
+      // don't fail booking if notification fails
+    }
+
+    // ------------------------------
+    // Respond
+    // ------------------------------
+    const updatedBooking = await UserBooking.findById(booking._id).lean();
+
+    return res.status(201).json({
+      message: willPayOnline
+        ? "Booking created as enquiry. Complete payment to confirm."
+        : "Booking created successfully",
+      bookingId: booking._id,
+      serviceType,
+      booking: updatedBooking,
+      razorpayOrder,
+    });
+  } catch (error) {
+    console.error("Error creating booking:", error);
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
+  }
+};
+
+
+exports.createBooking1 = async (req, res) => {
   try {
     const {
       customer,
@@ -1063,6 +1409,15 @@ exports.createBooking = async (req, res) => {
 
     await booking.save();
 
+    let razorpayOrder = null;
+    if (purpose) {
+      razorpayOrder = await createRazorpayOrderForBooking({
+        bookingId: booking._id,
+        purpose,
+      });
+    }
+
+
     // now generate and store payment link
     const pay_type = "auto-pay";
     const paymentLinkUrl = `${redirectionUrl}${booking._id
@@ -1106,6 +1461,7 @@ exports.createBooking = async (req, res) => {
       bookingId: updatedBooking._id,
       serviceType,
       booking,
+      razorpayOrder,
     });
   } catch (error) {
     console.error("Error creating booking:", error);

@@ -187,7 +187,14 @@ const bookingDetailsSchema = new mongoose.Schema(
       isActive: { type: Boolean, default: true },
       providerRef: String,
       installmentStage: { type: String },
+
+      // ✅ add for Razorpay
+      razorpayOrderId: String,
+      amount: Number,
+      currency: { type: String, default: "INR" },
+      purpose: String,              // "dc_first" | "site_visit"
     },
+
     paymentStatus: {
       type: String,
       enum: [
