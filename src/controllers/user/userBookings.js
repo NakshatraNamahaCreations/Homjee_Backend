@@ -15,7 +15,9 @@ const vendorAuthSchema = require("../../models/vendor/vendorAuth");
 const walletTransaction = require("../../models/vendor/wallet");
 const vendorNotification = require("../../models/notification/vendorNotification");
 const { createRazorpayOrderForBooking } = require("../../payments/payment.service");
-
+const Razorpay = require("razorpay");
+const { getRazorpayClient } = require("../../payments/razorpay.client");
+const { verifyRazorpaySignature } = require("../../payments/razorpay.util");
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
 const redirectionUrl = "https://websitehomjee.netlify.app/checkout/payment/";
@@ -25,6 +27,22 @@ const citiesObj = {
   Bangalore: "Bengaluru",
   Pune: "Pune",
 };
+
+const makeShortReceipt = (bookingId, stage) => {
+  const bid = String(bookingId || "").slice(-8);
+  const st = String(stage || "x").slice(0, 1);
+  const ts = Date.now().toString(36);
+  return `bk_${bid}_${st}_${ts}`.slice(0, 40);
+};
+
+// helper: decide purpose for Razorpay order notes
+function getPurpose(serviceType, stage) {
+  if (String(serviceType).toLowerCase() === "deep_cleaning") return "dc_final";
+  // house_painting
+  if (stage === "first") return "hp_first";
+  if (stage === "second") return "hp_second";
+  return "hp_final";
+}
 
 const norm = (s) =>
   String(s || "")
@@ -5991,15 +6009,18 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
   }
 };
 
-// controllers/payment.controller.js
 exports.makePayment = async (req, res) => {
   try {
     const {
       bookingId,
-      paymentMethod,
+      paymentMethod, // "Cash" | "Card" | "UPI" | "Wallet" | "Razorpay"
       paidAmount,
-      providerRef,
+      providerRef, // for Razorpay: order_id
       installmentStage,
+
+      // Razorpay success payload
+      razorpayPaymentId,
+      razorpaySignature,
     } = req.body;
 
     if (!bookingId || !paymentMethod || paidAmount == null) {
@@ -6009,7 +6030,7 @@ exports.makePayment = async (req, res) => {
       });
     }
 
-    const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
+    const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet", "Razorpay"];
     if (!validPaymentMethods.includes(String(paymentMethod))) {
       return res
         .status(400)
@@ -6038,28 +6059,8 @@ exports.makePayment = async (req, res) => {
         .json({ success: false, message: "bookingDetails missing" });
     }
 
-    // ✅ IMPORTANT: providerRef must be unique per payment (razorpay_order_id)
-    // If you keep razorpay_order_xyz for all, idempotency will block updates.
-    if (providerRef) {
-      booking.payments = booking.payments || [];
-      d.paymentLink.providerRef = providerRef;
-      const already = booking.payments.some(
-        (p) => p.providerRef === providerRef,
-      );
-      if (already) {
-        // Return current state (do NOT mutate again)
-        return res.status(200).json({
-          success: true,
-          message: "Payment already recorded (idempotent).",
-          bookingId: booking._id,
-          bookingDetails: d,
-        });
-      }
-    }
-
     const serviceType = getServiceTypeFromBooking(booking);
-    const isDeepCleaningSvc =
-      String(serviceType).toLowerCase() === "deep_cleaning";
+    const serviceNorm = String(serviceType || "").toLowerCase();
 
     // ---------- finalTotal ----------
     let finalTotal = Number(d.finalTotal || 0);
@@ -6078,25 +6079,16 @@ exports.makePayment = async (req, res) => {
     // ---------- Determine stage ----------
     let stage = null;
 
-    // 1) Strongest: gateway callback reference matches current link
-    if (
-      providerRef &&
-      d.paymentLink?.providerRef &&
-      d.paymentLink.providerRef === providerRef
-    ) {
-      stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
-    }
-    // 2) Website caller may send installmentStage (ok)
-    else if (installmentStage) {
-      stage = normalizeStage(installmentStage, serviceType, d);
-    }
-    // 3) Active link stage
-    else if (d.paymentLink?.isActive && d.paymentLink?.installmentStage) {
-      stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
-    }
-    // 4) Fallback derive
-    else {
-      stage = normalizeStage(null, serviceType, d);
+    // Deep cleaning: always final
+    if (serviceNorm === "deep_cleaning") {
+      stage = "final";
+    } else {
+      // House painting stages: first/second/final (your existing normalizeStage)
+      // NOTE: for Razorpay init call you will send installmentStage from frontend
+      if (installmentStage) stage = normalizeStage(installmentStage, serviceType, d);
+      else if (d.paymentLink?.isActive && d.paymentLink?.installmentStage)
+        stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
+      else stage = normalizeStage(null, serviceType, d);
     }
 
     if (!stage) {
@@ -6106,7 +6098,6 @@ exports.makePayment = async (req, res) => {
       });
     }
 
-    // ---------- Stage key ----------
     const instKey =
       stage === "first"
         ? "firstPayment"
@@ -6114,25 +6105,22 @@ exports.makePayment = async (req, res) => {
           ? "secondPayment"
           : "finalPayment";
 
-    // ✅ BLOCK paying any stage that is not requested yet
-    const requestedAmt = Number(d[instKey]?.requestedAmount || 0);
-    if (!(requestedAmt > 0)) {
-      return res.status(400).json({
-        success: false,
-        message: `${stage} payment is not requested yet.`,
-        stage,
-        requestedAmount: requestedAmt,
-      });
+    // ✅ If requestedAmount not set yet (customer paying via link before admin sets it),
+    // bootstrap it from the amount the customer is paying so the guards below pass.
+    // This handles the Razorpay customer-facing flow where the customer pays directly.
+    if (!(Number(d[instKey]?.requestedAmount) > 0)) {
+      d[instKey].requestedAmount = amount;
     }
 
-    // ---------- Safe activate (does NOT wipe requestedAmount to 0) ----------
+    const requestedAmt = Number(d[instKey]?.requestedAmount || 0);
+
+    // ---------- Safe activate ----------
     const safeActivate = (milestone) => {
       const reqAmt = Number(milestone.requestedAmount || 0);
       const paidSoFar =
         Number(milestone.amount || 0) + Number(milestone.prePayment || 0);
       milestone.remaining = Math.max(0, reqAmt - paidSoFar);
 
-      // status consistency
       if (reqAmt <= 0) milestone.status = "pending";
       else if (paidSoFar <= 0) milestone.status = "pending";
       else if (milestone.remaining === 0) milestone.status = "paid";
@@ -6170,47 +6158,156 @@ exports.makePayment = async (req, res) => {
       });
     }
 
-    // ---------- Apply payment ----------
-    d.paymentMethod = String(paymentMethod);
+    // ============================================================
+    // ✅ RAZORPAY MODE (2-step in the same API)
+    // ============================================================
+    if (String(paymentMethod) === "Razorpay") {
+      // STEP 1: Create order if payment success payload not provided yet
+      const isVerifyCall = !!(providerRef && razorpayPaymentId && razorpaySignature);
+
+      if (!isVerifyCall) {
+        // Create Razorpay order
+        const receipt = makeShortReceipt(bookingId, stage);;
+        const purpose = getPurpose(serviceNorm, stage);
+
+        const rzpClient = getRazorpayClient();
+        let order;
+        try {
+          order = await rzpClient.orders.create({
+            amount: Math.round(amount * 100),
+            currency: "INR",
+            receipt, // ✅ <=40 now
+            notes: {
+              bookingId: String(bookingId),
+              installmentStage: stage,
+              purpose,
+            },
+          });
+        } catch (e) {
+          console.error("Razorpay order create failed:", e?.error || e);
+          return res.status(400).json({
+            success: false,
+            message: "Razorpay order creation failed",
+            razorpay: e?.error || e?.message || "unknown_error",
+          });
+        }
+
+        // store active link
+        d.paymentLink = d.paymentLink || {};
+        d.paymentLink.isActive = true;
+        d.paymentLink.provider = "razorpay";
+        d.paymentLink.providerRef = order.id; // ✅ THIS is your idempotency key
+        d.paymentLink.installmentStage = stage;
+        d.paymentLink.amount = amount;
+        d.paymentLink.createdAt = new Date();
+
+        booking.markModified("bookingDetails");
+        await booking.save();
+
+        return res.json({
+          success: true,
+          message: "Razorpay order created",
+          action: "PAYMENT_ORDER_CREATED",
+          bookingId: booking._id,
+          installmentStage: stage,
+          razorpayOrder: {
+            keyId: process.env.RAZORPAY_KEY_ID,
+            orderId: order.id,
+            amount: amount, // rupees
+            currency: "INR",
+            purpose,
+          },
+          paymentLink: d.paymentLink,
+        });
+      }
+
+      // STEP 2: Verify payment
+      const ok = verifyRazorpaySignature({
+        orderId: providerRef,
+        paymentId: razorpayPaymentId,
+        signature: razorpaySignature,
+      });
+
+      if (!ok) {
+        return res.status(400).json({
+          success: false,
+          message: "Razorpay signature verification failed",
+        });
+      }
+
+      // OPTIONAL: ensure the orderId matches active paymentLink (recommended)
+      if (d.paymentLink?.providerRef && d.paymentLink.providerRef !== providerRef) {
+        return res.status(400).json({
+          success: false,
+          message: "Order mismatch for this booking/payment link.",
+        });
+      }
+    }
+
+    // ============================================================
+    // ✅ IDEMPOTENCY (for Razorpay: providerRef = order_id)
+    // ============================================================
+    if (providerRef) {
+      booking.payments = booking.payments || [];
+      const already = booking.payments.some((p) => p.providerRef === providerRef);
+      if (already) {
+        return res.status(200).json({
+          success: true,
+          message: "Payment already recorded (idempotent).",
+          bookingId: booking._id,
+          bookingDetails: d,
+        });
+      }
+    }
+
+
+    const ledgerMethod =
+      String(paymentMethod) === "Razorpay" ? "UPI" : String(paymentMethod); // or "Card"
+
+    // ✅ Keep gateway info separately (optional, but recommended)
+    const gateway = String(paymentMethod) === "Razorpay" ? "Razorpay" : "";
+
+
+    // ============================================================
+    // ✅ EXISTING LEDGER UPDATE (same as your code)
+    // ============================================================
+    d.paymentMethod = String(ledgerMethod);
     d.paidAmount = currentPaid + amount;
 
-    // log payment
     booking.payments = booking.payments || [];
     booking.payments.push({
       at: new Date(),
-      method: d.paymentMethod,
+      method: ledgerMethod,
       amount,
       providerRef: providerRef || undefined,
       installment: stage,
+      razorpayPaymentId: razorpayPaymentId || undefined,
+      purpose: stage
     });
 
-    // ✅ deactivate link because payment is recorded
+    // deactivate link because payment is recorded
     if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
 
-    // making backup empty
     const prevFirstStatus = String(d.firstPayment?.status || "pending");
 
-    // ✅ Resync milestones from ledger (your function)
     const { prevFinalStatus } = resyncMilestonesFromLedger(
       d,
-      d.paymentMethod,
-      serviceType,
+      ledgerMethod,
+      serviceType
     );
-    // Clear hiring backup once FIRST payment is confirmed paid
+
+    // Clear backup once FIRST payment is confirmed paid
     try {
       const firstNowPaid = String(d.firstPayment?.status || "pending") === "paid";
       const firstJustPaidNow = prevFirstStatus !== "paid" && firstNowPaid;
 
       if (firstJustPaidNow) {
-        // if your structure is booking.assignedProfessional.hiring.backup
         if (booking?.assignedProfessional?.hiring?.backup) {
-          booking.assignedProfessional.hiring.backup = null; // or {} based on your schema
+          booking.assignedProfessional.hiring.backup = null;
           booking.markModified("assignedProfessional");
         }
-
-        // if your structure is booking.bookingDetails.assignedProfessional.hiring.backup
         if (d?.assignedProfessional?.hiring?.backup) {
-          d.assignedProfessional.hiring.backup = null; // or {}
+          d.assignedProfessional.hiring.backup = null;
           booking.markModified("bookingDetails");
         }
       }
@@ -6218,62 +6315,50 @@ exports.makePayment = async (req, res) => {
       console.log("clear backup error:", e);
     }
 
-    // derived fields (your function)
     syncDerivedFields(d, finalTotal);
 
-    // mark job hired etc (your existing logic)
     const finalIsExactlyPaid = isStageExactlyPaid(d.finalPayment);
     const finalJustPaidNow = prevFinalStatus !== "paid" && finalIsExactlyPaid;
 
     if (finalJustPaidNow) {
       d.paymentStatus = "Paid";
       if (
-        [
-          "Waiting for final payment",
-          "Project Ongoing",
-          "Job Ongoing",
-        ].includes(String(d.status))
+        ["Waiting for final payment", "Project Ongoing", "Job Ongoing"].includes(
+          String(d.status)
+        )
       ) {
         d.status = "Project Completed";
         d.jobEndedAt = d.jobEndedAt || new Date();
       }
     } else {
       const ratio = finalTotal > 0 ? Number(d.paidAmount || 0) / finalTotal : 0;
-      d.paymentStatus =
-        ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
+      d.paymentStatus = ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
       const statusNorm = (d.status || "").trim().toLowerCase();
-      if (["pending hiring", "pending"].includes(statusNorm))
-        d.status = "Hired";
+      if (["pending hiring", "pending"].includes(statusNorm)) d.status = "Hired";
     }
 
     booking.isEnquiry = false;
 
     finalizeIfFullyPaid({ booking, bookingId, finalTotal });
 
-    // ✅ Force nested save (fixes “API hits but DB not updated” cases)
     booking.markModified("bookingDetails");
     booking.markModified("payments");
-
     await booking.save();
 
+    // vendor notification block remains same
     try {
       const assigned = isAssignedToVendor(booking);
-
       if (assigned) {
-        const isDeepCleaning =
-          String(serviceType).toLowerCase() === "deep_cleaning";
-
-        const shouldSkipForDeepCleaning =
-          isDeepCleaning && String(stage) === "first";
-
+        const isDeepCleaning = serviceNorm === "deep_cleaning";
+        const shouldSkipForDeepCleaning = isDeepCleaning && String(stage) === "first"; // keep your logic
         if (!shouldSkipForDeepCleaning) {
           await storeVendorPaymentNotification({
-            vendorId: booking.assignedProfessional?.professionalId, // ✅ your booking vendorId
+            vendorId: booking.assignedProfessional?.professionalId,
             booking,
             stage,
             amount,
             method: d.paymentMethod,
-            providerRef: providerRef
+            providerRef: providerRef,
           });
         }
       }
@@ -6307,6 +6392,324 @@ exports.makePayment = async (req, res) => {
     });
   }
 };
+
+// comment out beucase no payment gateway intergrated
+// exports.makePayment = async (req, res) => {
+//   try {
+//     const {
+//       bookingId,
+//       paymentMethod,
+//       paidAmount,
+//       providerRef,
+//       installmentStage,
+//     } = req.body;
+
+//     if (!bookingId || !paymentMethod || paidAmount == null) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "bookingId, paymentMethod, and paidAmount are required",
+//       });
+//     }
+
+//     const validPaymentMethods = ["Cash", "Card", "UPI", "Wallet"];
+//     if (!validPaymentMethods.includes(String(paymentMethod))) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "Invalid payment method" });
+//     }
+
+//     const amount = Number(paidAmount);
+//     if (!(amount > 0)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Paid amount must be greater than zero",
+//       });
+//     }
+
+//     const booking = await UserBooking.findById(bookingId);
+//     if (!booking) {
+//       return res
+//         .status(404)
+//         .json({ success: false, message: "Booking not found" });
+//     }
+
+//     const d = booking.bookingDetails;
+//     if (!d) {
+//       return res
+//         .status(400)
+//         .json({ success: false, message: "bookingDetails missing" });
+//     }
+
+//     // ✅ IMPORTANT: providerRef must be unique per payment (razorpay_order_id)
+//     // If you keep razorpay_order_xyz for all, idempotency will block updates.
+//     if (providerRef) {
+//       booking.payments = booking.payments || [];
+//       d.paymentLink.providerRef = providerRef;
+//       const already = booking.payments.some(
+//         (p) => p.providerRef === providerRef,
+//       );
+//       if (already) {
+//         // Return current state (do NOT mutate again)
+//         return res.status(200).json({
+//           success: true,
+//           message: "Payment already recorded (idempotent).",
+//           bookingId: booking._id,
+//           bookingDetails: d,
+//         });
+//       }
+//     }
+
+//     const serviceType = getServiceTypeFromBooking(booking);
+//     const isDeepCleaningSvc =
+//       String(serviceType).toLowerCase() === "deep_cleaning";
+
+//     // ---------- finalTotal ----------
+//     let finalTotal = Number(d.finalTotal || 0);
+//     if (!(finalTotal > 0)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Final total not set. Finalize quote first.",
+//       });
+//     }
+
+//     // ---------- Ensure milestone objects ----------
+//     d.firstPayment = ensureMilestoneDefaults(d.firstPayment || {});
+//     d.secondPayment = ensureMilestoneDefaults(d.secondPayment || {});
+//     d.finalPayment = ensureMilestoneDefaults(d.finalPayment || {});
+
+//     // ---------- Determine stage ----------
+//     let stage = null;
+
+//     // 1) Strongest: gateway callback reference matches current link
+//     if (
+//       providerRef &&
+//       d.paymentLink?.providerRef &&
+//       d.paymentLink.providerRef === providerRef
+//     ) {
+//       stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
+//     }
+//     // 2) Website caller may send installmentStage (ok)
+//     else if (installmentStage) {
+//       stage = normalizeStage(installmentStage, serviceType, d);
+//     }
+//     // 3) Active link stage
+//     else if (d.paymentLink?.isActive && d.paymentLink?.installmentStage) {
+//       stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
+//     }
+//     // 4) Fallback derive
+//     else {
+//       stage = normalizeStage(null, serviceType, d);
+//     }
+
+//     if (!stage) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "installmentStage is required for this payment.",
+//       });
+//     }
+
+//     // ---------- Stage key ----------
+//     const instKey =
+//       stage === "first"
+//         ? "firstPayment"
+//         : stage === "second"
+//           ? "secondPayment"
+//           : "finalPayment";
+
+//     // ✅ BLOCK paying any stage that is not requested yet
+//     const requestedAmt = Number(d[instKey]?.requestedAmount || 0);
+//     if (!(requestedAmt > 0)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `${stage} payment is not requested yet.`,
+//         stage,
+//         requestedAmount: requestedAmt,
+//       });
+//     }
+
+//     // ---------- Safe activate (does NOT wipe requestedAmount to 0) ----------
+//     const safeActivate = (milestone) => {
+//       const reqAmt = Number(milestone.requestedAmount || 0);
+//       const paidSoFar =
+//         Number(milestone.amount || 0) + Number(milestone.prePayment || 0);
+//       milestone.remaining = Math.max(0, reqAmt - paidSoFar);
+
+//       // status consistency
+//       if (reqAmt <= 0) milestone.status = "pending";
+//       else if (paidSoFar <= 0) milestone.status = "pending";
+//       else if (milestone.remaining === 0) milestone.status = "paid";
+//       else milestone.status = "partial";
+//     };
+
+//     safeActivate(d[instKey]);
+
+//     // ---------- Due cap ----------
+//     const installmentDue = Number(d[instKey]?.remaining || 0);
+//     if (!(installmentDue > 0)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `No payable amount found for ${stage} installment.`,
+//         stage,
+//         installmentDue,
+//         milestone: d[instKey],
+//       });
+//     }
+
+//     if (amount > installmentDue) {
+//       return res.status(400).json({
+//         success: false,
+//         message: `Paid amount cannot exceed remaining for ${stage} installment (${installmentDue}).`,
+//       });
+//     }
+
+//     // ---------- Booking-level cap ----------
+//     const currentPaid = Number(d.paidAmount || 0);
+//     const bookingRemaining = Math.max(0, finalTotal - currentPaid);
+//     if (amount > bookingRemaining) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Paid amount cannot exceed remaining balance",
+//       });
+//     }
+
+//     // ---------- Apply payment ----------
+//     d.paymentMethod = String(paymentMethod);
+//     d.paidAmount = currentPaid + amount;
+
+//     // log payment
+//     booking.payments = booking.payments || [];
+//     booking.payments.push({
+//       at: new Date(),
+//       method: d.paymentMethod,
+//       amount,
+//       providerRef: providerRef || undefined,
+//       installment: stage,
+//     });
+
+//     // ✅ deactivate link because payment is recorded
+//     if (d.paymentLink?.isActive) d.paymentLink.isActive = false;
+
+//     // making backup empty
+//     const prevFirstStatus = String(d.firstPayment?.status || "pending");
+
+//     // ✅ Resync milestones from ledger (your function)
+//     const { prevFinalStatus } = resyncMilestonesFromLedger(
+//       d,
+//       d.paymentMethod,
+//       serviceType,
+//     );
+//     // Clear hiring backup once FIRST payment is confirmed paid
+//     try {
+//       const firstNowPaid = String(d.firstPayment?.status || "pending") === "paid";
+//       const firstJustPaidNow = prevFirstStatus !== "paid" && firstNowPaid;
+
+//       if (firstJustPaidNow) {
+//         // if your structure is booking.assignedProfessional.hiring.backup
+//         if (booking?.assignedProfessional?.hiring?.backup) {
+//           booking.assignedProfessional.hiring.backup = null; // or {} based on your schema
+//           booking.markModified("assignedProfessional");
+//         }
+
+//         // if your structure is booking.bookingDetails.assignedProfessional.hiring.backup
+//         if (d?.assignedProfessional?.hiring?.backup) {
+//           d.assignedProfessional.hiring.backup = null; // or {}
+//           booking.markModified("bookingDetails");
+//         }
+//       }
+//     } catch (e) {
+//       console.log("clear backup error:", e);
+//     }
+
+//     // derived fields (your function)
+//     syncDerivedFields(d, finalTotal);
+
+//     // mark job hired etc (your existing logic)
+//     const finalIsExactlyPaid = isStageExactlyPaid(d.finalPayment);
+//     const finalJustPaidNow = prevFinalStatus !== "paid" && finalIsExactlyPaid;
+
+//     if (finalJustPaidNow) {
+//       d.paymentStatus = "Paid";
+//       if (
+//         [
+//           "Waiting for final payment",
+//           "Project Ongoing",
+//           "Job Ongoing",
+//         ].includes(String(d.status))
+//       ) {
+//         d.status = "Project Completed";
+//         d.jobEndedAt = d.jobEndedAt || new Date();
+//       }
+//     } else {
+//       const ratio = finalTotal > 0 ? Number(d.paidAmount || 0) / finalTotal : 0;
+//       d.paymentStatus =
+//         ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
+//       const statusNorm = (d.status || "").trim().toLowerCase();
+//       if (["pending hiring", "pending"].includes(statusNorm))
+//         d.status = "Hired";
+//     }
+
+//     booking.isEnquiry = false;
+
+//     finalizeIfFullyPaid({ booking, bookingId, finalTotal });
+
+//     // ✅ Force nested save (fixes “API hits but DB not updated” cases)
+//     booking.markModified("bookingDetails");
+//     booking.markModified("payments");
+
+//     await booking.save();
+
+//     try {
+//       const assigned = isAssignedToVendor(booking);
+
+//       if (assigned) {
+//         const isDeepCleaning =
+//           String(serviceType).toLowerCase() === "deep_cleaning";
+
+//         const shouldSkipForDeepCleaning =
+//           isDeepCleaning && String(stage) === "first";
+
+//         if (!shouldSkipForDeepCleaning) {
+//           await storeVendorPaymentNotification({
+//             vendorId: booking.assignedProfessional?.professionalId, // ✅ your booking vendorId
+//             booking,
+//             stage,
+//             amount,
+//             method: d.paymentMethod,
+//             providerRef: providerRef
+//           });
+//         }
+//       }
+//     } catch (e) {
+//       console.log("payment notification block error:", e);
+//     }
+
+//     return res.json({
+//       success: true,
+//       message: finalJustPaidNow
+//         ? "Final payment completed. Job marked as ended."
+//         : "Payment received.",
+//       bookingId: booking._id,
+//       finalTotal,
+//       totalPaid: d.paidAmount,
+//       remainingAmount: Math.max(0, finalTotal - d.paidAmount),
+//       status: d.status,
+//       paymentStatus: d.paymentStatus,
+//       firstPayment: d.firstPayment,
+//       secondPayment: d.secondPayment,
+//       finalPayment: d.finalPayment,
+//       paymentLink: d.paymentLink,
+//       finalJustPaidNow,
+//     });
+//   } catch (err) {
+//     console.error("makePayment error:", err);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Server error while processing payment",
+//       error: err.message,
+//     });
+//   }
+// };
+
 exports.updateManualPayment = async (req, res) => {
   try {
     const {
