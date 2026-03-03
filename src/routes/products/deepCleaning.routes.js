@@ -9,7 +9,10 @@ router.get("/deep-cleaning-catalog", ctrl.getCatalog);
 router.post("/deep-cleaning-packages", ctrl.createPackage);
 router.get("/deep-cleaning-packages", ctrl.listPackages);
 router.get("/deep-cleaning-packages/:id", ctrl.getPackageById);
-router.put("/deep-cleaning-packages/:id", ctrl.updatePackage);
+router.get("/deep-cleaning-packages/by-city/:cityId", ctrl.getPackagesByCityIdFlat);
+router.get("/deep-cleaning-packages/by-city-name/:city", ctrl.getPackagesByCityNameFlat);
+// router.put("/deep-cleaning-packages/:id", ctrl.updatePackage);
+router.put("/deep-cleaning-packages/:id/city-config", ctrl.upsertPackageCityConfig);
 router.delete("/deep-cleaning-packages/:id", ctrl.deletePackage);
 
 module.exports = router;

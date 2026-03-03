@@ -40,16 +40,21 @@ const parser = require("../../middleware/cloudinaryStorage");
 const multer = require("multer");
 const upload = multer({ storage: multer.memoryStorage() });
 
-const multerErrorHandler = (err, req, res, next) => {
+const uploadErrorHandler = (err, req, res, next) => {
   if (err instanceof multer.MulterError) {
-    return res
-      .status(400)
-      .json({ message: "Multer error", error: err.message });
+    return res.status(400).json({
+      success: false,
+      message: "Upload failed",
+      code: err.code,
+      error: err.message,
+    });
   }
   if (err) {
-    return res
-      .status(500)
-      .json({ message: "Server error", error: err.message });
+    return res.status(500).json({
+      success: false,
+      message: "Upload error",
+      error: err.message,
+    });
   }
   next();
 };
@@ -67,6 +72,7 @@ router.post(
     { name: "panImage", maxCount: 1 },
     { name: "otherPolicy", maxCount: 1 },
   ]),
+  uploadErrorHandler,
   vendorAuthController.createVendor
 );
 
@@ -87,6 +93,7 @@ router.put(
     { name: "panImage", maxCount: 1 },
     { name: "otherPolicy", maxCount: 1 },
   ]),
+  uploadErrorHandler,
   vendorAuthController.updateVendor
 );
 
@@ -106,6 +113,7 @@ router.post(
     { name: "panImage", maxCount: 1 },
     { name: "otherPolicy", maxCount: 1 },
   ]),
+  uploadErrorHandler,
   vendorAuthController.addTeamMember
 );
 
@@ -123,6 +131,7 @@ router.put(
     { name: "panImage", maxCount: 1 },
     { name: "otherPolicy", maxCount: 1 },
   ]),
+  uploadErrorHandler,
   vendorAuthController.updateTeamMember
 );
 

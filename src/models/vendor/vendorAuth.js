@@ -20,7 +20,7 @@ const documentInfo = new mongoose.Schema({
   panImage: String,
   otherPolicy: String,
 });
-
+ 
 const accountInfo = new mongoose.Schema({
   accountNumber: String,
   ifscCode: String,
@@ -40,6 +40,7 @@ const addressDetails = new mongoose.Schema({
     coordinates: { type: [Number], default: [0, 0] }, // [lng, lat]
   },
 });
+
 
 // Define team member schema to match vendor structure
 const teamMemberInfo = new mongoose.Schema(

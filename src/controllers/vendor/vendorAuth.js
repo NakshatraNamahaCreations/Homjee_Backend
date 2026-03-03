@@ -35,6 +35,14 @@ const setIfPresent = (update, obj, key, path, castFn) => {
 };
 
 exports.createVendor = async (req, res) => {
+  console.log("FILES:", Object.keys(req.files || {}));
+  console.log(
+    "SIZES:",
+    Object.fromEntries(
+      Object.entries(req.files || {}).map(([k, arr]) => [k, arr?.[0]?.size]),
+    ),
+  );
+
   try {
     const vendor = JSON.parse(req.body.vendor || "{}");
     const documents = JSON.parse(req.body.documents || "{}");
@@ -207,26 +215,34 @@ exports.updateVendorLeaves = async (req, res) => {
     const { vendorId, markedLeaves } = req.body;
 
     if (!vendorId) {
-      return res.status(400).json({ success: false, message: "vendorId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "vendorId is required" });
     }
 
     if (!Array.isArray(markedLeaves)) {
-      return res.status(400).json({ success: false, message: "markedLeaves must be an array" });
+      return res
+        .status(400)
+        .json({ success: false, message: "markedLeaves must be an array" });
     }
 
     // clean + dedupe + sort
-    const cleanedLeaves = [...new Set(markedLeaves.map((d) => String(d).trim()))]
+    const cleanedLeaves = [
+      ...new Set(markedLeaves.map((d) => String(d).trim())),
+    ]
       .filter(Boolean)
       .sort();
 
     const vendor = await vendorAuthSchema.findByIdAndUpdate(
       vendorId,
       { $set: { markedLeaves: cleanedLeaves } }, // ✅ overwrite
-      { new: true }
+      { new: true },
     );
 
     if (!vendor) {
-      return res.status(404).json({ success: false, message: "Vendor not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Vendor not found" });
     }
 
     return res.json({
@@ -236,7 +252,9 @@ exports.updateVendorLeaves = async (req, res) => {
     });
   } catch (err) {
     console.error("Error updating leaves:", err);
-    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: err.message });
   }
 };
 
@@ -1131,7 +1149,6 @@ exports.getVendorByVendorId = async (req, res) => {
 //   }
 // };
 
-
 // GET /api/vendor/get-all-vendor?page=1&limit=10&serviceType=Deep%20Cleaning&city=Bengaluru&search=whitefield
 exports.getAllVendors = async (req, res) => {
   try {
@@ -1464,6 +1481,130 @@ function getDistanceInMeters(lat1, lon1, lat2, lon2) {
   return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)));
 }
 
+// exports.getAvailableVendors = async (req, res) => {
+//   try {
+//     const {
+//       lat,
+//       lng,
+//       slotDate,
+//       slotTime,
+//       serviceType,
+//       requiredTeamMembers,
+//     } = req.body;
+
+//     if (!lat || !lng || !slotDate || !slotTime || !serviceType) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Missing required fields",
+//       });
+//     }
+
+//     if (!["deep_cleaning", "house_painting"].includes(serviceType)) {
+//       return res.status(400).json({
+//         success: false,
+//         message: "Invalid serviceType",
+//       });
+//     }
+
+//     const normalizedDate = slotDate.split("T")[0];
+//     const slotMinutes = timeToMinutes(slotTime);
+
+//     /* ================= SERVICE TYPE SAFE MATCH ================= */
+//     const serviceRegex =
+//       serviceType === "deep_cleaning"
+//         ? /deep\s*cleaning/i
+//         : /house\s*painting/i;
+
+//     /* ================= FETCH VENDORS ================= */
+//     const vendors = await Vendor.find({
+//       // activeStatus: true,
+//       "vendor.serviceType": serviceRegex,
+//     }).lean();
+
+//     /* ================= LOCATION FILTER ================= */
+//     const locationFiltered = vendors.filter((v) => {
+//       if (!v.address?.latitude || !v.address?.longitude) return false;
+
+//       return (
+//         getDistanceInMeters(
+//           lat,
+//           lng,
+//           v.address.latitude,
+//           v.address.longitude,
+//         ) <= 5000
+//       );
+//     });
+
+//     if (!locationFiltered.length) {
+//       return res.json({ success: true, count: 0, data: [] });
+//     }
+
+//     const vendorIds = locationFiltered.map((v) => v._id.toString());
+
+//     /* ================= SLOT CONFLICT ================= */
+//     const bookings = await userBooking
+//       .find({
+//         isEnquiry: false,
+//         "assignedProfessional.professionalId": { $in: vendorIds },
+//         "selectedSlot.slotDate": normalizedDate,
+//         "bookingDetails.status": {
+//           $nin: ["Cancelled", "Admin Cancelled", "Customer Cancelled"],
+//         },
+//       })
+//       .lean();
+
+//     const blockedVendors = new Set();
+
+//     for (const booking of bookings) {
+//       if (!booking.selectedSlot?.slotTime) continue;
+
+//       const start = timeToMinutes(booking.selectedSlot.slotTime);
+//       const duration = Array.isArray(booking.service)
+//         ? booking.service.reduce((s, x) => s + (x.duration || 120), 0)
+//         : 120;
+
+//       if (slotMinutes >= start && slotMinutes < start + duration) {
+//         blockedVendors.add(booking.assignedProfessional.professionalId);
+//       }
+//     }
+
+//     const slotAvailable = locationFiltered.filter(
+//       (v) => !blockedVendors.has(v._id.toString()),
+//     );
+
+//     /* ================= TEAM VALIDATION ================= */
+//     const finalAvailable = [];
+
+//     for (const vendor of slotAvailable) {
+//       if (serviceType === "house_painting") {
+//         finalAvailable.push(vendor);
+//         continue;
+//       }
+
+//       const team = vendor.team || [];
+//       const availableCount = team.filter(
+//         (m) => !m.markedLeaves?.includes(normalizedDate),
+//       ).length;
+
+//       if (availableCount >= requiredTeamMembers) {
+//         finalAvailable.push(vendor);
+//       }
+//     }
+
+//     return res.json({
+//       success: true,
+//       count: finalAvailable.length,
+//       data: finalAvailable,
+//     });
+//   } catch (err) {
+//     console.error("Available vendor error:", err);
+//     return res.status(500).json({
+//       success: false,
+//       message: "Server error",
+//     });
+//   }
+// };
+
 exports.getAvailableVendors = async (req, res) => {
   try {
     const {
@@ -1475,7 +1616,8 @@ exports.getAvailableVendors = async (req, res) => {
       requiredTeamMembers = 1,
     } = req.body;
 
-    if (!lat || !lng || !slotDate || !slotTime || !serviceType) {
+    // ✅ safer validation (lat/lng can be 0 in theory)
+    if (lat == null || lng == null || !slotDate || !slotTime || !serviceType) {
       return res.status(400).json({
         success: false,
         message: "Missing required fields",
@@ -1489,7 +1631,7 @@ exports.getAvailableVendors = async (req, res) => {
       });
     }
 
-    const normalizedDate = slotDate.split("T")[0];
+    const normalizedDate = String(slotDate).split("T")[0]; // "YYYY-MM-DD"
     const slotMinutes = timeToMinutes(slotTime);
 
     /* ================= SERVICE TYPE SAFE MATCH ================= */
@@ -1504,18 +1646,20 @@ exports.getAvailableVendors = async (req, res) => {
       "vendor.serviceType": serviceRegex,
     }).lean();
 
-    /* ================= LOCATION FILTER ================= */
+    /* ================= LOCATION FILTER (10 KM) ================= */
     const locationFiltered = vendors.filter((v) => {
-      if (!v.address?.latitude || !v.address?.longitude) return false;
+      if (v?.address?.latitude == null || v?.address?.longitude == null) {
+        return false;
+      }
 
-      return (
-        getDistanceInMeters(
-          lat,
-          lng,
-          v.address.latitude,
-          v.address.longitude,
-        ) <= 5000
+      const dist = getDistanceInMeters(
+        Number(lat),
+        Number(lng),
+        Number(v.address.latitude),
+        Number(v.address.longitude),
       );
+
+      return dist <= 10000; // ✅ 10km
     });
 
     if (!locationFiltered.length) {
@@ -1539,15 +1683,16 @@ exports.getAvailableVendors = async (req, res) => {
     const blockedVendors = new Set();
 
     for (const booking of bookings) {
-      if (!booking.selectedSlot?.slotTime) continue;
+      if (!booking?.selectedSlot?.slotTime) continue;
 
       const start = timeToMinutes(booking.selectedSlot.slotTime);
       const duration = Array.isArray(booking.service)
-        ? booking.service.reduce((s, x) => s + (x.duration || 120), 0)
+        ? booking.service.reduce((s, x) => s + (Number(x?.duration) || 120), 0)
         : 120;
 
+      // Current logic: if requested slot start is inside existing booking window
       if (slotMinutes >= start && slotMinutes < start + duration) {
-        blockedVendors.add(booking.assignedProfessional.professionalId);
+        blockedVendors.add(String(booking.assignedProfessional.professionalId));
       }
     }
 
@@ -1555,29 +1700,58 @@ exports.getAvailableVendors = async (req, res) => {
       (v) => !blockedVendors.has(v._id.toString()),
     );
 
-    /* ================= TEAM VALIDATION ================= */
+    /* ================= VENDOR + TEAM LEAVE VALIDATION ================= */
     const finalAvailable = [];
 
     for (const vendor of slotAvailable) {
+      // ✅ 1) Vendor-level leave check (if vendor is on leave, skip vendor fully)
+      // Change this path if your schema uses a different field for vendor leaves
+      const vendorLeaves =
+        vendor?.vendor?.markedLeaves || vendor?.markedLeaves || [];
+      const vendorOnLeave = Array.isArray(vendorLeaves)
+        ? vendorLeaves.includes(normalizedDate)
+        : false;
+
+      if (vendorOnLeave) continue;
+
+      // ✅ 2) Filter team members who are NOT on leave for that date
+      const team = Array.isArray(vendor.team) ? vendor.team : [];
+      const availableTeam = team.filter((m) => {
+        const leaves = Array.isArray(m?.markedLeaves) ? m.markedLeaves : [];
+        return !leaves.includes(normalizedDate);
+      });
+
+      // ✅ Replace team in response so leave members won't show
+      const vendorWithFilteredTeam = {
+        ...vendor,
+        team: availableTeam,
+        availableTeamCount: availableTeam.length, // optional (helps UI)
+      };
+
+      // ✅ House painting: vendor allowed, but still return only available team
       if (serviceType === "house_painting") {
-        finalAvailable.push(vendor);
+        finalAvailable.push(vendorWithFilteredTeam);
         continue;
       }
 
-      const team = vendor.team || [];
-      const availableCount = team.filter(
-        (m) => !m.markedLeaves?.includes(normalizedDate),
-      ).length;
-
-      if (availableCount >= requiredTeamMembers) {
-        finalAvailable.push(vendor);
+      // ✅ Deep cleaning: must have enough team members available
+      if (availableTeam.length >= Number(requiredTeamMembers || 1)) {
+        finalAvailable.push(vendorWithFilteredTeam);
       }
     }
 
+    /* ================= WALLET COIN FILTER (>= 100) ================= */
+    const MIN_VENDOR_COINS = 100;
+
+    const coinEligible = finalAvailable.filter((v) => {
+      const coins = Number(v?.wallet?.coins ?? 0);
+      return coins >= MIN_VENDOR_COINS;
+    });
+
     return res.json({
       success: true,
-      count: finalAvailable.length,
-      data: finalAvailable,
+      count: coinEligible.length,
+      data: coinEligible,
     });
   } catch (err) {
     console.error("Available vendor error:", err);
