@@ -20,8 +20,8 @@ const { getRazorpayClient } = require("../../payments/razorpay.client");
 const { verifyRazorpaySignature } = require("../../payments/razorpay.util");
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
-const redirectionUrl = "https://websitehomjee.netlify.app/checkout/payment/";
-const vendorRatingURL = "https://websitehomjee.netlify.app/vendor-ratings";
+const redirectionUrl = process.env.USER_PAYMENT || "https://websitehomjee.netlify.app/checkout/payment/";
+const vendorRatingURL = process.env.VENDOR_RATING ||"https://websitehomjee.netlify.app/vendor-ratings";
 
 const citiesObj = {
   Bangalore: "Bengaluru",

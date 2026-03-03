@@ -2,10 +2,17 @@ const express = require("express");
 const walletTransaction = require("../../models/vendor/wallet");
 const vendorAuthSchema = require("../../models/vendor/vendorAuth");
 const mongoose = require("mongoose");
-const ManualPayment = require("../../models/user/manualPayment"); // adjust path
-const VendorTransaction = require("../../models/vendor/wallet"); // adjust path
-
+const ManualPayment = require("../../models/user/manualPayment");
+const VendorTransaction = require("../../models/vendor/wallet");
+const { getRazorpayClient } = require("../../payments/razorpay.client");
+const { verifyRazorpaySignature } = require('../../payments/razorpay.util');
+const VendorWalletPaymentLink = require("../../models/vendor/VendorWalletPaymentLink");
 const router = express.Router();
+
+
+// const paymentLink = "http://localhost:5173/wallet-recharge";// dev
+const paymentLink = process.env.VENDOR_RECHARGE || "https://websitehomjee.netlify.app/wallet-recharge";
+
 
 // server might be UTC, so we should compute IST expiry correctly.
 const getTodayEndOfDayIST = () => {
@@ -20,83 +27,212 @@ const getTodayEndOfDayIST = () => {
   return expiryUTC;
 };
 
+const makeShortReceipt = (vendorId) => {
+  const vid = String(vendorId || "").slice(-8);
+  const ts = Date.now().toString(36);
+  return `VWL_${vid}_${ts}`.slice(0, 40);
+};
+
+
 const isExpired = (expiry) => {
   if (!expiry) return true;
   return new Date() > new Date(expiry);
 };
 
-// const paymentLink = "http://localhost:5173/wallet-recharge";// dev
-const paymentLink = "https://websitehomjee.netlify.app/wallet-recharge";
+const WALLET_PLAN = {
+  coin: 500,
+  amount: 5000,
+  gst18Perc: 900,
+  totalPaid: 5900, // what customer pays
+};
+
 
 // API to add a new transaction
 router.post("/recharge-wallet/add-coin/vendor", async (req, res) => {
   try {
     const { vendorId } = req.body;
-
-    if (!vendorId) {
-      return res
-        .status(400)
-        .json({ status: "fail", message: "vendorId required" });
-    }
+    if (!vendorId) return res.status(400).json({ success: false, message: "vendorId required" });
 
     const vendor = await vendorAuthSchema.findById(vendorId);
-    if (!vendor) {
-      return res
-        .status(404)
-        .json({ status: "fail", message: "Vendor not found" });
+    if (!vendor) return res.status(404).json({ success: false, message: "Vendor not found" });
+
+    const { coin, amount, gst18Perc, totalPaid } = WALLET_PLAN;
+
+    const rzp = getRazorpayClient();
+    const receipt = makeShortReceipt(vendorId);
+
+    let order;
+    try {
+      order = await rzp.orders.create({
+        amount: Math.round(Number(totalPaid) * 100),
+        currency: "INR",
+        receipt,
+        notes: { vendorId: String(vendorId), purpose: "vendor_wallet_recharge" },
+      });
+    } catch (e) {
+      console.error("Razorpay order create failed:", e?.error || e);
+      return res.status(400).json({ success: false, message: "Razorpay order creation failed" });
     }
 
-    // ✅ define values once
-    const coin = 500;
-    const amount = 5000;
-    const gst18Perc = 900;
-    const totalPaid = 5900;
-    const transactionType = "wallet recharge";
-    const type = "added";
+    // ✅ store link details in new collection
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    const newTransaction = new walletTransaction({
+    await VendorWalletPaymentLink.create({
       vendorId,
-      title: `Wallet recharge`,
-      amount,
+      provider: "razorpay",
+      providerRef: order.id,
+      receipt,
+      purpose: "vendor_wallet_recharge",
       coin,
+      amount,
       gst18Perc,
       totalPaid,
-      transactionType,
-      type,
+      isActive: true,
+      expiresAt,
     });
 
-    await newTransaction.save();
+    // ✅ keep vendor schema same (string only)
+    vendor.wallet = vendor.wallet || {};
+    vendor.wallet.paymentLink = vendor.wallet.paymentLink;  // ✅ String (old style)
+    vendor.wallet.isLinkActive = true;
+    vendor.wallet.linkExpiry = expiresAt;
+    vendor.wallet.canRespondLead = true; // or false if you want until recharge completes
 
-    // ✅ update wallet safely
-    if (!vendor.wallet) vendor.wallet = { coins: 0 };
-    if (!vendor.wallet) vendor.wallet = { overallCoinPurchased: 0 };
-    const totalCoinValue =
-      (Number(vendor.wallet.overallCoinPurchased) || 0) + coin;
-    if (transactionType === "wallet recharge" && type === "added") {
-      vendor.wallet.coins = (Number(vendor.wallet.coins) || 0) + coin;
-      vendor.wallet.overallCoinPurchased = totalCoinValue;
-    }
-
-    vendor.wallet.canRespondLead = true;
-    vendor.wallet.isLinkActive = false;
-    vendor.wallet.paymentLink = null;
-    vendor.wallet.linkExpiry = null;
-
+    vendor.markModified("wallet");
     await vendor.save();
 
-    return res.status(201).json({
-      status: "success",
-      message: "Wallet recharged successfully",
-      data: newTransaction,
-      updatedVendorCoins: vendor.wallet.coins,
+    return res.json({
+      success: true,
+      action: "PAYMENT_ORDER_CREATED",
+      vendorId,
+      razorpayOrder: {
+        keyId: process.env.RAZORPAY_KEY_ID,
+        orderId: order.id,
+        amount: Number(totalPaid),
+        currency: "INR",
+        purpose: "vendor_wallet_recharge",
+      },
     });
-  } catch (error) {
-    console.error("Error recharging wallet:", error);
-    return res.status(500).json({
-      status: "error",
-      message: "Server error",
-      error: error.message,
+  } catch (err) {
+    console.error("createVendorWalletRechargeOrder error:", err);
+    return res.status(500).json({ success: false, message: "Server error", error: err.message });
+  }
+});
+
+router.post("/verify-wallet/recharge", async (req, res) => {
+  const session = await mongoose.startSession();
+
+  try {
+    const { vendorId, providerRef, razorpayPaymentId, razorpaySignature } = req.body;
+
+    if (!vendorId || !providerRef || !razorpayPaymentId || !razorpaySignature) {
+      return res.status(400).json({
+        success: false,
+        message: "vendorId, providerRef, razorpayPaymentId, razorpaySignature are required",
+      });
+    }
+
+    const ok = verifyRazorpaySignature({
+      orderId: providerRef,
+      paymentId: razorpayPaymentId,
+      signature: razorpaySignature,
     });
+
+    if (!ok) return res.status(400).json({ success: false, message: "Signature verification failed" });
+
+    const out = { success: true, alreadyRecorded: false };
+
+    await session.withTransaction(async () => {
+      const vendor = await vendorAuthSchema.findById(vendorId).session(session);
+      if (!vendor) throw new Error("Vendor not found");
+
+      // ✅ fetch active link from new collection
+      const linkDoc = await VendorWalletPaymentLink.findOne({
+        vendorId,
+        providerRef: String(providerRef),
+        isActive: true,
+      }).session(session);
+
+      if (!linkDoc) throw new Error("No active recharge link found");
+
+      if (linkDoc.expiresAt.getTime() < Date.now()) {
+        throw new Error("Payment link expired. Please try again.");
+      }
+
+      // ✅ idempotency: don’t credit twice
+      const existingTx = await walletTransaction.findOne({
+        vendorId,
+        providerRef: String(razorpayPaymentId),
+      }).session(session);
+
+      if (existingTx) {
+        out.alreadyRecorded = true;
+
+        // clear vendor link state
+        vendor.wallet.isLinkActive = false;
+        vendor.wallet.paymentLink = null;
+        vendor.wallet.linkExpiry = null;
+
+        // deactivate linkDoc
+        linkDoc.isActive = false;
+
+        vendor.markModified("wallet");
+        await vendor.save();
+        await linkDoc.save();
+        return;
+      }
+
+      // ✅ create wallet transaction
+      const tx = await walletTransaction.create(
+        [
+          {
+            vendorId,
+            title: "Wallet recharge",
+            amount: linkDoc.amount,
+            coin: linkDoc.coin,
+            gst18Perc: linkDoc.gst18Perc,
+            totalPaid: linkDoc.totalPaid,
+            transactionType: "wallet recharge",
+            type: "added",
+            gateway: "Razorpay",
+            providerRef: String(razorpayPaymentId), // idempotency key
+            orderRef: String(providerRef),
+            at: new Date(),
+          },
+        ],
+        { session }
+      );
+
+      // ✅ credit wallet
+      vendor.wallet = vendor.wallet || {};
+      vendor.wallet.coins = (Number(vendor.wallet.coins) || 0) + linkDoc.coin;
+      vendor.wallet.overallCoinPurchased =
+        (Number(vendor.wallet.overallCoinPurchased) || 0) + linkDoc.coin;
+
+      vendor.wallet.canRespondLead = true;
+
+      // ✅ clear vendor payment link
+      vendor.wallet.isLinkActive = false;
+      vendor.wallet.paymentLink = null;
+      vendor.wallet.linkExpiry = null;
+
+      // ✅ deactivate link doc
+      linkDoc.isActive = false;
+
+      vendor.markModified("wallet");
+      await vendor.save();
+      await linkDoc.save();
+
+      out.transaction = tx?.[0];
+      out.updatedVendorCoins = vendor.wallet.coins;
+    });
+
+    return res.json(out);
+  } catch (err) {
+    console.error("verify-wallet/recharge error:", err);
+    return res.status(400).json({ success: false, message: err.message || "Verification failed" });
+  } finally {
+    session.endSession();
   }
 });
 
@@ -236,6 +372,8 @@ router.get("/vendor/payment-link/validate", async (req, res) => {
       linkExpiry: vendor.wallet.linkExpiry,
       // optional extra fields for UI:
       currentCoins: vendor.wallet.coins,
+      vendorname: vendor.vendor.vendorName,
+      vendorPhone: vendor.vendor.mobileNumber
     });
   } catch (err) {
     console.error("validate link error:", err);
