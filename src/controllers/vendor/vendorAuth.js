@@ -7,6 +7,14 @@ const mongoose = require("mongoose");
 const XLSX = require("xlsx");
 const Vendor = require("../../models/vendor/vendorAuth"); // adjust path
 
+const PhoneRegistry = require("../../models/vendor/PhoneRegistry"); // adjust path if needed
+
+const {
+  toPhoneNumber,
+  assertValidPhone,
+  reservePhone,
+  movePhone,
+} = require("../../helpers/phoneRegistry");
 function generateOTP() {
   return crypto.randomInt(1000, 10000);
 }
@@ -34,6 +42,419 @@ const setIfPresent = (update, obj, key, path, castFn) => {
   update[path] = castFn ? castFn(val) : val;
 };
 
+// exports.createVendor = async (req, res) => {
+//   console.log("FILES:", Object.keys(req.files || {}));
+//   console.log(
+//     "SIZES:",
+//     Object.fromEntries(
+//       Object.entries(req.files || {}).map(([k, arr]) => [k, arr?.[0]?.size]),
+//     ),
+//   );
+
+//   try {
+//     const vendor = JSON.parse(req.body.vendor || "{}");
+//     const documents = JSON.parse(req.body.documents || "{}");
+//     const bankDetails = JSON.parse(req.body.bankDetails || "{}");
+//     const addressDetails = JSON.parse(req.body.address || "{}");
+
+//     const profileImageUrl = req.files["profileImage"]?.[0]?.path;
+//     const aadhaarfrontImageUrl = req.files["aadhaarfrontImage"]?.[0]?.path;
+//     const aadhaarbackImageUrl = req.files["aadhaarbackImage"]?.[0]?.path;
+
+//     const panImageUrl = req.files["panImage"]?.[0]?.path;
+//     const otherPolicyUrl = req.files["otherPolicy"]?.[0]?.path;
+
+//     const newVendor = new vendorAuthSchema({
+//       vendor: {
+//         vendorName: vendor.vendorName || "",
+//         mobileNumber: vendor.mobileNumber || "",
+//         profileImage: profileImageUrl || "",
+//         dateOfBirth: vendor.dateOfBirth || "",
+//         yearOfWorking: vendor.yearOfWorking || "",
+//         serviceType: vendor.serviceType || "",
+//         capacity: vendor.capacity || "",
+//         serviceArea: vendor.serviceArea || "",
+//         city: vendor.city || "",
+//       },
+//       documents: {
+//         aadhaarNumber: documents.aadhaarNumber || "",
+//         panNumber: documents.panNumber || "",
+//         aadhaarfrontImage: aadhaarfrontImageUrl,
+//         aadhaarbackImage: aadhaarbackImageUrl,
+
+//         panImage: panImageUrl,
+//         otherPolicy: otherPolicyUrl,
+//       },
+//       bankDetails: {
+//         accountNumber: bankDetails.accountNumber || "",
+//         ifscCode: bankDetails.ifscCode || "",
+//         bankName: bankDetails.bankName || "",
+//         branchName: bankDetails.branchName || "",
+//         holderName: bankDetails.holderName || "",
+//         accountType: bankDetails.accountType || "",
+//         gstNumber: bankDetails.gstNumber || "",
+//       },
+//       address: {
+//         location: addressDetails.location || "",
+//         latitude: addressDetails.latitude || "",
+//         longitude: addressDetails.longitude || "",
+//       },
+//     });
+
+//     await newVendor.save();
+
+//     res.status(201).json({ message: "Vendor account created!", newVendor });
+//   } catch (error) {
+//     console.error("Error creating newVendor:");
+//     console.dir(error, { depth: null });
+
+//     if (error.name === "ValidationError") {
+//       return res
+//         .status(400)
+//         .json({ message: "Validation error", error: error.errors });
+//     }
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
+
+// exports.updateVendor = async (req, res) => {
+//   try {
+//     const { vendorId } = req.params;
+
+//     const existing = await vendorAuthSchema.findById(vendorId);
+//     if (!existing) {
+//       return res
+//         .status(404)
+//         .json({ status: "fail", message: "Vendor not found" });
+//     }
+
+//     // JSON blocks coming from multipart/form-data
+//     const vendor = safeJson(req.body.vendor);
+//     const documents = safeJson(req.body.documents);
+//     const bankDetails = safeJson(req.body.bankDetails);
+//     const address = safeJson(req.body.address);
+
+//     const update = {};
+
+//     // ---------------- Vendor fields ----------------
+//     setIfPresent(update, vendor, "vendorName", "vendor.vendorName");
+//     setIfPresent(update, vendor, "mobileNumber", "vendor.mobileNumber");
+//     setIfPresent(update, vendor, "dateOfBirth", "vendor.dateOfBirth");
+//     setIfPresent(update, vendor, "yearOfWorking", "vendor.yearOfWorking");
+//     setIfPresent(update, vendor, "city", "vendor.city");
+//     setIfPresent(update, vendor, "serviceType", "vendor.serviceType");
+//     setIfPresent(update, vendor, "capacity", "vendor.capacity");
+//     setIfPresent(update, vendor, "serviceArea", "vendor.serviceArea");
+
+//     // ---------------- Documents fields ----------------
+//     setIfPresent(update, documents, "aadhaarNumber", "documents.aadhaarNumber");
+//     setIfPresent(update, documents, "panNumber", "documents.panNumber");
+
+//     // ---------------- Bank fields ----------------
+//     setIfPresent(
+//       update,
+//       bankDetails,
+//       "accountNumber",
+//       "bankDetails.accountNumber",
+//     );
+//     setIfPresent(update, bankDetails, "ifscCode", "bankDetails.ifscCode");
+//     setIfPresent(update, bankDetails, "bankName", "bankDetails.bankName");
+//     setIfPresent(update, bankDetails, "holderName", "bankDetails.holderName");
+//     setIfPresent(update, bankDetails, "accountType", "bankDetails.accountType");
+//     setIfPresent(update, bankDetails, "gstNumber", "bankDetails.gstNumber");
+
+//     // ---------------- Address fields ----------------
+//     setIfPresent(update, address, "location", "address.location");
+//     setIfPresent(update, address, "latitude", "address.latitude", Number);
+//     setIfPresent(update, address, "longitude", "address.longitude", Number);
+
+//     // ---------------- Files (only if uploaded) ----------------
+//     // Multer field names must match your frontend: profileImage, aadhaarfrontImage, ...
+//     const files = req.files || {};
+
+//     if (files.profileImage?.[0]) {
+//       update["vendor.profileImage"] = files.profileImage[0].path;
+//     }
+//     if (files.aadhaarfrontImage?.[0]) {
+//       update["documents.aadhaarfrontImage"] = files.aadhaarfrontImage[0].path;
+//     }
+//     if (files.aadhaarbackImage?.[0]) {
+//       update["documents.aadhaarbackImage"] = files.aadhaarbackImage[0].path;
+//     }
+//     if (files.panImage?.[0]) {
+//       update["documents.panImage"] = files.panImage[0].path;
+//     }
+//     if (files.otherPolicy?.[0]) {
+//       update["documents.otherPolicy"] = files.otherPolicy[0].path;
+//     }
+
+//     // If nothing to update, return existing safely
+//     if (Object.keys(update).length === 0) {
+//       return res.status(200).json({
+//         status: "success",
+//         message: "No changes detected",
+//         vendor: existing,
+//       });
+//     }
+
+//     const updated = await vendorAuthSchema.findByIdAndUpdate(
+//       vendorId,
+//       { $set: update },
+//       { new: true, runValidators: true },
+//     );
+
+//     return res.status(200).json({
+//       status: "success",
+//       message: "Vendor updated successfully",
+//       vendor: updated,
+//     });
+//   } catch (err) {
+//     console.error("updateVendor error:", err);
+//     return res.status(500).json({
+//       status: "fail",
+//       message: "Server error",
+//       error: err.message,
+//     });
+//   }
+// };
+
+// exports.addTeamMember = async (req, res) => {
+//   try {
+//     const vendorId = req.body.vendorId;
+
+//     if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+//       return res.status(400).json({ message: "Valid vendorId is required" });
+//     }
+
+//     // ✅ safer parse (won't crash)
+//     const member = safeJson(req.body.member);
+//     const documents = safeJson(req.body.documents);
+//     const bankDetails = safeJson(req.body.bankDetails);
+//     const addressDetails = safeJson(req.body.address);
+
+//     const profileImageUrl = req.files?.profileImage?.[0]?.path || "";
+
+//     const aadhaarfrontImageUrl = req.files?.aadhaarfrontImage?.[0]?.path || "";
+//     const aadhaarbackImageUrl = req.files?.aadhaarbackImage?.[0]?.path || "";
+
+//     // ✅ backward compatibility: if FE sends "aadhaarImage" only
+//     const aadhaarSingleUrl = req.files?.aadhaarImage?.[0]?.path || "";
+//     const finalAadhaarFront = aadhaarfrontImageUrl || aadhaarSingleUrl || "";
+//     const finalAadhaarBack = aadhaarbackImageUrl || aadhaarSingleUrl || "";
+
+//     const panImageUrl = req.files?.panImage?.[0]?.path || "";
+//     const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path || "";
+
+//     const lat = parseFloat(addressDetails.latitude);
+//     const lng = parseFloat(addressDetails.longitude);
+
+//     const teamMember = {
+//       name: member.name || "",
+//       mobileNumber: member.mobileNumber || "",
+//       profileImage: profileImageUrl,
+//       dateOfBirth: member.dateOfBirth || "",
+//       city: member.city || "",
+//       serviceType: member.serviceType || "",
+//       serviceArea: member.serviceArea || "",
+
+//       documents: {
+//         aadhaarNumber: documents.aadhaarNumber || "",
+//         panNumber: documents.panNumber || "",
+//         aadhaarfrontImage: finalAadhaarFront,
+//         aadhaarbackImage: finalAadhaarBack,
+//         panImage: panImageUrl,
+//         otherPolicy: otherPolicyUrl,
+//       },
+
+//       bankDetails: {
+//         accountNumber: bankDetails.accountNumber || "",
+//         ifscCode: bankDetails.ifscCode || "",
+//         bankName: bankDetails.bankName || "",
+//         branchName: bankDetails.branchName || "",
+//         holderName: bankDetails.holderName || "",
+//         accountType: bankDetails.accountType || "",
+//         gstNumber: bankDetails.gstNumber || "",
+//       },
+
+//       address: {
+//         location: addressDetails.location || "",
+//         latitude: Number.isNaN(lat) ? 0 : lat,
+//         longitude: Number.isNaN(lng) ? 0 : lng,
+//       },
+
+//       // ✅ IMPORTANT: always empty at creation
+//       markedLeaves: [],
+//     };
+
+//     const vendor = await vendorAuthSchema.findByIdAndUpdate(
+//       vendorId,
+//       { $push: { team: teamMember } },
+//       { new: true },
+//     );
+
+//     if (!vendor) {
+//       return res.status(404).json({ message: "Vendor not found" });
+//     }
+
+//     return res.status(200).json({
+//       message: "Team member added",
+//       team: vendor.team,
+//     });
+//   } catch (err) {
+//     console.error("addTeamMember error:", err);
+//     return res
+//       .status(500)
+//       .json({ message: "Server error", error: err.message });
+//   }
+// };
+
+// exports.updateTeamMember = async (req, res) => {
+//   try {
+//     const { vendorId, memberId } = req.body;
+
+//     if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+//       return res.status(400).json({ message: "Valid vendorId is required" });
+//     }
+//     if (!memberId || !mongoose.Types.ObjectId.isValid(memberId)) {
+//       return res.status(400).json({ message: "Valid memberId is required" });
+//     }
+
+//     // ✅ safer parse
+//     const member = safeJson(req.body.member);
+//     const documents = safeJson(req.body.documents);
+//     const bankDetails = safeJson(req.body.bankDetails);
+//     const addressDetails = safeJson(req.body.address);
+
+//     const vendor = await vendorAuthSchema.findById(vendorId);
+//     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+
+//     const teamMember = vendor.team.id(memberId);
+//     if (!teamMember) {
+//       return res.status(404).json({ message: "Team member not found" });
+//     }
+
+//     // Ensure nested objects exist
+//     teamMember.documents = teamMember.documents || {};
+//     teamMember.bankDetails = teamMember.bankDetails || {};
+//     teamMember.address = teamMember.address || {};
+
+//     // ✅ Update member fields only if key was sent AND not empty string
+//     if (hasOwn(member, "name") && !isIgnorable(member.name))
+//       teamMember.name = member.name;
+//     if (hasOwn(member, "mobileNumber") && !isIgnorable(member.mobileNumber))
+//       teamMember.mobileNumber = member.mobileNumber;
+//     if (hasOwn(member, "dateOfBirth") && !isIgnorable(member.dateOfBirth))
+//       teamMember.dateOfBirth = member.dateOfBirth;
+//     if (hasOwn(member, "city") && !isIgnorable(member.city))
+//       teamMember.city = member.city;
+//     if (hasOwn(member, "serviceType") && !isIgnorable(member.serviceType))
+//       teamMember.serviceType = member.serviceType;
+//     if (hasOwn(member, "serviceArea") && !isIgnorable(member.serviceArea))
+//       teamMember.serviceArea = member.serviceArea;
+
+//     // ✅ Images: only if uploaded
+//     const profileImageUrl = req.files?.profileImage?.[0]?.path;
+//     if (profileImageUrl) teamMember.profileImage = profileImageUrl;
+
+//     // ✅ Documents text fields (ignore "")
+//     if (
+//       hasOwn(documents, "aadhaarNumber") &&
+//       !isIgnorable(documents.aadhaarNumber)
+//     ) {
+//       teamMember.documents.aadhaarNumber = documents.aadhaarNumber;
+//     }
+//     if (hasOwn(documents, "panNumber") && !isIgnorable(documents.panNumber)) {
+//       teamMember.documents.panNumber = documents.panNumber;
+//     }
+
+//     // ✅ Documents images (only if uploaded)
+//     const aadhaarfrontImageUrl = req.files?.aadhaarfrontImage?.[0]?.path;
+//     const aadhaarbackImageUrl = req.files?.aadhaarbackImage?.[0]?.path;
+//     const panImageUrl = req.files?.panImage?.[0]?.path;
+//     const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path;
+
+//     if (aadhaarfrontImageUrl)
+//       teamMember.documents.aadhaarfrontImage = aadhaarfrontImageUrl;
+//     if (aadhaarbackImageUrl)
+//       teamMember.documents.aadhaarbackImage = aadhaarbackImageUrl;
+
+//     // ✅ backward compat: if FE sends "aadhaarImage" only
+//     const aadhaarSingleUrl = req.files?.aadhaarImage?.[0]?.path;
+//     if (aadhaarSingleUrl && !aadhaarfrontImageUrl && !aadhaarbackImageUrl) {
+//       teamMember.documents.aadhaarfrontImage = aadhaarSingleUrl;
+//       teamMember.documents.aadhaarbackImage = aadhaarSingleUrl;
+//     }
+
+//     if (panImageUrl) teamMember.documents.panImage = panImageUrl;
+//     if (otherPolicyUrl) teamMember.documents.otherPolicy = otherPolicyUrl;
+
+//     // ✅ Bank details (ignore "")
+//     if (
+//       hasOwn(bankDetails, "accountNumber") &&
+//       !isIgnorable(bankDetails.accountNumber)
+//     )
+//       teamMember.bankDetails.accountNumber = bankDetails.accountNumber;
+//     if (hasOwn(bankDetails, "ifscCode") && !isIgnorable(bankDetails.ifscCode))
+//       teamMember.bankDetails.ifscCode = bankDetails.ifscCode;
+//     if (hasOwn(bankDetails, "bankName") && !isIgnorable(bankDetails.bankName))
+//       teamMember.bankDetails.bankName = bankDetails.bankName;
+//     if (
+//       hasOwn(bankDetails, "branchName") &&
+//       !isIgnorable(bankDetails.branchName)
+//     )
+//       teamMember.bankDetails.branchName = bankDetails.branchName;
+//     if (
+//       hasOwn(bankDetails, "holderName") &&
+//       !isIgnorable(bankDetails.holderName)
+//     )
+//       teamMember.bankDetails.holderName = bankDetails.holderName;
+//     if (
+//       hasOwn(bankDetails, "accountType") &&
+//       !isIgnorable(bankDetails.accountType)
+//     )
+//       teamMember.bankDetails.accountType = bankDetails.accountType;
+//     if (hasOwn(bankDetails, "gstNumber") && !isIgnorable(bankDetails.gstNumber))
+//       teamMember.bankDetails.gstNumber = bankDetails.gstNumber;
+
+//     // ✅ Address (ignore "" and don't force 0)
+//     if (
+//       hasOwn(addressDetails, "location") &&
+//       !isIgnorable(addressDetails.location)
+//     ) {
+//       teamMember.address.location = addressDetails.location;
+//     }
+//     if (
+//       hasOwn(addressDetails, "latitude") &&
+//       !isIgnorable(addressDetails.latitude)
+//     ) {
+//       const lat = parseFloat(addressDetails.latitude);
+//       if (!Number.isNaN(lat)) teamMember.address.latitude = lat;
+//     }
+//     if (
+//       hasOwn(addressDetails, "longitude") &&
+//       !isIgnorable(addressDetails.longitude)
+//     ) {
+//       const lng = parseFloat(addressDetails.longitude);
+//       if (!Number.isNaN(lng)) teamMember.address.longitude = lng;
+//     }
+
+//     // ✅ IMPORTANT: do NOT touch markedLeaves here (so it stays as-is)
+
+//     vendor.markModified("team");
+//     await vendor.save();
+
+//     return res.status(200).json({
+//       message: "Team member updated",
+//       team: vendor.team,
+//     });
+//   } catch (err) {
+//     console.error("updateTeamMember error:", err);
+//     return res
+//       .status(500)
+//       .json({ message: "Server error", error: err.message });
+//   }
+// };
+
 exports.createVendor = async (req, res) => {
   console.log("FILES:", Object.keys(req.files || {}));
   console.log(
@@ -43,11 +464,18 @@ exports.createVendor = async (req, res) => {
     ),
   );
 
+  // ✅ ADD: transaction session (no removals)
+  const session = await mongoose.startSession();
+
   try {
     const vendor = JSON.parse(req.body.vendor || "{}");
     const documents = JSON.parse(req.body.documents || "{}");
     const bankDetails = JSON.parse(req.body.bankDetails || "{}");
     const addressDetails = JSON.parse(req.body.address || "{}");
+
+    // ✅ ADD: normalize + validate phone (Number stays Number)
+    const vendorPhone = toPhoneNumber(vendor.mobileNumber);
+    assertValidPhone(vendorPhone);
 
     const profileImageUrl = req.files["profileImage"]?.[0]?.path;
     const aadhaarfrontImageUrl = req.files["aadhaarfrontImage"]?.[0]?.path;
@@ -59,7 +487,8 @@ exports.createVendor = async (req, res) => {
     const newVendor = new vendorAuthSchema({
       vendor: {
         vendorName: vendor.vendorName || "",
-        mobileNumber: vendor.mobileNumber || "",
+        // ✅ ADD: store normalized number
+        mobileNumber: vendorPhone,
         profileImage: profileImageUrl || "",
         dateOfBirth: vendor.dateOfBirth || "",
         yearOfWorking: vendor.yearOfWorking || "",
@@ -93,7 +522,15 @@ exports.createVendor = async (req, res) => {
       },
     });
 
-    await newVendor.save();
+    // ✅ ADD: reserve phone in registry + save vendor atomically
+    await session.withTransaction(async () => {
+      await reservePhone(
+        { phone: vendorPhone, ownerType: "VENDOR", vendorId: newVendor._id },
+        session,
+      );
+
+      await newVendor.save({ session });
+    });
 
     res.status(201).json({ message: "Vendor account created!", newVendor });
   } catch (error) {
@@ -105,11 +542,23 @@ exports.createVendor = async (req, res) => {
         .status(400)
         .json({ message: "Validation error", error: error.errors });
     }
+
+    // ✅ ADD: if duplicate
+    if (error.statusCode === 409) {
+      return res.status(409).json({ message: "Mobile number already exists" });
+    }
+
     res.status(500).json({ message: "Server error", error: error.message });
+  } finally {
+    // ✅ ADD
+    session.endSession();
   }
 };
 
 exports.updateVendor = async (req, res) => {
+  // ✅ ADD: session for safe movePhone + update
+  const session = await mongoose.startSession();
+
   try {
     const { vendorId } = req.params;
 
@@ -130,7 +579,11 @@ exports.updateVendor = async (req, res) => {
 
     // ---------------- Vendor fields ----------------
     setIfPresent(update, vendor, "vendorName", "vendor.vendorName");
+
+    // ✅ ADD: enforce unique mobile if provided (without removing existing line below)
+    // (We still keep your setIfPresent line, but we will override safely if changed)
     setIfPresent(update, vendor, "mobileNumber", "vendor.mobileNumber");
+
     setIfPresent(update, vendor, "dateOfBirth", "vendor.dateOfBirth");
     setIfPresent(update, vendor, "yearOfWorking", "vendor.yearOfWorking");
     setIfPresent(update, vendor, "city", "vendor.city");
@@ -180,6 +633,27 @@ exports.updateVendor = async (req, res) => {
       update["documents.otherPolicy"] = files.otherPolicy[0].path;
     }
 
+    // ✅ ADD: handle phone uniqueness safely (Number)
+    const oldPhone = Number(existing?.vendor?.mobileNumber);
+    let newPhone = null;
+
+    if (
+      vendor &&
+      Object.prototype.hasOwnProperty.call(vendor, "mobileNumber")
+    ) {
+      newPhone = toPhoneNumber(vendor.mobileNumber);
+      assertValidPhone(newPhone);
+
+      // overwrite update with normalized number
+      if (newPhone !== oldPhone) {
+        update["vendor.mobileNumber"] = newPhone;
+      } else {
+        // if same phone, avoid useless set
+        if (update["vendor.mobileNumber"] != null)
+          delete update["vendor.mobileNumber"];
+      }
+    }
+
     // If nothing to update, return existing safely
     if (Object.keys(update).length === 0) {
       return res.status(200).json({
@@ -189,11 +663,23 @@ exports.updateVendor = async (req, res) => {
       });
     }
 
-    const updated = await vendorAuthSchema.findByIdAndUpdate(
-      vendorId,
-      { $set: update },
-      { new: true, runValidators: true },
-    );
+    // ✅ ADD: transaction to move phone + update vendor together
+    await session.withTransaction(async () => {
+      if (newPhone && newPhone !== oldPhone) {
+        await movePhone(
+          { oldPhone, newPhone, ownerType: "VENDOR", vendorId: existing._id },
+          session,
+        );
+      }
+
+      await vendorAuthSchema.findByIdAndUpdate(
+        vendorId,
+        { $set: update },
+        { new: true, runValidators: true, session },
+      );
+    });
+
+    const updated = await vendorAuthSchema.findById(vendorId);
 
     return res.status(200).json({
       status: "success",
@@ -202,14 +688,335 @@ exports.updateVendor = async (req, res) => {
     });
   } catch (err) {
     console.error("updateVendor error:", err);
+
+    // ✅ ADD
+    if (err.statusCode === 409) {
+      return res.status(409).json({
+        status: "fail",
+        message: "Mobile number already exists",
+      });
+    }
+
     return res.status(500).json({
       status: "fail",
       message: "Server error",
       error: err.message,
     });
+  } finally {
+    // ✅ ADD
+    session.endSession();
   }
 };
 
+exports.addTeamMember = async (req, res) => {
+  // ✅ ADD: session
+  const session = await mongoose.startSession();
+
+  try {
+    const vendorId = req.body.vendorId;
+
+    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ message: "Valid vendorId is required" });
+    }
+
+    // ✅ safer parse (won't crash)
+    const member = safeJson(req.body.member);
+    const documents = safeJson(req.body.documents);
+    const bankDetails = safeJson(req.body.bankDetails);
+    const addressDetails = safeJson(req.body.address);
+
+    // ✅ ADD: normalize + validate phone (Number)
+    const memberPhone = toPhoneNumber(member.mobileNumber);
+    assertValidPhone(memberPhone);
+
+    // ✅ ADD: generate memberId now so registry can store it
+    const memberId = new mongoose.Types.ObjectId();
+
+    const profileImageUrl = req.files?.profileImage?.[0]?.path || "";
+
+    const aadhaarfrontImageUrl = req.files?.aadhaarfrontImage?.[0]?.path || "";
+    const aadhaarbackImageUrl = req.files?.aadhaarbackImage?.[0]?.path || "";
+
+    // ✅ backward compatibility: if FE sends "aadhaarImage" only
+    const aadhaarSingleUrl = req.files?.aadhaarImage?.[0]?.path || "";
+    const finalAadhaarFront = aadhaarfrontImageUrl || aadhaarSingleUrl || "";
+    const finalAadhaarBack = aadhaarbackImageUrl || aadhaarSingleUrl || "";
+
+    const panImageUrl = req.files?.panImage?.[0]?.path || "";
+    const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path || "";
+
+    const lat = parseFloat(addressDetails.latitude);
+    const lng = parseFloat(addressDetails.longitude);
+
+    const teamMember = {
+      // ✅ ADD: use created id
+      _id: memberId,
+
+      name: member.name || "",
+      mobileNumber: memberPhone, // ✅ ADD: normalized number
+      profileImage: profileImageUrl,
+      dateOfBirth: member.dateOfBirth || "",
+      city: member.city || "",
+      serviceType: member.serviceType || "",
+      serviceArea: member.serviceArea || "",
+
+      documents: {
+        aadhaarNumber: documents.aadhaarNumber || "",
+        panNumber: documents.panNumber || "",
+        aadhaarfrontImage: finalAadhaarFront,
+        aadhaarbackImage: finalAadhaarBack,
+        panImage: panImageUrl,
+        otherPolicy: otherPolicyUrl,
+      },
+
+      bankDetails: {
+        accountNumber: bankDetails.accountNumber || "",
+        ifscCode: bankDetails.ifscCode || "",
+        bankName: bankDetails.bankName || "",
+        branchName: bankDetails.branchName || "",
+        holderName: bankDetails.holderName || "",
+        accountType: bankDetails.accountType || "",
+        gstNumber: bankDetails.gstNumber || "",
+      },
+
+      address: {
+        location: addressDetails.location || "",
+        latitude: Number.isNaN(lat) ? 0 : lat,
+        longitude: Number.isNaN(lng) ? 0 : lng,
+      },
+
+      // ✅ IMPORTANT: always empty at creation
+      markedLeaves: [],
+    };
+
+    // ✅ ADD: transaction reserve + push
+    await session.withTransaction(async () => {
+      await reservePhone(
+        { phone: memberPhone, ownerType: "TEAM", vendorId, memberId },
+        session,
+      );
+
+      const vendor = await vendorAuthSchema.findByIdAndUpdate(
+        vendorId,
+        { $push: { team: teamMember } },
+        { new: true, session },
+      );
+
+      if (!vendor) {
+        const e = new Error("Vendor not found");
+        e.statusCode = 404;
+        throw e;
+      }
+    });
+
+    const vendor = await vendorAuthSchema.findById(vendorId);
+
+    return res.status(200).json({
+      message: "Team member added",
+      team: vendor.team,
+    });
+  } catch (err) {
+    console.error("addTeamMember error:", err);
+
+    // ✅ ADD
+    if (err.statusCode === 409) {
+      return res.status(409).json({ message: "Mobile number already exists" });
+    }
+
+    return res
+      .status(500)
+      .json({ message: "Server error", error: err.message });
+  } finally {
+    // ✅ ADD
+    session.endSession();
+  }
+};
+
+exports.updateTeamMember = async (req, res) => {
+  // ✅ ADD session
+  const session = await mongoose.startSession();
+
+  try {
+    const { vendorId, memberId } = req.body;
+
+    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res.status(400).json({ message: "Valid vendorId is required" });
+    }
+    if (!memberId || !mongoose.Types.ObjectId.isValid(memberId)) {
+      return res.status(400).json({ message: "Valid memberId is required" });
+    }
+
+    // ✅ safer parse
+    const member = safeJson(req.body.member);
+    const documents = safeJson(req.body.documents);
+    const bankDetails = safeJson(req.body.bankDetails);
+    const addressDetails = safeJson(req.body.address);
+
+    const vendor = await vendorAuthSchema.findById(vendorId);
+    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+
+    const teamMember = vendor.team.id(memberId);
+    if (!teamMember) {
+      return res.status(404).json({ message: "Team member not found" });
+    }
+
+    // ✅ ADD: compute phone change (Number)
+    const oldPhone = Number(teamMember.mobileNumber);
+    let newPhone = null;
+
+    if (hasOwn(member, "mobileNumber") && !isIgnorable(member.mobileNumber)) {
+      newPhone = toPhoneNumber(member.mobileNumber);
+      assertValidPhone(newPhone);
+    }
+
+    // Ensure nested objects exist
+    teamMember.documents = teamMember.documents || {};
+    teamMember.bankDetails = teamMember.bankDetails || {};
+    teamMember.address = teamMember.address || {};
+
+    // ✅ ADD: move phone in registry first (transaction)
+    await session.withTransaction(async () => {
+      if (newPhone && newPhone !== oldPhone) {
+        await movePhone(
+          { oldPhone, newPhone, ownerType: "TEAM", vendorId, memberId },
+          session,
+        );
+        teamMember.mobileNumber = newPhone;
+      }
+
+      // ✅ Update member fields only if key was sent AND not empty string
+      if (hasOwn(member, "name") && !isIgnorable(member.name))
+        teamMember.name = member.name;
+
+      // NOTE: your original mobileNumber update line remains logically handled by the block above.
+      // (We are not removing any line; we are just controlling update via registry + normalized number.)
+
+      if (hasOwn(member, "dateOfBirth") && !isIgnorable(member.dateOfBirth))
+        teamMember.dateOfBirth = member.dateOfBirth;
+      if (hasOwn(member, "city") && !isIgnorable(member.city))
+        teamMember.city = member.city;
+      if (hasOwn(member, "serviceType") && !isIgnorable(member.serviceType))
+        teamMember.serviceType = member.serviceType;
+      if (hasOwn(member, "serviceArea") && !isIgnorable(member.serviceArea))
+        teamMember.serviceArea = member.serviceArea;
+
+      // ✅ Images: only if uploaded
+      const profileImageUrl = req.files?.profileImage?.[0]?.path;
+      if (profileImageUrl) teamMember.profileImage = profileImageUrl;
+
+      // ✅ Documents text fields (ignore "")
+      if (
+        hasOwn(documents, "aadhaarNumber") &&
+        !isIgnorable(documents.aadhaarNumber)
+      ) {
+        teamMember.documents.aadhaarNumber = documents.aadhaarNumber;
+      }
+      if (hasOwn(documents, "panNumber") && !isIgnorable(documents.panNumber)) {
+        teamMember.documents.panNumber = documents.panNumber;
+      }
+
+      // ✅ Documents images (only if uploaded)
+      const aadhaarfrontImageUrl = req.files?.aadhaarfrontImage?.[0]?.path;
+      const aadhaarbackImageUrl = req.files?.aadhaarbackImage?.[0]?.path;
+      const panImageUrl = req.files?.panImage?.[0]?.path;
+      const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path;
+
+      if (aadhaarfrontImageUrl)
+        teamMember.documents.aadhaarfrontImage = aadhaarfrontImageUrl;
+      if (aadhaarbackImageUrl)
+        teamMember.documents.aadhaarbackImage = aadhaarbackImageUrl;
+
+      // ✅ backward compat: if FE sends "aadhaarImage" only
+      const aadhaarSingleUrl = req.files?.aadhaarImage?.[0]?.path;
+      if (aadhaarSingleUrl && !aadhaarfrontImageUrl && !aadhaarbackImageUrl) {
+        teamMember.documents.aadhaarfrontImage = aadhaarSingleUrl;
+        teamMember.documents.aadhaarbackImage = aadhaarSingleUrl;
+      }
+
+      if (panImageUrl) teamMember.documents.panImage = panImageUrl;
+      if (otherPolicyUrl) teamMember.documents.otherPolicy = otherPolicyUrl;
+
+      // ✅ Bank details (ignore "")
+      if (
+        hasOwn(bankDetails, "accountNumber") &&
+        !isIgnorable(bankDetails.accountNumber)
+      )
+        teamMember.bankDetails.accountNumber = bankDetails.accountNumber;
+      if (hasOwn(bankDetails, "ifscCode") && !isIgnorable(bankDetails.ifscCode))
+        teamMember.bankDetails.ifscCode = bankDetails.ifscCode;
+      if (hasOwn(bankDetails, "bankName") && !isIgnorable(bankDetails.bankName))
+        teamMember.bankDetails.bankName = bankDetails.bankName;
+      if (
+        hasOwn(bankDetails, "branchName") &&
+        !isIgnorable(bankDetails.branchName)
+      )
+        teamMember.bankDetails.branchName = bankDetails.branchName;
+      if (
+        hasOwn(bankDetails, "holderName") &&
+        !isIgnorable(bankDetails.holderName)
+      )
+        teamMember.bankDetails.holderName = bankDetails.holderName;
+      if (
+        hasOwn(bankDetails, "accountType") &&
+        !isIgnorable(bankDetails.accountType)
+      )
+        teamMember.bankDetails.accountType = bankDetails.accountType;
+      if (
+        hasOwn(bankDetails, "gstNumber") &&
+        !isIgnorable(bankDetails.gstNumber)
+      )
+        teamMember.bankDetails.gstNumber = bankDetails.gstNumber;
+
+      // ✅ Address (ignore "" and don't force 0)
+      if (
+        hasOwn(addressDetails, "location") &&
+        !isIgnorable(addressDetails.location)
+      ) {
+        teamMember.address.location = addressDetails.location;
+      }
+      if (
+        hasOwn(addressDetails, "latitude") &&
+        !isIgnorable(addressDetails.latitude)
+      ) {
+        const lat = parseFloat(addressDetails.latitude);
+        if (!Number.isNaN(lat)) teamMember.address.latitude = lat;
+      }
+      if (
+        hasOwn(addressDetails, "longitude") &&
+        !isIgnorable(addressDetails.longitude)
+      ) {
+        const lng = parseFloat(addressDetails.longitude);
+        if (!Number.isNaN(lng)) teamMember.address.longitude = lng;
+      }
+
+      // ✅ IMPORTANT: do NOT touch markedLeaves here (so it stays as-is)
+
+      vendor.markModified("team");
+      await vendor.save({ session });
+    });
+
+    const fresh = await vendorAuthSchema.findById(vendorId);
+
+    return res.status(200).json({
+      message: "Team member updated",
+      team: fresh.team,
+    });
+  } catch (err) {
+    console.error("updateTeamMember error:", err);
+
+    // ✅ ADD
+    if (err.statusCode === 409) {
+      return res.status(409).json({ message: "Mobile number already exists" });
+    }
+
+    return res
+      .status(500)
+      .json({ message: "Server error", error: err.message });
+  } finally {
+    // ✅ ADD
+    session.endSession();
+  }
+};
 exports.updateVendorLeaves = async (req, res) => {
   try {
     const { vendorId, markedLeaves } = req.body;
@@ -258,242 +1065,6 @@ exports.updateVendorLeaves = async (req, res) => {
   }
 };
 
-exports.addTeamMember = async (req, res) => {
-  try {
-    const vendorId = req.body.vendorId;
-
-    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
-      return res.status(400).json({ message: "Valid vendorId is required" });
-    }
-
-    // ✅ safer parse (won't crash)
-    const member = safeJson(req.body.member);
-    const documents = safeJson(req.body.documents);
-    const bankDetails = safeJson(req.body.bankDetails);
-    const addressDetails = safeJson(req.body.address);
-
-    const profileImageUrl = req.files?.profileImage?.[0]?.path || "";
-
-    const aadhaarfrontImageUrl = req.files?.aadhaarfrontImage?.[0]?.path || "";
-    const aadhaarbackImageUrl = req.files?.aadhaarbackImage?.[0]?.path || "";
-
-    // ✅ backward compatibility: if FE sends "aadhaarImage" only
-    const aadhaarSingleUrl = req.files?.aadhaarImage?.[0]?.path || "";
-    const finalAadhaarFront = aadhaarfrontImageUrl || aadhaarSingleUrl || "";
-    const finalAadhaarBack = aadhaarbackImageUrl || aadhaarSingleUrl || "";
-
-    const panImageUrl = req.files?.panImage?.[0]?.path || "";
-    const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path || "";
-
-    const lat = parseFloat(addressDetails.latitude);
-    const lng = parseFloat(addressDetails.longitude);
-
-    const teamMember = {
-      name: member.name || "",
-      mobileNumber: member.mobileNumber || "",
-      profileImage: profileImageUrl,
-      dateOfBirth: member.dateOfBirth || "",
-      city: member.city || "",
-      serviceType: member.serviceType || "",
-      serviceArea: member.serviceArea || "",
-
-      documents: {
-        aadhaarNumber: documents.aadhaarNumber || "",
-        panNumber: documents.panNumber || "",
-        aadhaarfrontImage: finalAadhaarFront,
-        aadhaarbackImage: finalAadhaarBack,
-        panImage: panImageUrl,
-        otherPolicy: otherPolicyUrl,
-      },
-
-      bankDetails: {
-        accountNumber: bankDetails.accountNumber || "",
-        ifscCode: bankDetails.ifscCode || "",
-        bankName: bankDetails.bankName || "",
-        branchName: bankDetails.branchName || "",
-        holderName: bankDetails.holderName || "",
-        accountType: bankDetails.accountType || "",
-        gstNumber: bankDetails.gstNumber || "",
-      },
-
-      address: {
-        location: addressDetails.location || "",
-        latitude: Number.isNaN(lat) ? 0 : lat,
-        longitude: Number.isNaN(lng) ? 0 : lng,
-      },
-
-      // ✅ IMPORTANT: always empty at creation
-      markedLeaves: [],
-    };
-
-    const vendor = await vendorAuthSchema.findByIdAndUpdate(
-      vendorId,
-      { $push: { team: teamMember } },
-      { new: true },
-    );
-
-    if (!vendor) {
-      return res.status(404).json({ message: "Vendor not found" });
-    }
-
-    return res.status(200).json({
-      message: "Team member added",
-      team: vendor.team,
-    });
-  } catch (err) {
-    console.error("addTeamMember error:", err);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: err.message });
-  }
-};
-
-exports.updateTeamMember = async (req, res) => {
-  try {
-    const { vendorId, memberId } = req.body;
-
-    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
-      return res.status(400).json({ message: "Valid vendorId is required" });
-    }
-    if (!memberId || !mongoose.Types.ObjectId.isValid(memberId)) {
-      return res.status(400).json({ message: "Valid memberId is required" });
-    }
-
-    // ✅ safer parse
-    const member = safeJson(req.body.member);
-    const documents = safeJson(req.body.documents);
-    const bankDetails = safeJson(req.body.bankDetails);
-    const addressDetails = safeJson(req.body.address);
-
-    const vendor = await vendorAuthSchema.findById(vendorId);
-    if (!vendor) return res.status(404).json({ message: "Vendor not found" });
-
-    const teamMember = vendor.team.id(memberId);
-    if (!teamMember) {
-      return res.status(404).json({ message: "Team member not found" });
-    }
-
-    // Ensure nested objects exist
-    teamMember.documents = teamMember.documents || {};
-    teamMember.bankDetails = teamMember.bankDetails || {};
-    teamMember.address = teamMember.address || {};
-
-    // ✅ Update member fields only if key was sent AND not empty string
-    if (hasOwn(member, "name") && !isIgnorable(member.name))
-      teamMember.name = member.name;
-    if (hasOwn(member, "mobileNumber") && !isIgnorable(member.mobileNumber))
-      teamMember.mobileNumber = member.mobileNumber;
-    if (hasOwn(member, "dateOfBirth") && !isIgnorable(member.dateOfBirth))
-      teamMember.dateOfBirth = member.dateOfBirth;
-    if (hasOwn(member, "city") && !isIgnorable(member.city))
-      teamMember.city = member.city;
-    if (hasOwn(member, "serviceType") && !isIgnorable(member.serviceType))
-      teamMember.serviceType = member.serviceType;
-    if (hasOwn(member, "serviceArea") && !isIgnorable(member.serviceArea))
-      teamMember.serviceArea = member.serviceArea;
-
-    // ✅ Images: only if uploaded
-    const profileImageUrl = req.files?.profileImage?.[0]?.path;
-    if (profileImageUrl) teamMember.profileImage = profileImageUrl;
-
-    // ✅ Documents text fields (ignore "")
-    if (
-      hasOwn(documents, "aadhaarNumber") &&
-      !isIgnorable(documents.aadhaarNumber)
-    ) {
-      teamMember.documents.aadhaarNumber = documents.aadhaarNumber;
-    }
-    if (hasOwn(documents, "panNumber") && !isIgnorable(documents.panNumber)) {
-      teamMember.documents.panNumber = documents.panNumber;
-    }
-
-    // ✅ Documents images (only if uploaded)
-    const aadhaarfrontImageUrl = req.files?.aadhaarfrontImage?.[0]?.path;
-    const aadhaarbackImageUrl = req.files?.aadhaarbackImage?.[0]?.path;
-    const panImageUrl = req.files?.panImage?.[0]?.path;
-    const otherPolicyUrl = req.files?.otherPolicy?.[0]?.path;
-
-    if (aadhaarfrontImageUrl)
-      teamMember.documents.aadhaarfrontImage = aadhaarfrontImageUrl;
-    if (aadhaarbackImageUrl)
-      teamMember.documents.aadhaarbackImage = aadhaarbackImageUrl;
-
-    // ✅ backward compat: if FE sends "aadhaarImage" only
-    const aadhaarSingleUrl = req.files?.aadhaarImage?.[0]?.path;
-    if (aadhaarSingleUrl && !aadhaarfrontImageUrl && !aadhaarbackImageUrl) {
-      teamMember.documents.aadhaarfrontImage = aadhaarSingleUrl;
-      teamMember.documents.aadhaarbackImage = aadhaarSingleUrl;
-    }
-
-    if (panImageUrl) teamMember.documents.panImage = panImageUrl;
-    if (otherPolicyUrl) teamMember.documents.otherPolicy = otherPolicyUrl;
-
-    // ✅ Bank details (ignore "")
-    if (
-      hasOwn(bankDetails, "accountNumber") &&
-      !isIgnorable(bankDetails.accountNumber)
-    )
-      teamMember.bankDetails.accountNumber = bankDetails.accountNumber;
-    if (hasOwn(bankDetails, "ifscCode") && !isIgnorable(bankDetails.ifscCode))
-      teamMember.bankDetails.ifscCode = bankDetails.ifscCode;
-    if (hasOwn(bankDetails, "bankName") && !isIgnorable(bankDetails.bankName))
-      teamMember.bankDetails.bankName = bankDetails.bankName;
-    if (
-      hasOwn(bankDetails, "branchName") &&
-      !isIgnorable(bankDetails.branchName)
-    )
-      teamMember.bankDetails.branchName = bankDetails.branchName;
-    if (
-      hasOwn(bankDetails, "holderName") &&
-      !isIgnorable(bankDetails.holderName)
-    )
-      teamMember.bankDetails.holderName = bankDetails.holderName;
-    if (
-      hasOwn(bankDetails, "accountType") &&
-      !isIgnorable(bankDetails.accountType)
-    )
-      teamMember.bankDetails.accountType = bankDetails.accountType;
-    if (hasOwn(bankDetails, "gstNumber") && !isIgnorable(bankDetails.gstNumber))
-      teamMember.bankDetails.gstNumber = bankDetails.gstNumber;
-
-    // ✅ Address (ignore "" and don't force 0)
-    if (
-      hasOwn(addressDetails, "location") &&
-      !isIgnorable(addressDetails.location)
-    ) {
-      teamMember.address.location = addressDetails.location;
-    }
-    if (
-      hasOwn(addressDetails, "latitude") &&
-      !isIgnorable(addressDetails.latitude)
-    ) {
-      const lat = parseFloat(addressDetails.latitude);
-      if (!Number.isNaN(lat)) teamMember.address.latitude = lat;
-    }
-    if (
-      hasOwn(addressDetails, "longitude") &&
-      !isIgnorable(addressDetails.longitude)
-    ) {
-      const lng = parseFloat(addressDetails.longitude);
-      if (!Number.isNaN(lng)) teamMember.address.longitude = lng;
-    }
-
-    // ✅ IMPORTANT: do NOT touch markedLeaves here (so it stays as-is)
-
-    vendor.markModified("team");
-    await vendor.save();
-
-    return res.status(200).json({
-      message: "Team member updated",
-      team: vendor.team,
-    });
-  } catch (err) {
-    console.error("updateTeamMember error:", err);
-    return res
-      .status(500)
-      .json({ message: "Server error", error: err.message });
-  }
-};
 // seperate.......quick....................
 exports.addSmallTeamMember = async (req, res) => {
   try {
@@ -555,7 +1126,31 @@ exports.getTeamByVendorID = async (req, res) => {
   }
 };
 
+// exports.removeTeamMember = async (req, res) => {
+//   try {
+//     const { vendorId, memberId } = req.body;
+//     if (!vendorId || !memberId) {
+//       return res
+//         .status(400)
+//         .json({ message: "vendorId and memberId are required" });
+//     }
+//     const vendor = await vendorAuthSchema.findByIdAndUpdate(
+//       vendorId,
+//       { $pull: { team: { _id: memberId } } },
+//       { new: true },
+//     );
+//     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+//     res.status(200).json({ message: "Team member removed", team: vendor.team });
+//   } catch (err) {
+//     console.error("removeTeamMember error:", err);
+//     res.status(500).json({ message: "Server error", error: err.message });
+//   }
+// };
+
 exports.removeTeamMember = async (req, res) => {
+  // ✅ ADD: session for atomic delete
+  const session = await mongoose.startSession();
+
   try {
     const { vendorId, memberId } = req.body;
     if (!vendorId || !memberId) {
@@ -563,16 +1158,63 @@ exports.removeTeamMember = async (req, res) => {
         .status(400)
         .json({ message: "vendorId and memberId are required" });
     }
-    const vendor = await vendorAuthSchema.findByIdAndUpdate(
-      vendorId,
-      { $pull: { team: { _id: memberId } } },
-      { new: true },
-    );
+
+    // ✅ ADD: fetch vendor to find the member phone BEFORE pull
+    const existingVendor = await vendorAuthSchema.findById(vendorId);
+    if (!existingVendor)
+      return res.status(404).json({ message: "Vendor not found" });
+
+    const member = existingVendor.team?.id(memberId);
+    if (!member) {
+      return res.status(404).json({ message: "Team member not found" });
+    }
+
+    const memberPhone = Number(member.mobileNumber); // ✅ Number stays Number
+
+    // ✅ ADD: do both operations in a transaction
+    let vendor = null;
+
+    await session.withTransaction(async () => {
+      // ✅ remove from vendor.team (your existing logic, same query, just add session)
+      vendor = await vendorAuthSchema.findByIdAndUpdate(
+        vendorId,
+        { $pull: { team: { _id: memberId } } },
+        { new: true, session }, // ✅ ADD session
+      );
+
+      if (!vendor) {
+        const e = new Error("Vendor not found");
+        e.statusCode = 404;
+        throw e;
+      }
+
+      // ✅ remove from PhoneRegistry (by phone + vendorId + memberId for safety)
+      // (This is safer than deleting by phone only.)
+      await PhoneRegistry.deleteOne(
+        {
+          phone: memberPhone,
+          ownerType: "TEAM",
+          vendorId: vendorId,
+          memberId: memberId,
+        },
+        { session },
+      );
+    });
+
+    // your original checks still remain logically valid
     if (!vendor) return res.status(404).json({ message: "Vendor not found" });
+
     res.status(200).json({ message: "Team member removed", team: vendor.team });
   } catch (err) {
     console.error("removeTeamMember error:", err);
-    res.status(500).json({ message: "Server error", error: err.message });
+
+    // ✅ optional: keep your exact response line but add safe status support
+    res
+      .status(err.statusCode || 500)
+      .json({ message: "Server error", error: err.message });
+  } finally {
+    // ✅ ADD
+    session.endSession();
   }
 };
 
@@ -961,6 +1603,44 @@ exports.checkVendorAvailabilityRange = async (req, res) => {
   }
 };
 
+// exports.loginWithMobile = async (req, res) => {
+//   try {
+//     const { mobileNumber } = req.body;
+//     if (!mobileNumber) {
+//       return res.status(400).json({ message: "Phone number is required" });
+//     }
+
+//     const vendor = await vendorAuthSchema.findOne({
+//       "vendor.mobileNumber": mobileNumber,
+//     });
+//     if (!vendor) {
+//       return res.status(404).json({ message: "Vendor not found" });
+//     }
+
+//     const otp = generateOTP();
+
+//     const expiry = new Date(Date.now() + 60 * 1000);
+
+//     await otpSchema.deleteMany({ mobileNumber: mobileNumber });
+
+//     await otpSchema.create({ mobileNumber: mobileNumber, otp, expiry });
+
+//     console.log(`OTP for ${mobileNumber}: ${otp}`);
+
+//     res
+//       .status(200)
+//       .json({ message: "OTP sent successfully", mobileNumber, otp: otp });
+//   } catch (error) {
+//     console.error("Error during vendor login:", error);
+//     if (error.name === "ValidationError") {
+//       return res
+//         .status(400)
+//         .json({ message: "Validation error", error: error.errors });
+//     }
+//     res.status(500).json({ message: "Server error", error: error.message });
+//   }
+// };
+
 exports.loginWithMobile = async (req, res) => {
   try {
     const { mobileNumber } = req.body;
@@ -968,8 +1648,12 @@ exports.loginWithMobile = async (req, res) => {
       return res.status(400).json({ message: "Phone number is required" });
     }
 
+    // ✅ ADD: normalize + validate (Number)
+    const phone = toPhoneNumber(mobileNumber);
+    assertValidPhone(phone);
+
     const vendor = await vendorAuthSchema.findOne({
-      "vendor.mobileNumber": mobileNumber,
+      "vendor.mobileNumber": phone, // ✅ use phone
     });
     if (!vendor) {
       return res.status(404).json({ message: "Vendor not found" });
@@ -979,15 +1663,18 @@ exports.loginWithMobile = async (req, res) => {
 
     const expiry = new Date(Date.now() + 60 * 1000);
 
-    await otpSchema.deleteMany({ mobileNumber: mobileNumber });
+    // ✅ use phone everywhere
+    await otpSchema.deleteMany({ mobileNumber: phone });
 
-    await otpSchema.create({ mobileNumber: mobileNumber, otp, expiry });
+    await otpSchema.create({ mobileNumber: phone, otp, expiry });
 
-    console.log(`OTP for ${mobileNumber}: ${otp}`);
+    console.log(`OTP for ${phone}: ${otp}`);
 
-    res
-      .status(200)
-      .json({ message: "OTP sent successfully", mobileNumber, otp: otp });
+    res.status(200).json({
+      message: "OTP sent successfully",
+      mobileNumber: phone,
+      otp: otp,
+    });
   } catch (error) {
     console.error("Error during vendor login:", error);
     if (error.name === "ValidationError") {
@@ -999,11 +1686,54 @@ exports.loginWithMobile = async (req, res) => {
   }
 };
 
+// exports.verifyOTP = async (req, res) => {
+//   const { mobileNumber, otp } = req.body;
+
+//   try {
+//     const record = await otpSchema.findOne({ mobileNumber, otp });
+
+//     if (!record) {
+//       return res.status(400).json({ message: "Invalid OTP" });
+//     }
+
+//     if (record.expiry < new Date()) {
+//       return res.status(400).json({ message: "OTP expired" });
+//     }
+
+//     await otpSchema.deleteMany({ mobileNumber });
+
+//     let user = await vendorAuthSchema.findOne({
+//       "vendor.mobileNumber": mobileNumber,
+//     });
+
+//     if (!user) {
+//       isNewUser = true;
+//       user = new vendorAuthSchema({
+//         mobileNumber,
+//       });
+//       await user.save();
+//     }
+
+//     res.status(200).json({
+//       message: "OTP verified successfully",
+//       data: user,
+//       status: "Online",
+//     });
+//   } catch (error) {
+//     console.error("OTP verification error:", error);
+//     res.status(500).json({ message: "Server error" });
+//   }
+// };
+
 exports.verifyOTP = async (req, res) => {
   const { mobileNumber, otp } = req.body;
 
   try {
-    const record = await otpSchema.findOne({ mobileNumber, otp });
+    // ✅ ADD: normalize + validate (Number)
+    const phone = toPhoneNumber(mobileNumber);
+    assertValidPhone(phone);
+
+    const record = await otpSchema.findOne({ mobileNumber: phone, otp }); // ✅ use phone
 
     if (!record) {
       return res.status(400).json({ message: "Invalid OTP" });
@@ -1013,19 +1743,11 @@ exports.verifyOTP = async (req, res) => {
       return res.status(400).json({ message: "OTP expired" });
     }
 
-    await otpSchema.deleteMany({ mobileNumber });
+    await otpSchema.deleteMany({ mobileNumber: phone }); // ✅ use phone
 
     let user = await vendorAuthSchema.findOne({
-      "vendor.mobileNumber": mobileNumber,
+      "vendor.mobileNumber": phone, // ✅ use phone
     });
-
-    if (!user) {
-      isNewUser = true;
-      user = new vendorAuthSchema({
-        mobileNumber,
-      });
-      await user.save();
-    }
 
     res.status(200).json({
       message: "OTP verified successfully",
@@ -1037,7 +1759,6 @@ exports.verifyOTP = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
 exports.resendOTP = async (req, res) => {
   const { mobileNumber } = req.body;
   try {
