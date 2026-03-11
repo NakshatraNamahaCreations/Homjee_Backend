@@ -198,24 +198,6 @@ exports.createQuote = async (req, res) => {
       status: "draft",
     });
 
-    try {
-      const pdfUrl = `${process.env.PUBLIC_BASE_URL}/api/quotes/${quote._id}/pdf`;
-      const msg =
-        `Hi ${"Kiruthika"}\n` +
-        `Your quotation is ready.\n` +
-        `Quotation ID: ${quote.quoteNo}\n` +
-        `Total: ₹${quote.totals.grandTotal}\n` +
-        `Download PDF: ${pdfUrl}`;
-
-      await sendWhatsAppText({
-        to: 8526190332, // "91xxxxxxxxxx"
-        body: msg,
-      });
-    } catch (e) {
-      console.log("WhatsApp failed but quotation created:", e.message);
-      // don’t fail quotation creation — just log it
-    }
-
     return res.status(201).json({ message: "Quotation created", data: quote });
   } catch (err) {
     console.error("createQuote error", err);
@@ -902,6 +884,26 @@ exports.updateQuoteMeta = async (req, res) => {
     };
 
     await q.save();
+
+    // send quotation to whatsapp
+    try {
+      const pdfUrl = `${process.env.PUBLIC_BASE_URL}/api/quotes/${quote._id}/pdf`;
+      const msg =
+        `Hi ${"Kiruthika"}\n` +
+        `Your quotation is ready.\n` +
+        `Quotation ID: ${quote.quoteNo}\n` +
+        `Total: ₹${quote.totals.grandTotal}\n` +
+        `Download PDF: ${pdfUrl}`;
+
+      await sendWhatsAppText({
+        to: 8526190332, // "91xxxxxxxxxx"
+        body: msg,
+      });
+    } catch (e) {
+      console.log("WhatsApp failed but quotation created:", e.message);
+      // don’t fail quotation creation — just log it
+    }
+
     res.json({ message: "OK", data: q });
   } catch (err) {
     console.error("updateQuoteMeta error:", err);
