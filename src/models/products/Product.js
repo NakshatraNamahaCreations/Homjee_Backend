@@ -30,7 +30,7 @@
 //   paintName: String,
 //   paintPrice: Number,
 //   category: String,
- 
+
 //   includePuttyOnFresh: {
 //     type: Boolean,
 //     default: true,
@@ -119,7 +119,8 @@ const packageList = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
-  city: { type: String }
+  city: { type: String },
+  isSpecial: { type: Boolean, default: false },  // added by kir
 });
 
 const packageSchema = new mongoose.Schema({
