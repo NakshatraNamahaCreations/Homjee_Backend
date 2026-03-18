@@ -1,10 +1,4 @@
-// models/MinimumOrder.js
 const mongoose = require("mongoose");
-
-/**
- * Single-scope minimum order for Deep Cleaning.
- * We keep a fixed "scope" so it's extendable later if you add more categories.
- */
 const MinimumOrderSchema = new mongoose.Schema(
   {
     scope: {
@@ -14,12 +8,10 @@ const MinimumOrderSchema = new mongoose.Schema(
       unique: true,
       required: true
     },
-    amount: { type: Number, required: true, min: 0 }
+    amount: { type: Number, required: true, min: 0 },
+    city: { type: String, required: true, unique: true, trim: true },
   },
   { timestamps: true }
 );
-
-// Unique per scope (only one doc for deep-cleaning)
-// MinimumOrderSchema.index({ scope: 1 }, { unique: true });
 
 module.exports = mongoose.model("MinimumOrder", MinimumOrderSchema);

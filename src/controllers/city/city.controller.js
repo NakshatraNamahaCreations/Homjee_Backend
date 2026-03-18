@@ -30,7 +30,7 @@ exports.createCity = async (req, res) => {
 
 exports.listCities = async (req, res) => {
   try {
-    const data = await City.find({}).sort({ createdAt: -1 });
+    const data = await City.find({});
     return res.json({ success: true, data });
   } catch (err) {
     console.error("listCities error:", err);

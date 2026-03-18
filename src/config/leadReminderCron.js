@@ -83,7 +83,7 @@ export const startLeadReminderCron = () => {
             }
         });
 
-        console.log("✅ Lead reminder cron started");
+        // console.log("✅ Lead reminder cron started");
     } catch (e) {
         console.log("Cron start error:", e);
     }

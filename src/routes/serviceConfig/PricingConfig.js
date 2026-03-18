@@ -1,11 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const {
-  createPricingConfig,
+  createOrUpdatePricingConfig,
   getLatestPricing,
+  getPricingConfigByCity,
 } = require("../../controllers/serviceConfig/PricingConfig");
 
-router.post("/create", createPricingConfig);
+router.post("/pricing-config", createOrUpdatePricingConfig);
 router.get("/latest", getLatestPricing);
+router.get("/get-pricing-config/city/:city", getPricingConfigByCity);
 
 module.exports = router;

@@ -221,13 +221,13 @@ const RESEND_COOLDOWN_MS = parseInt(
 // FIXED: Proper debug OTP handling
 const shouldShowDebugOTP = () => {
   const envValue = process.env.ADMIN_AUTH_DEBUG_OTP;
-  
+
   // Check if explicitly set
   if (envValue !== undefined && envValue !== null) {
     const strValue = String(envValue).trim().toLowerCase();
     return ['1', 'true', 'yes', 'on'].includes(strValue);
   }
-  
+
   // Default to true in development
   return process.env.NODE_ENV === 'development';
 };
@@ -235,9 +235,9 @@ const shouldShowDebugOTP = () => {
 const SHOW_DEBUG_OTP = shouldShowDebugOTP();
 
 // Log configuration for debugging
-console.log(`[AUTH CONFIG] JWT Secret: ${JWT_SECRET ? 'Set' : 'Not Set'}`);
-console.log(`[AUTH CONFIG] Debug OTP: ${SHOW_DEBUG_OTP ? 'ENABLED' : 'DISABLED'}`);
-console.log(`[AUTH CONFIG] NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
+// console.log(`[AUTH CONFIG] JWT Secret: ${JWT_SECRET ? 'Set' : 'Not Set'}`);
+// console.log(`[AUTH CONFIG] Debug OTP: ${SHOW_DEBUG_OTP ? 'ENABLED' : 'DISABLED'}`);
+// console.log(`[AUTH CONFIG] NODE_ENV: ${process.env.NODE_ENV || 'development'}`);
 
 // ====== Helpers ======
 const normalizeMobile = (n) => String(n || "").replace(/\D/g, "");
@@ -256,7 +256,7 @@ async function sendOtpSMS(mobileNumber, otp) {
   try {
     // Always log OTP to console for debugging (but only show in response if debug mode is on)
     console.log(`[OTP GENERATED] For ${mobileNumber}: ${otp}`);
-    
+
     // Only send actual SMS if SMS provider is configured
     if (process.env.SMS_PROVIDER_ENABLED === 'true') {
       // Add your SMS provider integration here (Twilio, MSG91, etc.)
@@ -270,7 +270,7 @@ async function sendOtpSMS(mobileNumber, otp) {
       //   from: process.env.TWILIO_PHONE_NUMBER,
       //   to: `+91${mobileNumber}`
       // });
-      
+
       console.log(`[SMS SENT] OTP sent to ${mobileNumber} via SMS provider`);
     } else {
       console.log(`[SMS SKIPPED] SMS provider not enabled. OTP: ${otp}`);
@@ -290,21 +290,21 @@ async function sendOtpSMS(mobileNumber, otp) {
 exports.createAdmin = async (req, res) => {
   try {
     const { mobileNumber: rawMobile, name, canBeDeleted = true } = req.body;
-    
+
     const mobileNumber = normalizeMobile(rawMobile);
 
     // Validation
     if (!mobileNumber || !/^\d{10,15}$/.test(mobileNumber)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Valid mobile number is required (10-15 digits)" 
+        message: "Valid mobile number is required (10-15 digits)"
       });
     }
 
     if (!name || name.trim().length < 2) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Admin name is required (minimum 2 characters)" 
+        message: "Admin name is required (minimum 2 characters)"
       });
     }
 
@@ -312,9 +312,9 @@ exports.createAdmin = async (req, res) => {
     const existingAdmin = await AdminAuth.findOne({ mobileNumber });
 
     if (existingAdmin) {
-      return res.status(409).json({ 
+      return res.status(409).json({
         success: false,
-        message: "Admin with this mobile number already exists" 
+        message: "Admin with this mobile number already exists"
       });
     }
 
@@ -324,7 +324,7 @@ exports.createAdmin = async (req, res) => {
       name: name.trim(),
       canBeDeleted
     });
-    
+
     await admin.save();
 
     return res.status(201).json({
@@ -340,18 +340,18 @@ exports.createAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error("Create admin error:", error);
-    
+
     if (error.code === 11000) {
-      return res.status(409).json({ 
+      return res.status(409).json({
         success: false,
-        message: "Admin with this mobile number already exists" 
+        message: "Admin with this mobile number already exists"
       });
     }
-    
-    return res.status(500).json({ 
+
+    return res.status(500).json({
       success: false,
-      message: "Server error", 
-      error: error.message 
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -367,17 +367,17 @@ exports.deleteAdmin = async (req, res) => {
     const admin = await AdminAuth.findById(id);
 
     if (!admin) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Admin not found" 
+        message: "Admin not found"
       });
     }
 
     // Check if admin can be deleted
     if (!admin.canBeDeleted) {
-      return res.status(403).json({ 
+      return res.status(403).json({
         success: false,
-        message: "This admin account cannot be deleted" 
+        message: "This admin account cannot be deleted"
       });
     }
 
@@ -390,10 +390,10 @@ exports.deleteAdmin = async (req, res) => {
     });
   } catch (error) {
     console.error("Delete admin error:", error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       success: false,
-      message: "Server error", 
-      error: error.message 
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -406,7 +406,7 @@ exports.getAllAdmins = async (req, res) => {
   try {
     const admins = await AdminAuth.find()
       .select('-otp -otpExpiresAt -__v')
-      .sort({ createdAt: -1 });
+    // .sort({ createdAt: -1 });
 
     return res.status(200).json({
       success: true,
@@ -416,10 +416,10 @@ exports.getAllAdmins = async (req, res) => {
     });
   } catch (error) {
     console.error("Get admins error:", error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       success: false,
-      message: "Server error", 
-      error: error.message 
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -438,9 +438,9 @@ exports.loginWithMobile = async (req, res) => {
     console.log(`[LOGIN DEBUG] Request received for mobile: ${mobileNumber}`);
 
     if (!mobileNumber || !/^\d{10,15}$/.test(mobileNumber)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Phone number is required (10-15 digits)" 
+        message: "Phone number is required (10-15 digits)"
       });
     }
 
@@ -449,9 +449,9 @@ exports.loginWithMobile = async (req, res) => {
     console.log(`[LOGIN DEBUG] Admin found: ${admin ? 'YES' : 'NO'}`);
 
     if (!admin) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Admin account not found. Please contact administrator." 
+        message: "Admin account not found. Please contact administrator."
       });
     }
 
@@ -476,10 +476,10 @@ exports.loginWithMobile = async (req, res) => {
 
     admin.otp = otp;
     admin.otpExpiresAt = otpExpiresAt;
-    
+
     // Save and verify
     await admin.save();
-    
+
     // Double-check that OTP was saved
     const updatedAdmin = await AdminAuth.findOne({ mobileNumber });
     console.log(`[LOGIN DEBUG] After save - OTP: ${updatedAdmin.otp}, Expires: ${updatedAdmin.otpExpiresAt}`);
@@ -506,10 +506,10 @@ exports.loginWithMobile = async (req, res) => {
     return res.status(200).json(response);
   } catch (error) {
     console.error("Admin loginWithMobile error:", error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       success: false,
-      message: "Server error", 
-      error: error.message 
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -529,19 +529,19 @@ exports.verifyOTP = async (req, res) => {
       !/^\d{10,15}$/.test(mobileNumber) ||
       !/^\d{6}$/.test(otp)
     ) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Invalid mobile number or 6-digit OTP" 
+        message: "Invalid mobile number or 6-digit OTP"
       });
     }
 
     const admin = await AdminAuth.findOne({ mobileNumber });
     console.log(`[VERIFY DEBUG] Admin found: ${admin ? 'YES' : 'NO'}`);
-    
+
     if (!admin) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Admin account not found" 
+        message: "Admin account not found"
       });
     }
 
@@ -550,9 +550,9 @@ exports.verifyOTP = async (req, res) => {
 
     if (!admin.otp || !admin.otpExpiresAt) {
       console.log(`[VERIFY DEBUG] No active OTP found. OTP: ${admin.otp}, Expires: ${admin.otpExpiresAt}`);
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "No active OTP. Please request a new OTP." 
+        message: "No active OTP. Please request a new OTP."
       });
     }
 
@@ -561,17 +561,17 @@ exports.verifyOTP = async (req, res) => {
       admin.otp = null;
       admin.otpExpiresAt = null;
       await admin.save();
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "OTP expired. Please request a new OTP." 
+        message: "OTP expired. Please request a new OTP."
       });
     }
 
     if (admin.otp !== otp) {
       console.log(`[VERIFY DEBUG] OTP mismatch. Expected: ${admin.otp}, Received: ${otp}`);
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Invalid OTP" 
+        message: "Invalid OTP"
       });
     }
 
@@ -610,10 +610,10 @@ exports.verifyOTP = async (req, res) => {
     });
   } catch (error) {
     console.error("Admin verifyOTP error:", error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       success: false,
-      message: "Server error", 
-      error: error.message 
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -626,18 +626,18 @@ exports.resendOTP = async (req, res) => {
   try {
     const mobileNumber = normalizeMobile(req.body?.mobileNumber);
     if (!mobileNumber || !/^\d{10,15}$/.test(mobileNumber)) {
-      return res.status(400).json({ 
+      return res.status(400).json({
         success: false,
-        message: "Invalid mobile number (10-15 digits)" 
+        message: "Invalid mobile number (10-15 digits)"
       });
     }
 
     const admin = await AdminAuth.findOne({ mobileNumber });
 
     if (!admin) {
-      return res.status(404).json({ 
+      return res.status(404).json({
         success: false,
-        message: "Admin account not found" 
+        message: "Admin account not found"
       });
     }
 
@@ -682,10 +682,10 @@ exports.resendOTP = async (req, res) => {
     return res.status(200).json(response);
   } catch (error) {
     console.error("Admin resendOTP error:", error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       success: false,
-      message: "Server error", 
-      error: error.message 
+      message: "Server error",
+      error: error.message
     });
   }
 };
@@ -698,17 +698,17 @@ exports.logout = async (req, res) => {
   try {
     // Note: JWT is stateless, so we don't need to do anything on the server
     // If you want to implement token blacklisting, you can add it here
-    
+
     return res.status(200).json({
       success: true,
       message: "Logged out successfully"
     });
   } catch (error) {
     console.error("Admin logout error:", error);
-    return res.status(500).json({ 
+    return res.status(500).json({
       success: false,
-      message: "Server error", 
-      error: error.message 
+      message: "Server error",
+      error: error.message
     });
   }
 };

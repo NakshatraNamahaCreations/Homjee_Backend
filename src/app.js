@@ -10,7 +10,7 @@ const {
 
 const app = express();
 
-console.log("Razorpay key present:", !!process.env.RAZORPAY_KEY_ID);
+// console.log("Razorpay key present:", !!process.env.RAZORPAY_KEY_ID);
 
 app.use(express.json());
 app.use(morgan("dev"));
