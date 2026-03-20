@@ -3157,7 +3157,8 @@ exports.getOverallPerformance = async (req, res) => {
 
     const hpLeads = leads.filter(isHP);
     const dcLeads = leads.filter(isDC);
-
+    // console.log("hpLeads", hpLeads.length)
+    // console.log("dcLeads", dcLeads.length)
     /* -----------------------------
         4. CALCULATE GSV
     ----------------------------- */
@@ -3296,14 +3297,13 @@ exports.getOverallPerformance = async (req, res) => {
           if (!prof) continue;
           vendorId = prof.professionalId;
         } else {
-          // For DC, find the vendor in invitedVendors
-          // const invited = lead.invitedVendors?.find(
-          //   (iv) => String(iv.professionalId) === String(vendorId),
-          // );   // wrong
+          // Deep cleaning
           const invited = lead.invitedVendors?.[0];
           if (!invited) continue;
           prof = invited;
           vendorId = invited.professionalId;
+
+          // Prefer assignedProfessional for name/start info if it matches
           if (
             lead.assignedProfessional &&
             String(lead.assignedProfessional.professionalId) === String(vendorId)
@@ -3322,14 +3322,13 @@ exports.getOverallPerformance = async (req, res) => {
         if (!vendorId) continue;
 
         if (!map[vendorId]) {
-          // Get vendor ratings
           const ratings = await calculateVendorRatings(
             vendorId,
-            period === "this_month" ? "month" : "last",
+            period === "this_month" ? "month" : "last"
           );
 
           map[vendorId] = {
-            vendorId: vendorId,
+            vendorId,
             name: prof.name || "Unknown",
             totalLeads: 0,
             responded: 0,
@@ -3347,16 +3346,29 @@ exports.getOverallPerformance = async (req, res) => {
         }
 
         const v = map[vendorId];
-
         v.totalLeads++;
 
-        if (prof.acceptedDate) v.responded++;
-        if (prof.startedDate) v.survey++;
+        if (type === "hp") {
+          if (prof.acceptedDate) v.responded++;
+          if (prof.startedDate) v.survey++;
+        } else {
+          if (prof.responseStatus === "accepted"
+            || prof.respondedAt) v.responded++;
+
+          if (
+            lead.assignedProfessional &&
+            String(lead.assignedProfessional.professionalId) === String(vendorId) &&
+            lead.assignedProfessional.startedDate
+          ) {
+            v.survey++;
+          }
+        }
 
         const status = normalize(lead.bookingDetails?.status);
         const isHired =
           status === "hired" ||
           status === "project ongoing" ||
+          status === "project completed" ||
           lead.bookingDetails?.firstPayment?.status === "paid";
 
         if (isHired) v.hired++;
@@ -3364,8 +3376,8 @@ exports.getOverallPerformance = async (req, res) => {
         if (type === "dc") {
           if (prof.responseStatus === "customer_cancelled") {
             const slot = moment(
-              `${lead.selectedSlot.slotDate} ${lead.selectedSlot.slotTime}`,
-              "YYYY-MM-DD hh:mm A",
+              `${lead.selectedSlot?.slotDate} ${lead.selectedSlot?.slotTime}`,
+              "YYYY-MM-DD hh:mm A"
             );
             const cancelled = moment(prof.cancelledAt);
             const diff = slot.diff(cancelled, "hours", true);
@@ -3381,7 +3393,6 @@ exports.getOverallPerformance = async (req, res) => {
         });
       }
 
-      // Convert map to array and calculate final metrics
       return Object.values(map).map((v) => ({
         ...v,
         responseRate: v.totalLeads
@@ -3400,9 +3411,113 @@ exports.getOverallPerformance = async (req, res) => {
           v.ratingCount > 0
             ? parseFloat((v.ratingSum / v.ratingCount).toFixed(2))
             : 0,
-        strikes: v.strikes,
       }));
     };
+    // const getVendorStats = async (arr, type) => {
+    //   const map = {};
+
+    //   for (const lead of arr) {
+    //     let vendorId;
+    //     let prof;
+
+    //     if (type === "hp") {
+    //       prof = lead.assignedProfessional;
+    //       if (!prof) continue;
+    //       vendorId = prof.professionalId;
+    //     } else {
+    //       // For DC, find the vendor in invitedVendors
+    //       const invited = lead.invitedVendors?.find(
+    //         (iv) => String(iv.professionalId) === String(vendorId),
+    //       );
+    //       if (!invited) continue;
+    //       prof = invited;
+    //       vendorId = invited.professionalId;
+    //     }
+
+    //     if (!vendorId) continue;
+
+    //     if (!map[vendorId]) {
+    //       // Get vendor ratings
+    //       const ratings = await calculateVendorRatings(
+    //         vendorId,
+    //         period === "this_month" ? "month" : "last",
+    //       );
+
+    //       map[vendorId] = {
+    //         vendorId: vendorId,
+    //         name: prof.name || "Unknown",
+    //         totalLeads: 0,
+    //         responded: 0,
+    //         survey: 0,
+    //         hired: 0,
+    //         cancelled: 0,
+    //         gsv: 0,
+    //         ratingSum:
+    //           ratings.totalRatings > 0
+    //             ? ratings.averageRating * ratings.totalRatings
+    //             : 0,
+    //         ratingCount: ratings.totalRatings,
+    //         strikes: ratings.strikes,
+    //       };
+    //     }
+
+    //     const v = map[vendorId];
+
+    //     v.totalLeads++;
+
+    //     if (prof.acceptedDate) v.responded++;
+    //     if (prof.startedDate) v.survey++;
+
+    //     const status = normalize(lead.bookingDetails?.status);
+    //     const isHired =
+    //       status === "hired" ||
+    //       status === "project ongoing" ||
+    //       lead.bookingDetails?.firstPayment?.status === "paid";
+
+    //     if (isHired) v.hired++;
+
+    //     if (type === "dc") {
+    //       if (prof.responseStatus === "customer_cancelled") {
+    //         const slot = moment(
+    //           `${lead.selectedSlot.slotDate} ${lead.selectedSlot.slotTime}`,
+    //           "YYYY-MM-DD hh:mm A",
+    //         );
+    //         const cancelled = moment(prof.cancelledAt);
+    //         const diff = slot.diff(cancelled, "hours", true);
+
+    //         if (diff >= 0 && diff <= 3) {
+    //           v.cancelled++;
+    //         }
+    //       }
+    //     }
+
+    //     lead.service?.forEach((s) => {
+    //       v.gsv += (s.price || 0) * (s.quantity || 1);
+    //     });
+    //   }
+
+    //   // Convert map to array and calculate final metrics
+    //   return Object.values(map).map((v) => ({
+    //     ...v,
+    //     responseRate: v.totalLeads
+    //       ? parseFloat(((v.responded / v.totalLeads) * 100).toFixed(2))
+    //       : 0,
+    //     surveyRate: v.responded
+    //       ? parseFloat(((v.survey / v.responded) * 100).toFixed(2))
+    //       : 0,
+    //     hiringRate: v.responded
+    //       ? parseFloat(((v.hired / v.responded) * 100).toFixed(2))
+    //       : 0,
+    //     cancellationRate: v.responded
+    //       ? parseFloat(((v.cancelled / v.responded) * 100).toFixed(2))
+    //       : 0,
+    //     avgRating:
+    //       v.ratingCount > 0
+    //         ? parseFloat((v.ratingSum / v.ratingCount).toFixed(2))
+    //         : 0,
+    //     strikes: v.strikes,
+    //   }));
+    // };
 
     const hpVendorStats = await getVendorStats(hpLeads, "hp");
     const dcVendorStats = await getVendorStats(dcLeads, "dc");
