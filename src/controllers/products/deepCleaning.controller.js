@@ -923,22 +923,58 @@ exports.getPackageById = async (req, res) => {
 // };
 
 // PUT /api/deeppackage/deep-cleaning-packages/:id/city-config
-// Body: { cityId, totalAmount, coinsForVendor, teamMembers, durationMinutes }
+// Body: { cityId, totalAmount, coinsForVendor, teamMembers, durationMinutes }\
 exports.upsertPackageCityConfig = async (req, res) => {
+  const session = await mongoose.startSession();
+
   try {
+    session.startTransaction();
+
     const { id } = req.params;
-    const { cityId, totalAmount, coinsForVendor, teamMembers, durationMinutes } = req.body;
+    const {
+      category,
+      cityId,
+      totalAmount,
+      coinsForVendor,
+      teamMembers,
+      durationMinutes,
+    } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(400).json({ success: false, message: "Invalid package id" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid package id",
+      });
     }
+
+    if (!category || typeof category !== "string") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "category is required",
+      });
+    }
+
     if (!mongoose.Types.ObjectId.isValid(cityId)) {
-      return res.status(400).json({ success: false, message: "Invalid cityId" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid cityId",
+      });
     }
 
     const cityDoc = await City.findById(cityId).lean();
     if (!cityDoc) {
-      return res.status(404).json({ success: false, message: "City not found" });
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "City not found",
+      });
     }
 
     const payload = {
@@ -950,21 +986,46 @@ exports.upsertPackageCityConfig = async (req, res) => {
       durationMinutes: Number(durationMinutes),
     };
 
-    // basic validations
-    if (!Number.isFinite(payload.totalAmount) || payload.totalAmount < 0)
-      return res.status(400).json({ success: false, message: "Invalid totalAmount" });
+    if (!Number.isFinite(payload.totalAmount) || payload.totalAmount < 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid totalAmount",
+      });
+    }
 
-    if (!Number.isFinite(payload.coinsForVendor) || payload.coinsForVendor < 0)
-      return res.status(400).json({ success: false, message: "Invalid coinsForVendor" });
+    if (!Number.isFinite(payload.coinsForVendor) || payload.coinsForVendor < 0) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid coinsForVendor",
+      });
+    }
 
-    if (!Number.isFinite(payload.teamMembers) || payload.teamMembers < 1)
-      return res.status(400).json({ success: false, message: "Invalid teamMembers" });
+    if (!Number.isFinite(payload.teamMembers) || payload.teamMembers < 1) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid teamMembers",
+      });
+    }
 
-    if (!Number.isFinite(payload.durationMinutes) || payload.durationMinutes < 30)
-      return res.status(400).json({ success: false, message: "Invalid durationMinutes" });
+    if (!Number.isFinite(payload.durationMinutes) || payload.durationMinutes < 30) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "Invalid durationMinutes",
+      });
+    }
 
-    // 1) Try update existing cityConfig
-    const updated = await DeepCleaningPackage.findOneAndUpdate(
+    // -------------------------------------------------
+    // 1) Update DeepCleaningPackage
+    // -------------------------------------------------
+    let deepDoc = await DeepCleaningPackage.findOneAndUpdate(
       { _id: id, "cityConfigs.cityId": payload.cityId },
       {
         $set: {
@@ -975,30 +1036,212 @@ exports.upsertPackageCityConfig = async (req, res) => {
           "cityConfigs.$.durationMinutes": payload.durationMinutes,
         },
       },
-      { new: true }
-    ).lean();
+      { new: true, session }
+    );
 
-    if (updated) {
-      return res.json({ success: true, message: "City config updated", data: updated });
+    if (!deepDoc) {
+      deepDoc = await DeepCleaningPackage.findByIdAndUpdate(
+        id,
+        {
+          $push: {
+            cityConfigs: payload,
+          },
+        },
+        { new: true, session }
+      );
     }
 
-    // 2) Else push new cityConfig
-    const pushed = await DeepCleaningPackage.findByIdAndUpdate(
-      id,
-      { $push: { cityConfigs: payload } },
-      { new: true }
-    ).lean();
-
-    if (!pushed) {
-      return res.status(404).json({ success: false, message: "Package not found" });
+    if (!deepDoc) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "Package not found in DeepCleaningPackage",
+      });
     }
 
-    return res.json({ success: true, message: "City config added", data: pushed });
+    // -------------------------------------------------
+    // 2) Update CleaningCatalogConfig
+    // -------------------------------------------------
+    const configDoc = await CleaningCatalogConfig.findOne({
+      serviceType: "deep_cleaning",
+    }).session(session);
+
+    if (!configDoc) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: "CleaningCatalogConfig not found",
+      });
+    }
+
+    if (!configDoc.data || typeof configDoc.data !== "object") {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(400).json({
+        success: false,
+        message: "CleaningCatalogConfig data is invalid",
+      });
+    }
+
+    if (!Array.isArray(configDoc.data[category])) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: `Category '${category}' not found in CleaningCatalogConfig`,
+      });
+    }
+
+    const packageIndex = configDoc.data[category].findIndex(
+      (item) => String(item.packageId) === String(id)
+    );
+
+    if (packageIndex === -1) {
+      await session.abortTransaction();
+      session.endSession();
+      return res.status(404).json({
+        success: false,
+        message: `Package '${id}' not found under category '${category}'`,
+      });
+    }
+
+    if (!Array.isArray(configDoc.data[category][packageIndex].cityConfigs)) {
+      configDoc.data[category][packageIndex].cityConfigs = [];
+    }
+
+    const cityIndex = configDoc.data[category][packageIndex].cityConfigs.findIndex(
+      (cfg) => String(cfg.cityId) === String(cityId)
+    );
+
+    const catalogCityPayload = {
+      cityId: payload.cityId,
+      city: payload.city,
+      price: payload.totalAmount,
+      coinsForVendor: payload.coinsForVendor,
+      teamMembers: payload.teamMembers,
+      duration: payload.durationMinutes,
+    };
+
+    if (cityIndex > -1) {
+      configDoc.data[category][packageIndex].cityConfigs[cityIndex] = {
+        ...configDoc.data[category][packageIndex].cityConfigs[cityIndex],
+        ...catalogCityPayload,
+      };
+    } else {
+      configDoc.data[category][packageIndex].cityConfigs.push(catalogCityPayload);
+    }
+
+    // VERY IMPORTANT for Mixed type
+    configDoc.markModified("data");
+    configDoc.updatedBy = "admin";
+    configDoc.version = (configDoc.version || 1) + 1;
+
+    await configDoc.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    return res.status(200).json({
+      success: true,
+      message: "City config updated in both collections",
+      data: {
+        deepCleaningPackage: deepDoc,
+      },
+    });
   } catch (err) {
+    try {
+      await session.abortTransaction();
+    } catch (abortErr) {
+      console.error("abort error:", abortErr);
+    }
+    session.endSession();
+
     console.error("upsertPackageCityConfig error:", err);
-    return res.status(500).json({ success: false, message: "Failed to save city config" });
+    return res.status(500).json({
+      success: false,
+      message: "Failed to save city config",
+      error: err.message,
+    });
   }
 };
+// exports.upsertPackageCityConfig = async (req, res) => {
+//   try {
+//     const { id } = req.params;
+//     const { category, cityId, totalAmount, coinsForVendor, teamMembers, durationMinutes } = req.body;
+
+//     if (!mongoose.Types.ObjectId.isValid(id)) {
+//       return res.status(400).json({ success: false, message: "Invalid package id" });
+//     }
+//     if (!mongoose.Types.ObjectId.isValid(cityId)) {
+//       return res.status(400).json({ success: false, message: "Invalid cityId" });
+//     }
+
+//     const cityDoc = await City.findById(cityId).lean();
+//     if (!cityDoc) {
+//       return res.status(404).json({ success: false, message: "City not found" });
+//     }
+
+//     const payload = {
+//       cityId: new mongoose.Types.ObjectId(cityId),
+//       city: cityDoc.city,
+//       totalAmount: Number(totalAmount),
+//       coinsForVendor: Number(coinsForVendor),
+//       teamMembers: Number(teamMembers),
+//       durationMinutes: Number(durationMinutes),
+//     };
+
+//     // basic validations
+//     if (!Number.isFinite(payload.totalAmount) || payload.totalAmount < 0)
+//       return res.status(400).json({ success: false, message: "Invalid totalAmount" });
+
+//     if (!Number.isFinite(payload.coinsForVendor) || payload.coinsForVendor < 0)
+//       return res.status(400).json({ success: false, message: "Invalid coinsForVendor" });
+
+//     if (!Number.isFinite(payload.teamMembers) || payload.teamMembers < 1)
+//       return res.status(400).json({ success: false, message: "Invalid teamMembers" });
+
+//     if (!Number.isFinite(payload.durationMinutes) || payload.durationMinutes < 30)
+//       return res.status(400).json({ success: false, message: "Invalid durationMinutes" });
+
+//     // 1) Try update existing cityConfig
+//     const updated = await DeepCleaningPackage.findOneAndUpdate(
+//       { _id: id, "cityConfigs.cityId": payload.cityId },
+//       {
+//         $set: {
+//           "cityConfigs.$.city": payload.city,
+//           "cityConfigs.$.totalAmount": payload.totalAmount,
+//           "cityConfigs.$.coinsForVendor": payload.coinsForVendor,
+//           "cityConfigs.$.teamMembers": payload.teamMembers,
+//           "cityConfigs.$.durationMinutes": payload.durationMinutes,
+//         },
+//       },
+//       { new: true }
+//     ).lean();
+
+//     if (updated) {
+//       return res.json({ success: true, message: "City config updated", data: updated });
+//     }
+
+//     // 2) Else push new cityConfig
+//     const pushed = await DeepCleaningPackage.findByIdAndUpdate(
+//       id,
+//       { $push: { cityConfigs: payload } },
+//       { new: true }
+//     ).lean();
+
+//     if (!pushed) {
+//       return res.status(404).json({ success: false, message: "Package not found" });
+//     }
+
+//     return res.json({ success: true, message: "City config added", data: pushed });
+//   } catch (err) {
+//     console.error("upsertPackageCityConfig error:", err);
+//     return res.status(500).json({ success: false, message: "Failed to save city config" });
+//   }
+// };
+
 /* ===================== DELETE PACKAGE ===================== */
 // DELETE /api/deeppackage/deep-cleaning-packages/:id
 exports.deletePackage = async (req, res) => {
