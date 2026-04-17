@@ -1,0 +1,396 @@
+const mongoose = require("mongoose");
+
+const customerSchema = new mongoose.Schema({
+  customerId: String,
+  name: String,
+  phone: String,
+});
+const serviceSchema = new mongoose.Schema({
+  // serviceId: String,
+  category: String,
+  subCategory: String,
+  serviceName: String,
+  price: Number,
+  quantity: Number,
+  teamMembersRequired: Number,
+  packageId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "DeepCleaningPackage",
+  },
+  duration: Number,
+  coinDeduction: Number,
+});
+const PriceChangeSchema = new mongoose.Schema(
+  {
+    adjustmentAmount: {
+      type: Number,
+      required: true,
+      min: 1,
+    },
+    proposedTotal: {
+      type: Number,
+      required: true,
+      min: 0,
+    },
+    reason: {
+      type: String,
+      // required: true, // enable it when production
+      // trim: true,
+    },
+    scopeType: {
+      type: String,
+      trim: true, // e.g., "Add Room", "Upgrade Paint", etc.
+    },
+    status: {
+      type: String,
+      enum: ["pending", "approved", "rejected"],
+      default: "pending",
+    },
+    requestedBy: {
+      type: String,
+      enum: ["admin", "vendor", "customer"],
+      required: true,
+    },
+    requestedAt: {
+      type: Date,
+      default: Date.now,
+    },
+
+    // Approval
+    approvedBy: {
+      type: String,
+      enum: ["admin", "customer"],
+    },
+    approvedAt: Date,
+
+    // Rejection
+    rejectedBy: {
+      type: String,
+      enum: ["admin", "customer"],
+    },
+    rejectedAt: Date,
+  },
+  { _id: false }
+);
+
+const PaymentMilestoneSchema = new mongoose.Schema(
+  {
+    status: {
+      type: String,
+      enum: ["pending", "partial", "paid", "failed", "No Payment"],
+      default: "pending",
+    },
+    amount: {
+      type: Number,
+      default: 0,
+    },
+    paidAt: Date,
+    method: {
+      type: String,
+      enum: ["None", "Cash", "Card", "UPI", "Wallet"],
+      default: "None",
+    },
+    requestedAmount: { type: Number, default: 0 }, // preserver installment amt for each request
+    remaining: {
+      type: Number,
+      default: 0
+    },
+    prePayment: {
+      type: Number,
+      default: 0,
+    },
+  },
+  { _id: false }
+);
+
+const bookingDetailsSchema = new mongoose.Schema(
+  {
+    bookingDate: Date,
+    bookingTime: String,
+    booking_id: String,
+    status: {
+      type: String,
+      enum: [
+        "Pending",
+        "Confirmed", //accepted or responded
+        "Job Ongoing", // started - deep cleaning
+        "Survey Ongoing", //started - house painting
+        "Survey Completed", //ended - house painting
+        "Job Completed", //ended - deep cleaning
+        "Customer Cancelled", // from the vendor app
+        "Admin Cancelled", // from the vendor app
+        "Cancelled", // from the website by customer themself
+        "Cancelled Rescheduled", // old booking canelled created new booking for reschedule by customer/admin
+        "Customer Unreachable",
+        "Rescheduled", // rescheduled by vendor from vendor app
+        "Pending Hiring", // mark hiring
+        "Hired", // first payment done
+        "Project Ongoing", // project started house painting
+        "Waiting for final payment",
+        "Project Completed", // project completed
+        "Negotiation",
+        "Customer Denied",
+        "Set Remainder",
+      ],
+      default: "Pending",
+    },
+    isJobStarted: { type: Boolean, default: false },
+
+    // 🔁 Price Change Tracking
+    priceChanges: {
+      type: [PriceChangeSchema],
+      default: [],
+    },
+    hasPriceUpdated: { type: Boolean, default: false },
+    priceUpdateRequestedToUser: { type: Boolean, default: false },
+    priceUpdateRequestedToAdmin: { type: Boolean, default: false },
+    // 💰 Core Amounts (never change original)
+    originalTotalAmount: {
+      type: Number,
+      required: true,
+    },
+    finalTotal: {
+      type: Number,
+      required: true, // will be set to originalTotalAmount initially
+    },
+
+    // 💳 Installment Tracking (clear & explicit)
+    firstPayment: {
+      type: PaymentMilestoneSchema,
+      default: () => ({}),
+    },
+    secondPayment: {
+      type: PaymentMilestoneSchema,
+      default: () => ({}),
+    },
+    finalPayment: {
+      type: PaymentMilestoneSchema,
+      default: () => ({}),
+    },
+
+    // 🧾 Legacy / Derived Fields (optional for compatibility)
+    paidAmount: { type: Number, default: 0 }, // total paid so far
+    amountYetToPay: { type: Number, default: 0 },
+    bookingAmount: Number, // initial payment from website
+    refundAmount: Number, // New field
+    cancelApprovedAt: Date,
+    hasLeadLocked: Boolean,
+    // 💳 Payment method (last used)
+    paymentMethod: {
+      type: String,
+      enum: ["Cash", "Card", "UPI", "Wallet", "None"],
+    },
+
+    // 🔗 Payment Link
+    paymentLink: {
+      url: String,
+      isActive: { type: Boolean, default: true },
+      providerRef: String,
+      installmentStage: { type: String },
+
+      // ✅ add for Razorpay
+      razorpayOrderId: String,
+      amount: Number,
+      currency: { type: String, default: "INR" },
+      purpose: String,              // "dc_first" | "site_visit"
+    },
+
+    paymentStatus: {
+      type: String,
+      enum: [
+        "Paid",
+        "Unpaid",
+        "Refunded",
+        "Partial Payment", // second installment sending
+        "Partially Completed", // second installment done, job ongoing
+        "Waiting for final payment", // job end, waiting for final payment
+      ],
+      default: "Unpaid",
+    },
+
+    // 📅 Project Timing
+    startProject: { type: Boolean, default: false },
+    isSurveyStarted: { type: Boolean, default: false },
+    projectStartDate: Date,
+    startProjectRequestedAt: Date,
+    startProjectApprovedAt: Date,
+    jobEndRequestedAt: Date,
+    jobEndedAt: Date,
+
+    // 🔐 OTP for starting project
+    startProjectOtp: String, // hashed
+    startProjectOtpExpiry: Date,
+
+    // 📝 Other
+    siteVisitCharges: Number,
+    otp: Number,
+  },
+  {
+    _id: false, // if embedded in UserBooking
+  }
+);
+
+const invitedVendorSchema = new mongoose.Schema({
+  professionalId: String,
+  invitedAt: Date,
+  respondedAt: Date,
+  cancelledAt: Date,
+  cancelledBy: {
+    type: String,
+    enum: ["internal", "external"], // internal = vendor (app), external = customer/admin (website)
+    // default: "external", // safer default
+  },
+  responseStatus: {
+    type: String,
+    enum: [
+      "pending",
+      "accepted",
+      "declined",
+      "started",
+      "completed",
+      "customer_cancelled",
+      // "vendor_cancelled",
+      "unreachable",
+      "pending_hiring",
+      "mark_hiring",
+    ],
+    default: "pending",
+  },
+  coinsDeducted: { type: Boolean, default: false },
+  coinsDeductedAt: { type: Date },
+  coinsDeductedValue: { type: Number, default: 0 },
+
+  coinsRefunded: { type: Boolean, default: false },
+  coinsRefundedAt: { type: Date },
+  coinsRefundedValue: { type: Number, default: 0 },
+});
+
+const selectedTeam = new mongoose.Schema(
+  {
+    memberId: String,
+    memberName: String,
+  },
+  { _id: false }
+);
+const backupSchema = new mongoose.Schema(
+  {
+    bookingDetails: mongoose.Schema.Types.Mixed,
+    selectedSlot: mongoose.Schema.Types.Mixed
+  }, { _id: false }
+);
+const assignedProfessionalSchema = new mongoose.Schema({
+  professionalId: String,
+  name: String,
+  phone: String,
+  profile: String,
+  acceptedDate: Date,
+  acceptedTime: String,
+  startedDate: Date,
+  startedTime: String,
+  endedDate: Date,
+  endedTime: String,
+  completedDate: Date,
+  completedTime: String,
+  hiring: {
+    markedDate: Date,
+    markedTime: String,
+    hiredDate: Date,
+    hiredTime: String,
+    teamMember: [selectedTeam],
+    projectDate: Array,
+    noOfDay: Number,
+    quotationId: { type: mongoose.Schema.Types.ObjectId, ref: "Quote" },
+    status: { type: String, enum: ["active", "cancelled"], default: "active" },
+    cancelledAt: Date,
+    cancelReason: String, // NEW ("auto-unpaid" | "admin-cancel" | "vendor-cancel")
+    autoCancelAt: Date,
+    backup: backupSchema
+
+  },
+});
+const selectedSlot = new mongoose.Schema({
+  slotTime: String,
+  slotDate: String,
+});
+
+const leadReminderSchema = new mongoose.Schema(
+  {
+    reminderAt: { type: Date, required: true, index: true },
+    status: {
+      type: String,
+      enum: ["pending", "sent", "cancelled"],
+      default: "pending",
+      index: true,
+    },
+    sentAt: { type: Date },
+  },
+  { timestamps: true, _id: false } // ✅ correct place
+);
+
+const userBookingSchema = new mongoose.Schema({
+  customer: customerSchema,
+  service: [serviceSchema],
+  bookingDetails: bookingDetailsSchema,
+  assignedProfessional: assignedProfessionalSchema,
+  address: {
+    houseFlatNumber: String,
+    streetArea: String,
+    landMark: String,
+    city: String,
+    location: {
+      type: {
+        type: String,
+        enum: ["Point"],
+        default: "Point",
+      },
+      coordinates: {
+        type: [Number],
+        required: true,
+      },
+    },
+  },
+  payments: [
+    {
+      at: { type: Date, default: Date.now },
+      method: { type: String, enum: ["Cash", "Card", "UPI", "Wallet"] },
+      amount: { type: Number, required: true },
+      providerRef: String,
+      installment: { type: String, enum: ["first", "second", "final"] }, // helpful for reporting
+      purpose: String
+    },
+  ],
+  serviceType: {
+    type: String,
+    enum: [
+      "deep_cleaning",
+      "house_painting",
+      "packers_&_movers",
+      "home_interior",
+    ],
+    required: true,
+  },
+  selectedSlot: selectedSlot,
+  isEnquiry: Boolean,
+  isRead: { type: Boolean, default: false }, //New Field
+  isDismmised: { type: Boolean, default: false }, //New Field
+  invitedVendors: [invitedVendorSchema],
+  vendorRatingUrl: String,
+  leadReminder: leadReminderSchema,
+  // vendorRating: {
+  //   rating: { type: Number, min: 1, max: 5 },
+  //   review: String,
+  //   ratedAt: Date
+  // },
+  formName: { type: String, required: true }, // Add formName
+  createdDate: { type: Date, default: Date.now },
+});
+
+userBookingSchema.index({ "address.location": "2dsphere" });
+// ✅ Vendor booking conflict lookup
+userBookingSchema.index({
+  "assignedProfessional.professionalId": 1,
+  "selectedSlot.slotDate": 1,
+  "bookingDetails.status": 1,
+});
+
+module.exports = mongoose.model("UserBookings", userBookingSchema);
