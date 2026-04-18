@@ -1659,6 +1659,15 @@ exports.loginWithMobile = async (req, res) => {
       return res.status(404).json({ message: "Vendor not found" });
     }
 
+    // 🔒 Block archived vendors from logging in
+    if (vendor.isArchived === true) {
+      return res.status(403).json({
+        code: "VENDOR_ARCHIVED",
+        message:
+          "Your vendor account has been archived by the administrator. Please contact support.",
+      });
+    }
+
     const otp = generateOTP();
 
     const expiry = new Date(Date.now() + 60 * 1000);
@@ -1748,6 +1757,15 @@ exports.verifyOTP = async (req, res) => {
     let user = await vendorAuthSchema.findOne({
       "vendor.mobileNumber": phone, // ✅ use phone
     });
+
+    // 🔒 Block archived vendors from completing login
+    if (user && user.isArchived === true) {
+      return res.status(403).json({
+        code: "VENDOR_ARCHIVED",
+        message:
+          "Your vendor account has been archived by the administrator. Please contact support.",
+      });
+    }
 
     res.status(200).json({
       message: "OTP verified successfully",
@@ -2505,6 +2523,141 @@ exports.getOverallCoinPurchasedTotal = async (req, res) => {
       success: false,
       message:
         err.message || "Failed to calculate overall coin purchased total",
+    });
+  }
+};
+
+// =============================================================
+// 🔒 Archive / Unarchive vendor (admin-only actions)
+// =============================================================
+
+exports.archiveVendor = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { reason } = req.body || {};
+
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid vendor id" });
+    }
+
+    const vendor = await vendorAuthSchema.findById(vendorId);
+    if (!vendor) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vendor not found" });
+    }
+
+    if (vendor.isArchived === true) {
+      return res.status(200).json({
+        success: true,
+        message: "Vendor is already archived",
+        vendor,
+      });
+    }
+
+    vendor.isArchived = true;
+    vendor.archivedAt = new Date();
+    vendor.archiveReason = reason || null;
+    if (req.admin && req.admin._id) {
+      vendor.archivedBy = req.admin._id;
+    }
+    await vendor.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Vendor archived successfully",
+      vendor,
+    });
+  } catch (error) {
+    console.error("archiveVendor error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to archive vendor",
+      error: error.message,
+    });
+  }
+};
+
+exports.unarchiveVendor = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid vendor id" });
+    }
+
+    const vendor = await vendorAuthSchema.findById(vendorId);
+    if (!vendor) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vendor not found" });
+    }
+
+    if (!vendor.isArchived) {
+      return res.status(200).json({
+        success: true,
+        message: "Vendor is not archived",
+        vendor,
+      });
+    }
+
+    vendor.isArchived = false;
+    vendor.archivedAt = null;
+    vendor.archiveReason = null;
+    vendor.archivedBy = null;
+    await vendor.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Vendor unarchived successfully",
+      vendor,
+    });
+  } catch (error) {
+    console.error("unarchiveVendor error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to unarchive vendor",
+      error: error.message,
+    });
+  }
+};
+
+// Lightweight endpoint used by the Vendor App to poll archive state.
+// Returns only { isArchived } so it is cheap to call frequently.
+exports.getVendorArchiveStatus = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid vendor id" });
+    }
+
+    const vendor = await vendorAuthSchema
+      .findById(vendorId)
+      .select("isArchived archiveReason");
+
+    if (!vendor) {
+      return res
+        .status(404)
+        .json({ success: false, isArchived: true, message: "Vendor not found" });
+    }
+
+    return res.status(200).json({
+      success: true,
+      isArchived: vendor.isArchived === true,
+      archiveReason: vendor.archiveReason || null,
+    });
+  } catch (error) {
+    console.error("getVendorArchiveStatus error:", error);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch archive status",
+      error: error.message,
     });
   }
 };

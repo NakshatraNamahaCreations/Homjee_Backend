@@ -3,6 +3,8 @@ import UserBooking from "../models/user/userBookings.js"; // ✅ change path/nam
 import Vendor from "../models/vendor/vendorAuth.js"; // ✅ change path/name
 // import { sendPushToVendor } from "../utils/push.js"; // ✅ you create this
 import vendorNotification from "../models/notification/vendorNotification.js";
+import Reminder from "../models/user/reminder.js";
+import InAppNotification from "../models/notification/Notification.js";
 
 export const startLeadReminderCron = () => {
     try {
@@ -76,6 +78,66 @@ export const startLeadReminderCron = () => {
                         );
                     } catch (err) {
                         console.log("Reminder send error:", err);
+                    }
+                }
+
+                // 🔔 Admin reminders (from the Reminder collection)
+                const dueAdminReminders = await Reminder.find({
+                    status: "pending",
+                    reminderAt: { $lte: now, $ne: null },
+                }).limit(50);
+
+                for (const rem of dueAdminReminders) {
+                    try {
+                        const bookingId = rem.bookingId
+                            ? String(rem.bookingId)
+                            : "";
+
+                        const adminNotification = {
+                            bookingId,
+                            notificationType: "REMINDER",
+                            thumbnailTitle: "Lead Reminder",
+                            message:
+                                rem.note ||
+                                "You have a reminder for a lead/enquiry",
+                            status: "unread",
+                            notifyTo: "admin",
+                            metaData: {
+                                bookingId,
+                                reminderId: String(rem._id),
+                                adminId: rem.adminId
+                                    ? String(rem.adminId)
+                                    : undefined,
+                            },
+                        };
+
+                        try {
+                            const created = await InAppNotification.create(
+                                adminNotification
+                            );
+                            console.log(
+                                "✅ admin reminder notification saved:",
+                                created._id
+                            );
+                        } catch (e) {
+                            console.log(
+                                "❌ admin reminder notification create failed:",
+                                e?.message
+                            );
+                        }
+
+                        await Reminder.updateOne(
+                            { _id: rem._id },
+                            {
+                                $set: {
+                                    status: "sent",
+                                    sentAt: new Date(),
+                                    isChecked: true,
+                                },
+                            }
+                        );
+                    } catch (err) {
+                        console.log("Admin reminder send error:", err);
                     }
                 }
             } catch (e) {

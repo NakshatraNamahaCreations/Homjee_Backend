@@ -70,6 +70,10 @@ const vendorAuthSchema = new mongoose.Schema({
   address: addressDetails,
   bankDetails: accountInfo,
   activeStatus: Boolean,
+  isArchived: { type: Boolean, default: false },
+  archivedAt: { type: Date },
+  archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "admin" },
+  archiveReason: { type: String },
   wallet: {
     coins: {
       type: Number,

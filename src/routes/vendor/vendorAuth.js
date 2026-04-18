@@ -194,4 +194,15 @@ router.get(
 );
 
 router.post("/get-available-vendor", vendorAuthController.getAvailableVendors)
+
+// 🔒 Archive / Unarchive (admin-only actions)
+router.put("/archive-vendor/:vendorId", vendorAuthController.archiveVendor);
+router.put("/unarchive-vendor/:vendorId", vendorAuthController.unarchiveVendor);
+
+// Lightweight poll endpoint for the Vendor App
+router.get(
+  "/archive-status/:vendorId",
+  vendorAuthController.getVendorArchiveStatus
+);
+
 module.exports = router;

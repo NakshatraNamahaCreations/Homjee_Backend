@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const InAppNotification = require("../../models/notification/Notification");
+const Reminder = require("../../models/user/reminder");
 
 /**
  * FETCH ADMIN NOTIFICATIONS (LOAD MORE)
@@ -46,6 +47,10 @@ router.get("/fetch-admin-notifications", async (req, res) => {
 
 /**
  * MARK NOTIFICATION AS READ
+ *
+ * Side-effect: if the notification is a REMINDER, also cancel the linked
+ * Reminder record so the "Reminder" highlight on the Enquiries list drops off
+ * (the admin has already acknowledged it by opening the notification).
  */
 router.post("/mark-notification-read/:notificationId", async (req, res) => {
   try {
@@ -59,6 +64,29 @@ router.post("/mark-notification-read/:notificationId", async (req, res) => {
 
     if (!updatedNotification) {
       return res.status(404).json({ message: "Notification not found" });
+    }
+
+    // 🔔 If this was a reminder, auto-dismiss the underlying Reminder so the
+    // list highlight clears. Non-fatal if the reminder can't be found.
+    if (updatedNotification.notificationType === "REMINDER") {
+      try {
+        const reminderId = updatedNotification?.metaData?.reminderId;
+        const bookingId = updatedNotification?.metaData?.bookingId;
+
+        if (reminderId) {
+          await Reminder.findByIdAndUpdate(reminderId, {
+            $set: { status: "cancelled", isChecked: true },
+          });
+        } else if (bookingId) {
+          // Fallback: cancel any pending/sent reminder for this booking.
+          await Reminder.findOneAndUpdate(
+            { bookingId, status: { $in: ["pending", "sent"] } },
+            { $set: { status: "cancelled", isChecked: true } }
+          );
+        }
+      } catch (e) {
+        console.error("auto-cancel reminder on notification read failed:", e);
+      }
     }
 
     res.status(200).json({
