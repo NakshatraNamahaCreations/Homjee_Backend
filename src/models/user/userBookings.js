@@ -145,13 +145,14 @@ const bookingDetailsSchema = new mongoose.Schema(
     priceUpdateRequestedToUser: { type: Boolean, default: false },
     priceUpdateRequestedToAdmin: { type: Boolean, default: false },
     // 💰 Core Amounts (never change original)
+    // Not required at enquiry creation — filled in during checkout / progressive update
     originalTotalAmount: {
       type: Number,
-      required: true,
+      default: 0,
     },
     finalTotal: {
       type: Number,
-      required: true, // will be set to originalTotalAmount initially
+      default: 0,
     },
 
     // 💳 Installment Tracking (clear & explicit)
@@ -345,7 +346,7 @@ const userBookingSchema = new mongoose.Schema({
       },
       coordinates: {
         type: [Number],
-        required: true,
+        default: [0, 0],
       },
     },
   },

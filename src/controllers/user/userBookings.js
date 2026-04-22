@@ -14,14 +14,20 @@ const VendorRating = require("../../models/vendor/vendorRating");
 const vendorAuthSchema = require("../../models/vendor/vendorAuth");
 const walletTransaction = require("../../models/vendor/wallet");
 const vendorNotification = require("../../models/notification/vendorNotification");
-const { createRazorpayOrderForBooking } = require("../../payments/payment.service");
+const {
+  createRazorpayOrderForBooking,
+} = require("../../payments/payment.service");
 const Razorpay = require("razorpay");
 const { getRazorpayClient } = require("../../payments/razorpay.client");
 const { verifyRazorpaySignature } = require("../../payments/razorpay.util");
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
-const redirectionUrl = process.env.USER_PAYMENT || "https://websitehomjee.netlify.app/checkout/payment/";
-const vendorRatingURL = process.env.VENDOR_RATING || "https://websitehomjee.netlify.app/vendor-ratings";
+const redirectionUrl =
+  process.env.USER_PAYMENT ||
+  "https://websitehomjee.netlify.app/checkout/payment/";
+const vendorRatingURL =
+  process.env.VENDOR_RATING ||
+  "https://websitehomjee.netlify.app/vendor-ratings";
 
 const citiesObj = {
   Bangalore: "Bengaluru",
@@ -100,27 +106,6 @@ function recalculateInstallments(d) {
   // Also update amountYetToPay if needed (for legacy)
   d.amountYetToPay = total - (d.paidAmount || 0);
 }
-
-// const mapStatusToInvite = (status) => {
-//   switch (status) {
-//     case "Confirmed":
-//       return "accepted";
-//     case "Ongoing":
-//       return "started";
-//     case "Completed":
-//       return "completed";
-//     case "Customer Unreachable":
-//       return "unreachable";
-//     case "Customer Cancelled":
-//       return "customer_cancelled";
-//     // return "vendor_cancelled";
-//     // if vendor explicitly declines (no booking status change), you’ll pass status='Declined' from UI
-//     case "Declined":
-//       return "declined";
-//     default:
-//       return "pending";
-//   }
-// };
 
 function mapStatusToInvite(status, cancelledByFromClient) {
   switch (status) {
@@ -279,100 +264,6 @@ const isStageExactlyPaid = (m) => {
   return Math.min(req, amt + pre) === req;
 };
 
-// const ensureInstallmentTargets = (d, finalTotal, serviceType) => {
-//   try {
-//     if (!d) return;
-
-//     // init objects
-//     d.firstPayment = d.firstPayment || {
-//       status: "pending",
-//       amount: 0,
-//       method: "None",
-//       requestedAmount: 0,
-//       remaining: 0,
-//       prePayment: 0,
-//     };
-
-//     d.secondPayment = d.secondPayment || {
-//       status: "pending",
-//       amount: 0,
-//       method: "None",
-//       requestedAmount: 0,
-//       remaining: 0,
-//       prePayment: 0,
-//     };
-
-//     d.finalPayment = d.finalPayment || {
-//       status: "pending",
-//       amount: 0,
-//       method: "None",
-//       requestedAmount: 0,
-//       remaining: 0,
-//       prePayment: 0,
-//     };
-
-//     // store "planned targets" separately (DO NOT touch requestedAmount yet)
-//     d.installmentPlan = d.installmentPlan || {};
-
-//     const isDeepCleaning = String(serviceType).toLowerCase() === "deep_cleaning";
-
-//     if (isDeepCleaning) {
-//       // Deep cleaning: first + final
-//       const firstTarget =
-//         Number(d.firstPayment.requestedAmount) > 0
-//           ? Number(d.firstPayment.requestedAmount)
-//           : Math.round(finalTotal * 0.4); // example; use your existing formula
-//       const finalTarget = Math.max(0, finalTotal - firstTarget);
-
-//       d.installmentPlan.firstTarget = firstTarget;
-//       d.installmentPlan.secondTarget = 0;
-//       d.installmentPlan.finalTarget = finalTarget;
-
-//       // ✅ keep second/final requestedAmount & remaining 0 until requested
-//       if (!(Number(d.secondPayment.requestedAmount) > 0)) d.secondPayment.requestedAmount = 0;
-//       if (!(Number(d.secondPayment.remaining) > 0)) d.secondPayment.remaining = 0;
-
-//       if (d.finalPayment.status !== "paid" && !(Number(d.finalPayment.requestedAmount) > 0)) {
-//         d.finalPayment.requestedAmount = 0;
-//         d.finalPayment.remaining = 0;
-//       }
-//     } else {
-//       // House painting: first + second + final
-//       // Use your existing split logic here. Below is just an example.
-//       const firstTarget = Math.round(finalTotal * 0.4);
-//       const secondTarget = Math.round(finalTotal * 0.3);
-//       const finalTarget = Math.max(0, finalTotal - firstTarget - secondTarget);
-
-//       d.installmentPlan.firstTarget = firstTarget;
-//       d.installmentPlan.secondTarget = secondTarget;
-//       d.installmentPlan.finalTarget = finalTarget;
-
-//       // ✅ keep second/final requestedAmount & remaining 0 until requested
-//       if (d.secondPayment.status !== "paid" && !(Number(d.secondPayment.requestedAmount) > 0)) {
-//         d.secondPayment.requestedAmount = 0;
-//         d.secondPayment.remaining = 0;
-//       }
-
-//       if (d.finalPayment.status !== "paid" && !(Number(d.finalPayment.requestedAmount) > 0)) {
-//         d.finalPayment.requestedAmount = 0;
-//         d.finalPayment.remaining = 0;
-//       }
-//     }
-//     // ✅ HARD RULE: finalPayment must stay 0 until requested
-//     if (!isFinalRequested(d)) {
-//       d.finalPayment.requestedAmount = 0;
-//       d.finalPayment.remaining = 0;
-//       d.finalPayment.amount = 0;     // important: prevents admin UI confusion
-//       if (d.finalPayment.status !== "paid") d.finalPayment.status = "pending";
-//       if (!d.finalPayment.method || d.finalPayment.method === "None") {
-//         d.finalPayment.method = "None";
-//       }
-//     }
-//   } catch (e) {
-//     console.error("ensureInstallmentTargets error:", e);
-//   }
-// };
-
 const ensureInstallmentTargets = (d, finalTotal, serviceType) => {
   try {
     if (!d) return;
@@ -511,34 +402,6 @@ const activateInstallmentStage = (d, stage) => {
     console.error("activateInstallmentStage error:", e);
   }
 };
-
-// const activateInstallmentStage = (d, stage) => {
-//   try {
-//     if (!d || !stage) return;
-//     d.installmentPlan = d.installmentPlan || {};
-
-//     const s = String(stage).toLowerCase();
-
-//     const setTarget = (obj, target) => {
-//       const paid = Number(obj.amount || 0) + Number(obj.prePayment || 0);
-//       const t = Math.max(0, Number(target || 0));
-
-//       obj.requestedAmount = t;
-//       obj.remaining = Math.max(0, t - paid);
-
-//       // keep status consistent
-//       if (obj.remaining === 0 && t > 0) obj.status = "paid";
-//       else if (t > 0) obj.status = obj.status === "paid" ? "paid" : "pending";
-//     };
-
-//     if (s === "first") setTarget(d.firstPayment, d.installmentPlan.firstTarget);
-//     if (s === "second") setTarget(d.secondPayment, d.installmentPlan.secondTarget);
-//     if (s === "final") setTarget(d.finalPayment, d.installmentPlan.finalTarget);
-//   } catch (e) {
-//     console.error("error:", e);
-//   }
-// };
-
 const isAssignedToVendor = (booking) => {
   try {
     // ✅ adjust if your assignment is stored elsewhere
@@ -555,38 +418,8 @@ const storeVendorPaymentNotification = async ({
   stage,
   amount,
   method,
-  providerRef
+  providerRef,
 }) => {
-  // try {
-  //   if (!vendorId) return;
-
-  //   const customerName = booking?.customer?.name
-
-  //   const msg = `₹${Number(amount).toLocaleString()} paid by customer ${customerName} via ${method}`;
-
-  //   await vendorNotification.create({
-  //     vendorId: String(vendorId),
-  //     notificationType: "PAYMENT",
-  //     thumbnailTitle: "Payment Received",
-  //     message: msg,
-  //     status: "unread",
-  //     metaData: {
-  //       customerName: booking?.customer?.name || "-",
-  //       bookingId: booking?.bookingDetails?.booking_id || "-",
-  //       leadId: booking?._id,
-  //       paymentDate: paidAt ? paidAt.toISOString() : null,
-  //       paidDate,
-  //       paidTime,
-  //       paymentType: String(stage),
-  //       amount: Number(amount),
-  //       method: String(method),
-  //       providerRef: p.providerRef || null, // ✅ cash will be null
-  //       formattedPaymentDate: paidAt ? `${paidDate} ${paidTime}` : "",
-  //     },
-  //   });
-  // } catch (e) {
-  //   console.log("storeVendorPaymentNotification error:", e?.message || e);
-  // }
   try {
     const paidAt = new Date();
     const paidDate = moment(paidAt).format("DD/MM/YYYY"); // dd/mm/yyyy in most cases
@@ -594,11 +427,10 @@ const storeVendorPaymentNotification = async ({
 
     const customerName = booking?.customer?.name || "-";
 
-    const bookingUniqueId =
-      booking?.bookingDetails?.booking_id || "-";
+    const bookingUniqueId = booking?.bookingDetails?.booking_id || "-";
 
     const msg = `₹${Number(amount).toLocaleString()} paid by customer ${customerName} via ${String(
-      method
+      method,
     )}`;
 
     await vendorNotification.create({
@@ -625,7 +457,6 @@ const storeVendorPaymentNotification = async ({
     console.log("vendor payment notification create error:", e?.message || e);
   }
 };
-
 
 const resyncMilestonesFromLedger = (
   d,
@@ -859,6 +690,122 @@ const CANCELLED_STATUSES = Object.freeze([
 // ..........................API's.......................................
 // BOOKED FROM THE WEBSITE
 
+// Create a lightweight enquiry/lead as soon as the customer's phone is OTP-verified.
+// Captures the lead even if the customer drops off before reaching checkout.
+// The returned bookingId is carried in sessionStorage by the website and enriched
+// (address → slot → checkout) via updateEnquiry. Payment verify flips isEnquiry=false.
+exports.createEnquiryLead = async (req, res) => {
+  try {
+    const { customer, serviceType, formName } = req.body;
+
+    if (!customer?.phone) {
+      return res.status(400).json({ message: "customer.phone is required" });
+    }
+
+    const SERVICE_TYPE_LABEL = {
+      deep_cleaning: "Deep Cleaning",
+      house_painting: "House Painting",
+      "packers_&_movers": "Packers & Movers",
+      home_interior: "Home Interior",
+    };
+    if (!serviceType || !SERVICE_TYPE_LABEL[serviceType]) {
+      return res.status(400).json({
+        message: `serviceType is required and must be one of: ${Object.keys(
+          SERVICE_TYPE_LABEL,
+        ).join(", ")}`,
+      });
+    }
+    const categoryLabel = SERVICE_TYPE_LABEL[serviceType];
+
+    // Ensure user exists (mirror createBooking behaviour)
+    let user = await userSchema.findOne({ mobileNumber: customer.phone });
+    if (!user) {
+      user = await userSchema.create({
+        mobileNumber: customer.phone,
+        userName: customer.name || "",
+      });
+    }
+
+    const booking = new UserBooking({
+      customer: {
+        customerId: customer.customerId || String(user._id),
+        name: customer.name || user.userName || "",
+        phone: customer.phone,
+      },
+      // Seed a single placeholder service so admin enquiry lists (which render
+      // service[].category / serviceName) show the lead's interest immediately.
+      // Finalize-time (updateEnquiry with finalize:true) overwrites this array
+      // with the real cart from checkout.
+      service: [
+        {
+          category: categoryLabel,
+          serviceName: categoryLabel,
+          price: 0,
+          quantity: 1,
+          teamMembersRequired: 0,
+          duration: 0,
+          coinDeduction: 0,
+        },
+      ],
+      serviceType,
+      bookingDetails: {
+        booking_id: generateBookingId(),
+        bookingDate: new Date(),
+        bookingTime: moment().format("LT"),
+        status: "Pending",
+        paymentStatus: "Unpaid",
+        originalTotalAmount: 0,
+        finalTotal: 0,
+        paidAmount: 0,
+        amountYetToPay: 0,
+        paymentMethod: "None",
+        paymentLink: { isActive: false },
+        otp: generateOTP(),
+      },
+      address: {
+        houseFlatNumber: "",
+        streetArea: "",
+        landMark: "",
+        city: "",
+        location: { type: "Point", coordinates: [0, 0] },
+      },
+      selectedSlot: { slotDate: "", slotTime: "" },
+      isEnquiry: true,
+      formName: formName || "Website OTP Lead",
+      createdDate: new Date(),
+    });
+
+    await booking.save();
+
+    // Fire-and-forget admin notification; don't fail the request if it errors.
+    try {
+      await notificationSchema.create({
+        bookingId: booking._id,
+        notificationType: "NEW_LEAD_CREATED",
+        thumbnailTitle: "New OTP-verified lead",
+        notifyTo: "admin",
+        message: `New ${serviceType.replace(/_/g, " ")} lead from ${customer.name || "customer"} (${customer.phone})`,
+        status: "unread",
+        created_at: new Date(),
+      });
+    } catch (e) {
+      // swallow
+    }
+
+    return res.status(201).json({
+      success: true,
+      message: "Enquiry lead created",
+      bookingId: booking._id,
+      serviceType,
+    });
+  } catch (error) {
+    console.error("Error creating enquiry lead:", error);
+    return res
+      .status(500)
+      .json({ message: "Server error", error: error.message });
+  }
+};
+
 exports.createBooking = async (req, res) => {
   try {
     const {
@@ -950,7 +897,7 @@ exports.createBooking = async (req, res) => {
     if (serviceType === "deep_cleaning") {
       originalTotalAmount = service.reduce(
         (sum, itm) => sum + Number(itm.price) * (Number(itm.quantity) || 1),
-        0
+        0,
       );
 
       bookingAmount = Math.round(originalTotalAmount * 0.2); // 20% first installment
@@ -995,7 +942,7 @@ exports.createBooking = async (req, res) => {
       // other service types (if any) - keep safe defaults
       originalTotalAmount = service.reduce(
         (sum, itm) => sum + Number(itm.price) * (Number(itm.quantity) || 1),
-        0
+        0,
       );
       bookingAmount = 0;
       paidAmount = 0;
@@ -1092,10 +1039,10 @@ exports.createBooking = async (req, res) => {
 
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
 
       address: {
@@ -1156,7 +1103,7 @@ exports.createBooking = async (req, res) => {
             },
           },
         },
-        { new: true }
+        { new: true },
       );
     }
 
@@ -1170,7 +1117,7 @@ exports.createBooking = async (req, res) => {
         thumbnailTitle: "New Booking Scheduled",
         notifyTo: "admin",
         message: `New ${service[0]?.category} booking scheduled for ${moment(
-          selectedSlot?.slotDate
+          selectedSlot?.slotDate,
         ).format("DD-MM-YYYY")} at ${selectedSlot?.slotTime}`,
         status: "unread",
         created_at: new Date(),
@@ -1201,7 +1148,6 @@ exports.createBooking = async (req, res) => {
       .json({ message: "Server error", error: error.message });
   }
 };
-
 
 exports.createBooking1 = async (req, res) => {
   try {
@@ -1294,7 +1240,7 @@ exports.createBooking1 = async (req, res) => {
         paidAt: paidAmount > 0 ? new Date() : null,
         method: "UPI",
         requestedAmount: paidAmount || bookingAmount,
-        remaining: 0,//paidAmount || bookingAmount,
+        remaining: 0, //paidAmount || bookingAmount,
         prePayment: 0,
       };
       finalPayment = {
@@ -1400,10 +1346,10 @@ exports.createBooking1 = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -1435,11 +1381,11 @@ exports.createBooking1 = async (req, res) => {
       });
     }
 
-
     // now generate and store payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -1998,10 +1944,10 @@ exports.adminCreateBooking = async (req, res) => {
       bookingDetails: bookingDetailsConfig,
       assignedProfessional: assignedProfessional
         ? {
-          professionalId: assignedProfessional.professionalId,
-          name: assignedProfessional.name,
-          phone: assignedProfessional.phone,
-        }
+            professionalId: assignedProfessional.professionalId,
+            name: assignedProfessional.name,
+            phone: assignedProfessional.phone,
+          }
         : undefined,
       address: {
         houseFlatNumber: address?.houseFlatNumber || "",
@@ -2033,8 +1979,9 @@ exports.adminCreateBooking = async (req, res) => {
     // const redirectionUrl = "http://localhost:5173/checkout/payment";
     const pay_type = "auto-pay";
 
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     booking.bookingDetails.paymentLink = {
       url: paymentLinkUrl,
@@ -2371,7 +2318,11 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       if (!slotDateObj || !slotTimeStr) return false;
 
       const slotDateMoment = moment.tz(slotDateStr, "YYYY-MM-DD", TZ);
-      const slotDateTime = moment.tz(`${slotDateStr} ${slotTimeStr}`, "YYYY-MM-DD hh:mm A", TZ);
+      const slotDateTime = moment.tz(
+        `${slotDateStr} ${slotTimeStr}`,
+        "YYYY-MM-DD hh:mm A",
+        TZ,
+      );
 
       // const slotDateMoment = moment(slotDateObj);
       const slotDateStr = slotDateMoment.format("YYYY-MM-DD");
@@ -2402,7 +2353,6 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
 
 // deep cleaning metric
 exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
@@ -2454,7 +2404,10 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       ratingMatch.createdAt = { $gte: startOfMonth };
     }
 
-    let ratingPipeline = [{ $match: ratingMatch }, { $sort: { createdAt: -1 } }];
+    let ratingPipeline = [
+      { $match: ratingMatch },
+      { $sort: { createdAt: -1 } },
+    ];
 
     if (timeframe === "last") {
       ratingPipeline.push({ $limit: 50 }); // last 50 ratings
@@ -2523,7 +2476,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     for (const booking of bookings) {
       // Find vendor invite
       const vendorInvitation = (booking.invitedVendors || []).find(
-        (v) => String(v.professionalId) === String(vendorId)
+        (v) => String(v.professionalId) === String(vendorId),
       );
       if (!vendorInvitation) continue;
 
@@ -2535,8 +2488,8 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
 
       // Compute booking cart value (GSV basis)
       const bookingGsv = (booking.service || []).reduce(
-        (sum, s) => sum + (Number(s.price || 0) * Number(s.quantity || 0)),
-        0
+        (sum, s) => sum + Number(s.price || 0) * Number(s.quantity || 0),
+        0,
       );
 
       // ✅ Only responded leads contribute to GSV
@@ -2553,7 +2506,7 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       ) {
         const bookedSlot = moment(
           `${booking?.selectedSlot?.slotDate} ${booking?.selectedSlot?.slotTime}`,
-          "YYYY-MM-DD hh:mm A"
+          "YYYY-MM-DD hh:mm A",
         );
 
         const cancelledAt = moment(vendorInvitation.cancelledAt);
@@ -2689,19 +2642,20 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     }
 
     // ---------------- Metrics ----------------
-    let totalLeads = 0;        // vendor relevant leads (invited OR assigned)
+    let totalLeads = 0; // vendor relevant leads (invited OR assigned)
     let surveyLeads = 0;
-    let hiredLeads = 0;        // total hired in fetched window (we cap selection at 50)
+    let hiredLeads = 0; // total hired in fetched window (we cap selection at 50)
     let selectedHiredCount = 0; // ✅ used for Avg GSV denominator (<= 50)
     let totalSelectedHiredGsv = 0;
 
     for (const booking of bookings) {
       const invited = (booking.invitedVendors || []).find(
-        (v) => String(v.professionalId) === String(vendorId)
+        (v) => String(v.professionalId) === String(vendorId),
       );
 
       const assignedToVendor =
-        String(booking?.assignedProfessional?.professionalId || "") === String(vendorId);
+        String(booking?.assignedProfessional?.professionalId || "") ===
+        String(vendorId);
 
       // lead relevant to this vendor
       if (!invited && !assignedToVendor) continue;
@@ -2771,7 +2725,9 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     });
   } catch (error) {
     console.error("Error calculating house painters vendor metrics:", error);
-    return res.status(500).json({ message: "Server error calculating performance" });
+    return res
+      .status(500)
+      .json({ message: "Server error calculating performance" });
   }
 };
 
@@ -3306,7 +3262,8 @@ exports.getOverallPerformance = async (req, res) => {
           vendorId = invited.professionalId;
           if (
             lead.assignedProfessional &&
-            String(lead.assignedProfessional.professionalId) === String(vendorId)
+            String(lead.assignedProfessional.professionalId) ===
+              String(vendorId)
           ) {
             prof = {
               ...invited,
@@ -3465,13 +3422,13 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     const now = new Date();
 
     const todayStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
     )
       .toISOString()
       .slice(0, 10);
 
     const dayAfterTomorrow = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2)
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 2),
     );
     const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().slice(0, 10);
 
@@ -3504,7 +3461,7 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       const slotDateStr = slotDateMoment.format("YYYY-MM-DD");
       const slotDateTime = moment(
         `${slotDateStr} ${slotTimeStr}`,
-        "YYYY-MM-DD hh:mm A"
+        "YYYY-MM-DD hh:mm A",
       );
 
       // Today: keep only future-times
@@ -3607,333 +3564,6 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
-
-// exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
-//   try {
-//     res.set("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
-//     res.set("Pragma", "no-cache");
-//     res.set("Expires", "0");
-//     res.set("Surrogate-Control", "no-store");
-
-//     const { lat, long } = req.params;
-
-//     const vendorId =
-//       (req.user && (req.user._id || req.user.id) && String(req.user._id || req.user.id)) ||
-//       (req.query.vendorId ? String(req.query.vendorId) : null);
-
-//     const isLow = String(req.query.isPerformanceLow || "0") === "1";
-//     if (isLow) {
-//       return res.status(200).json({
-//         success: true,
-//         isPerformanceLow: true,
-//         bookings: [],
-//       });
-//     }
-
-//     if (!vendorId) {
-//       return res.status(400).json({ message: "vendorId required" });
-//     }
-
-//     if (!lat || !long) {
-//       return res.status(400).json({ message: "Coordinates required" });
-//     }
-
-//     // ✅ STATIC SETTINGS (for now)
-//     const waveDelaySeconds = 50 // 30 * 60; // 30 mins
-//     const broadcastWithinHours = 2; // 2 hours 
-//     const waveBatchSize = 1;
-
-//     const now = new Date();
-
-//     // ✅ Use IST timezone everywhere (important!)
-//     const TZ = "Asia/Kolkata";
-//     const nowMoment = moment.tz(TZ);
-
-//     const todayStr = ymdLocal(now);
-//     const tomorrowStr = ymdLocal(
-//       new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
-//     );
-
-//     const me = await vendorAuthSchema
-//       .findById(vendorId)
-//       .select("_id vendor.city vendor.serviceType wallet markedLeaves")
-//       .lean();
-
-//     if (!me) {
-//       return res.status(200).json({
-//         success: true,
-//         isPerformanceLow: false,
-//         bookings: [],
-//       });
-//     }
-
-//     const leaveSet = new Set(Array.isArray(me.markedLeaves) ? me.markedLeaves : []);
-
-//     const nearbyBookings = await UserBooking.find({
-//       "address.location": {
-//         $near: {
-//           $geometry: {
-//             type: "Point",
-//             coordinates: [parseFloat(long), parseFloat(lat)],
-//           },
-//           $maxDistance: 10000,
-//         },
-//       },
-//       isEnquiry: false,
-//       "service.category": "House Painting",
-//       "bookingDetails.status": "Pending",
-//       "selectedSlot.slotDate": { $gte: todayStr, $lte: tomorrowStr },
-//     }).sort({ createdAt: -1 });
-
-//     // ✅ Time + Leave filter
-//     let baseFiltered = nearbyBookings.filter((booking) => {
-//       const slotDateStr = booking.selectedSlot?.slotDate;
-//       const slotTimeStr = booking.selectedSlot?.slotTime;
-//       if (!slotDateStr || !slotTimeStr) return false;
-
-//       // Leave rule
-//       if (leaveSet.has(slotDateStr)) return false;
-
-//       const slotDateMoment = moment.tz(slotDateStr, "YYYY-MM-DD", TZ);
-//       const slotDateTime = moment.tz(
-//         `${slotDateStr} ${slotTimeStr}`,
-//         "YYYY-MM-DD hh:mm A",
-//         TZ,
-//       );
-
-//       // future times today, all tomorrow
-//       if (slotDateMoment.isSame(nowMoment, "day")) {
-//         return slotDateTime.isAfter(nowMoment);
-//       }
-//       if (slotDateMoment.isSame(nowMoment.clone().add(1, "day"), "day")) {
-//         return true;
-//       }
-//       return false;
-//     });
-
-//     if (!baseFiltered.length) {
-//       return res.status(200).json({
-//         success: true,
-//         isPerformanceLow: false,
-//         bookings: [],
-//       });
-//     }
-
-//     // ✅ keep only vendors within 10km
-//     const eligibleVendors = await vendorAuthSchema.find({
-//       "wallet.canRespondLead": true,
-//       "vendor.serviceType": "House Painting",
-//       "vendor.city": me.vendor.city,
-//       "address.geo": {
-//         $near: {
-//           $geometry: { type: "Point", coordinates: [parseFloat(long), parseFloat(lat)] },
-//           $maxDistance: 10000,
-//         },
-//       },
-//     }).select("_id").lean();
-//     console.log("eligibleVendorsNearby:", eligibleVendors.length);
-
-//     const eligibleIds = eligibleVendors.map((v) => v._id);
-
-//     // ✅ last responded time from historical accepted/response logs
-//     const lastRespAgg = await UserBooking.aggregate([
-//       { $match: { "invitedVendors.professionalId": { $in: eligibleIds } } },
-//       { $unwind: "$invitedVendors" },
-//       {
-//         $match: {
-//           "invitedVendors.professionalId": { $in: eligibleIds },
-//           "invitedVendors.respondedAt": { $type: "date" },
-//         },
-//       },
-//       {
-//         $group: {
-//           _id: "$invitedVendors.professionalId",
-//           lastRespondedAt: { $max: "$invitedVendors.respondedAt" },
-//         },
-//       },
-//     ]);
-
-//     const lastMap = new Map(
-//       lastRespAgg.map((x) => [String(x._id), new Date(x.lastRespondedAt).getTime()]),
-//     );
-
-//     const vendorOrder = eligibleVendors
-//       .map((v) => ({
-//         id: String(v._id),
-//         t: lastMap.has(String(v._id)) ? lastMap.get(String(v._id)) : 0,
-//       }))
-//       .sort((a, b) => a.t - b.t) // oldest response first
-//       .map((x) => x.id);
-
-//     const myIndex = vendorOrder.indexOf(String(vendorId));
-//     if (myIndex === -1) {
-//       return res.status(200).json({
-//         success: true,
-//         isPerformanceLow: false,
-//         bookings: [],
-//       });
-//     }
-
-//     console.log("totalEligible:", vendorOrder.length, "myIndex:", myIndex);
-//     if (baseFiltered[0]) {
-//       const b = baseFiltered[0];
-//       const createdAtMs = b.createdDate ? new Date(b.createdDate).getTime() : Date.now();
-//       const visibleAtMs = createdAtMs + myIndex * waveDelaySeconds * 1000;
-//       console.log("bookingCreated:", new Date(createdAtMs).toISOString());
-//       console.log("visibleAt:", new Date(visibleAtMs).toISOString());
-//     }
-
-//     console.log("vendorId", vendorId);
-//     console.log("eligibleIds", eligibleIds.map(String));
-//     console.log("vendorOrder", vendorOrder);
-//     console.log("myIndex", myIndex);
-
-//     // ✅ Wave visibility (Rapido-like waves)
-//     const finalBookings = [];
-
-//     for (const booking of baseFiltered) {
-//       const bCoords = booking.address?.location?.coordinates; // [lng, lat]
-//       if (!Array.isArray(bCoords) || bCoords.length !== 2) continue;
-
-//       const bookingLng = bCoords[0];
-//       const bookingLat = bCoords[1];
-
-//       // ✅ build SAME eligible pool for this booking (based on booking location)
-//       const eligibleVendorsForBooking = await vendorAuthSchema.find({
-//         "wallet.canRespondLead": true,
-//         "vendor.serviceType": "House Painting",
-//         "vendor.city": me.vendor.city,
-//         "address.geo": {
-//           $near: {
-//             $geometry: { type: "Point", coordinates: [bookingLng, bookingLat] },
-//             $maxDistance: 10000,
-//           },
-//         },
-//       }).select("_id").lean();
-
-//       const ids = eligibleVendorsForBooking.map(v => String(v._id));
-
-//       // If this vendor isn't in the pool, skip
-//       if (!ids.includes(String(vendorId))) continue;
-
-//       // last response ordering (same as your current logic)
-//       const lastRespAgg = await UserBooking.aggregate([
-//         { $match: { "invitedVendors.professionalId": { $in: eligibleVendorsForBooking.map(v => v._id) } } },
-//         { $unwind: "$invitedVendors" },
-//         { $match: { "invitedVendors.professionalId": { $in: eligibleVendorsForBooking.map(v => v._id) }, "invitedVendors.respondedAt": { $type: "date" } } },
-//         { $group: { _id: "$invitedVendors.professionalId", lastRespondedAt: { $max: "$invitedVendors.respondedAt" } } },
-//       ]);
-
-//       const lastMap = new Map(lastRespAgg.map(x => [String(x._id), new Date(x.lastRespondedAt).getTime()]));
-
-//       const vendorOrder = eligibleVendorsForBooking
-//         .map(v => ({ id: String(v._id), t: lastMap.get(String(v._id)) ?? 0 }))
-//         .sort((a, b) => a.t - b.t)
-//         .map(x => x.id);
-
-//       const myIndex = vendorOrder.indexOf(String(vendorId));
-//       if (myIndex === -1) continue;
-
-//       // broadcast within 2 hours
-//       const slotDateStr = booking.selectedSlot?.slotDate;
-//       const slotTimeStr = booking.selectedSlot?.slotTime;
-
-//       const slotDateTime = moment.tz(`${slotDateStr} ${slotTimeStr}`, "YYYY-MM-DD hh:mm A", TZ);
-//       const diffHours = slotDateTime.diff(nowMoment, "hours", true);
-//       if (diffHours <= broadcastWithinHours) {
-//         finalBookings.push(booking);
-//         continue;
-//       }
-
-//       // waves
-//       const createdAtMs = booking.createdDate ? new Date(booking.createdDate).getTime() : Date.now();
-//       const waveNumber = Math.floor(myIndex / waveBatchSize);
-//       const visibleAtMs = createdAtMs + waveNumber * waveDelaySeconds * 1000;
-
-//       if (Date.now() >= visibleAtMs) finalBookings.push(booking);
-//     }
-
-//     return res.status(200).json({
-//       success: true,
-//       isPerformanceLow: false,
-//       bookings: finalBookings,
-//       meta: {
-//         waveDelaySeconds,
-//         broadcastWithinHours,
-//         waveBatchSize,
-//         myIndex,
-//         totalEligible: vendorOrder.length,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Error finding nearby bookings:", error);
-//     return res.status(500).json({ message: "Server error" });
-//   }
-// };
-
-// exports.respondConfirmJobVendorLine = async (req, res) => {
-//   try {
-//     const { bookingId, status, assignedProfessional, vendorId, cancelledBy } =
-//       req.body;
-//     if (!bookingId)
-//       return res.status(400).json({ message: "bookingId is required" });
-//     if (!vendorId)
-//       return res
-//         .status(400)
-//         .json({ message: "vendorId (professionalId) is required" });
-
-//     const updateFields = {};
-//     if (status) updateFields["bookingDetails.status"] = status;
-//     if (assignedProfessional)
-//       updateFields.assignedProfessional = assignedProfessional;
-
-//     // 1) ensure invite exists
-//     await UserBooking.updateOne(
-//       {
-//         _id: bookingId,
-//         "invitedVendors.professionalId": { $ne: String(vendorId) },
-//       },
-//       {
-//         $addToSet: {
-//           invitedVendors: {
-//             professionalId: String(vendorId),
-//             invitedAt: new Date(),
-//             responseStatus: "pending",
-//           },
-//         },
-//       }
-//     );
-
-//     // 2) build $set from the patch object (DO NOT assign the object to the string path)
-//     const patch = mapStatusToInvite(status, cancelledBy);
-//     const setOps = {
-//       ...updateFields,
-//       "invitedVendors.$[iv].respondedAt": new Date(),
-//     };
-//     if (patch.responseStatus)
-//       setOps["invitedVendors.$[iv].responseStatus"] = patch.responseStatus;
-//     if (patch.cancelledAt)
-//       setOps["invitedVendors.$[iv].cancelledAt"] = patch.cancelledAt;
-//     if (patch.cancelledBy)
-//       setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
-
-//     const result = await UserBooking.findOneAndUpdate(
-//       { _id: bookingId },
-//       { $set: setOps },
-//       {
-//         new: true,
-//         runValidators: true,
-//         arrayFilters: [{ "iv.professionalId": String(vendorId) }],
-//       }
-//     );
-
-//     if (!result) return res.status(404).json({ message: "Booking not found" });
-//     res.status(200).json({ message: "Booking updated", booking: result });
-//   } catch (error) {
-//     console.error("Error updating booking:", error);
-//     res.status(500).json({ message: "Server error", error: error.message });
-//   }
-// };
 
 exports.respondConfirmJobVendorLine = async (req, res) => {
   const session = await mongoose.startSession();
@@ -4262,7 +3892,7 @@ exports.startJob = async (req, res) => {
         s.serviceName?.toLowerCase().includes("paint"),
     );
 
-    console.log("isHousePainter", isHousePainter)
+    console.log("isHousePainter", isHousePainter);
 
     // === Prepare hiring data (for Deep Cleaning only) ===
     const hiringUpdate = {};
@@ -4678,7 +4308,8 @@ exports.getCustomerPaymentsForMD = async (req, res) => {
 
           // ✅ allow CASH without providerRef
           // for ONLINE payments, providerRef should exist (optional strictness)
-          if (String(p.method).toLowerCase() !== "cash" && !p?.providerRef) return false;
+          if (String(p.method).toLowerCase() !== "cash" && !p?.providerRef)
+            return false;
 
           return true;
         })
@@ -4714,7 +4345,9 @@ exports.getCustomerPaymentsForMD = async (req, res) => {
     });
 
     // ✅ Sort by latest payment time (final payment will appear)
-    paymentDetails.sort((a, b) => new Date(b.paymentDate) - new Date(a.paymentDate));
+    paymentDetails.sort(
+      (a, b) => new Date(b.paymentDate) - new Date(a.paymentDate),
+    );
 
     return res.status(200).json({
       success: true,
@@ -5039,66 +4672,6 @@ exports.cancelLeadFromWebsite = async (req, res) => {
     session.endSession();
   }
 };
-// exports.cancelLeadFromWebsite = async (req, res) => {
-//   try {
-//     const { bookingId, status } = req.body;
-
-//     if (!bookingId)
-//       return res.status(400).json({ message: "bookingId is required" });
-
-//     if (!status) return res.status(400).json({ message: "status is required" });
-
-//     const booking = await UserBooking.findById(bookingId);
-//     if (!booking) return res.status(404).json({ message: "Booking not found" });
-
-//     // booking-level fields
-//     const updateFields = {
-//       "bookingDetails.status": status,
-//       "bookingDetails.updatedAt": new Date(), // track when status changed
-//     };
-
-//     const updated = await UserBooking.findByIdAndUpdate(
-//       bookingId,
-//       { $set: updateFields },
-//       {
-//         new: true,
-//         runValidators: true,
-//       }
-//     );
-
-//     if (!updated)
-//       return res
-//         .status(404)
-//         .json({ message: "Booking not found after update" });
-
-//     const customerName = booking?.customer.name;
-//     const customer_id = booking?.customer.customerId;
-//     const ID = booking?.bookingDetails.booking_id;
-//     const newBookingNotification = {
-//       bookingId: booking._id,
-//       notificationType: "CUSTOMER_CANCEL_REQUESTED",
-//       thumbnailTitle: "Lead Cancel Requested",
-//       message: `Customer ${customerName} has requested cancellation for Lead #${ID}.`,
-//       metaData: {
-//         customer_id,
-//         customerMsg: `Your booking #${ID} has been cancelled.`,
-//       },
-//       status: "unread",
-//       created_at: new Date(),
-//       notifyTo: "admin",
-//     };
-//     await notificationSchema.create(newBookingNotification);
-
-//     res.status(200).json({
-//       message: "Booking cancelled successfully",
-//       booking: updated,
-//     });
-//   } catch (error) {
-//     console.error("Error cancelling booking:", error);
-//     res.status(500).json({ message: "Server error", error: error.message });
-//   }
-// };
-
 exports.bookingCancelledbyAdmin = async (req, res) => {
   try {
     const { bookingId, refundAmount = 0 } = req.body;
@@ -5253,22 +4826,30 @@ exports.markPendingHiring = async (req, res) => {
       req.body;
 
     if (!mongoose.Types.ObjectId.isValid(bookingId)) {
-      return res.status(400).json({ success: false, message: "Invalid bookingId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid bookingId" });
     }
     if (!mongoose.Types.ObjectId.isValid(quotationId)) {
-      return res.status(400).json({ success: false, message: "Invalid quotationId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid quotationId" });
     }
 
     const quotationObjectId = new mongoose.Types.ObjectId(quotationId);
 
     const booking = await UserBooking.findById(bookingId);
     if (!booking) {
-      return res.status(404).json({ success: false, message: "Booking not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
     }
 
     const quoteDoc = await Quote.findById(quotationObjectId).lean();
     if (!quoteDoc) {
-      return res.status(400).json({ success: false, message: "Quotation not found" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Quotation not found" });
     }
 
     const backup = {
@@ -5284,7 +4865,7 @@ exports.markPendingHiring = async (req, res) => {
     try {
       await Quote.updateOne(
         { _id: quotationObjectId, status: "finalized" },
-        { $set: { locked: true } }
+        { $set: { locked: true } },
       );
     } catch (e) {
       // non-blocking
@@ -5302,7 +4883,9 @@ exports.markPendingHiring = async (req, res) => {
       });
     }
 
-    const approvedTotal = Number(d.finalTotal ?? d.currentTotalAmount ?? d.bookingAmount ?? 0);
+    const approvedTotal = Number(
+      d.finalTotal ?? d.currentTotalAmount ?? d.bookingAmount ?? 0,
+    );
     d.finalTotal = approvedTotal > 0 ? approvedTotal : totalAmount;
     d.currentTotalAmount = d.finalTotal;
 
@@ -5322,7 +4905,7 @@ exports.markPendingHiring = async (req, res) => {
 
     // Build project dates (YYYY-MM-DD)
     const projectDate = Array.from({ length: Number(noOfDays) }, (_, i) =>
-      moment(startDate).add(i, "days").format("YYYY-MM-DD")
+      moment(startDate).add(i, "days").format("YYYY-MM-DD"),
     );
 
     const firstDay = projectDate[0];
@@ -5364,7 +4947,8 @@ exports.markPendingHiring = async (req, res) => {
       })),
       quotationId: quotationObjectId,
       status: "active",
-      autoCancelAt, backup,
+      autoCancelAt,
+      backup,
     };
 
     // Carry leadId if missing
@@ -5374,7 +4958,8 @@ exports.markPendingHiring = async (req, res) => {
 
     return res.json({
       success: true,
-      message: "Booking updated to Pending Hiring. Payment link sent to customer.",
+      message:
+        "Booking updated to Pending Hiring. Payment link sent to customer.",
       bookingId,
       paymentLink: paymentLinkUrl,
       amountDue: firstInstallment,
@@ -5387,220 +4972,6 @@ exports.markPendingHiring = async (req, res) => {
       .json({ success: false, message: "Server error", error: err.message });
   }
 };
-// exports.markPendingHiring = async (req, res) => {
-//   try {
-//     const { bookingId, startDate, teamMembers, noOfDays, quotationId } =
-//       req.body;
-//     const quotationObjectId = new mongoose.Types.ObjectId(quotationId);
-//     // Find booking
-//     const booking = await UserBooking.findById(bookingId);
-//     if (!booking) {
-//       // console.log("Booking not found");
-//       return res
-//         .status(404)
-//         .json({ success: false, message: "Booking not found" });
-//     }
-
-//     // Update bookingDetails status
-//     booking.bookingDetails.status = "Pending Hiring";
-//     booking.bookingDetails.startProject = true;
-
-//     const quoteDoc = await Quote.findById(quotationId).lean();
-//     if (!quoteDoc) {
-//       return res
-//         .status(400)
-//         .json({ success: false, message: "Quotation not found" });
-//     }
-
-//     console.log("Attempting to lock quotation:", quotationId);
-
-//     // ✅ Calculate TOTAL AMOUNT from quote (or fallback to service total)
-//     const totalAmount = booking.bookingDetails.bookingAmount;
-
-//     if (!totalAmount || totalAmount <= 0) {
-//       return res.status(400).json({
-//         success: false,
-//         message: "Booking amount not set. Finalize quote first.",
-//       });
-//     }
-//     console.log("Finalized total amount:", totalAmount);
-//     booking.bookingDetails.currentTotalAmount = totalAmount;
-
-//     const d = booking.bookingDetails;
-
-//     // If we already have an approved total, keep it; else adopt the booking/quote amount
-//     const approvedTotal = Number(
-//       d.finalTotal ?? d.currentTotalAmount ?? d.bookingAmount ?? 0,
-//     );
-
-//     d.finalTotal = approvedTotal > 0 ? approvedTotal : Number(totalAmount || 0);
-
-//     // Keep mirror in sync
-//     d.currentTotalAmount = d.finalTotal;
-//     // booking.service[0].price = finalTotal;  added by sonali
-//     d.paymentStatus = "Unpaid";
-//     d.paidAmount = 0;
-//     d.amountYetToPay = d.finalTotal;
-//     // booking.bookingDetails.amountYetToPay =  firstInstallment; // old line check with below
-
-//     // ✅ Calculate 40% for first installment...................
-//     const firstInstallment = Math.round(d.finalTotal * 0.4);
-//     d.firstPayment.amount = 0; //firstInstallment || Math.round(finalTotal * 0.4);
-//     d.firstPayment.status = "pending";
-//     // presever installment amt
-//     d.firstPayment.requestedAmount =
-//       firstInstallment || Math.round(finalTotal * 0.4);
-//     d.firstPayment.remaining = firstInstallment;
-//     // ..........................
-
-//     const updatedQuote = await Quote.updateOne(
-//       { _id: quotationObjectId, status: "finalized" }, // Make sure you're selecting the finalized quote
-//       { $set: { locked: true } }, // Lock the quotation
-//     );
-
-//     if (!mongoose.Types.ObjectId.isValid(quotationId)) {
-//       return res
-//         .status(400)
-//         .json({ success: false, message: "Invalid quotation ID" });
-//     }
-
-//     // console.log("Updated quotation:", updatedQuote);
-
-//     if (updatedQuote.nModified === 0) {
-//       console.log("Failed to lock the quotation, no rows modified.");
-//     } else {
-//       console.log("Quotation locked successfully.");
-//     }
-
-//     // 1. Build project dates (as before)
-//     const projectDate = Array.from({ length: noOfDays }, (_, i) =>
-//       moment(startDate).add(i, "days").format("YYYY-MM-DD"),
-//     );
-
-//     // 2. Create a proper Date object for "first project day at 10:30 AM"
-//     const projectStartDateTime = moment(projectDate[0], "YYYY-MM-DD")
-//       .set({ hour: 10, minute: 30, second: 0, millisecond: 0 })
-//       .toDate();
-
-//     // 3. Update selectedSlot to reflect the project start (not booking time)
-//     booking.selectedSlot.slotDate = projectDate[0]; // e.g., "2025-09-25"
-//     booking.selectedSlot.slotTime || "10:30 AM"; // Fixed per client requirement
-
-//     // 4. Store the full datetime in bookingDetails for UI display (if needed)
-//     booking.bookingDetails.projectStartDate = projectStartDateTime; // This should be a Date
-
-//     // 5. Auto-cancel logic (unchanged)
-//     const firstDay = projectDate[0]; // no need to sort — it's already in order
-//     const slotTime = booking.selectedSlot.slotTime || "10:30 AM";
-//     const autoCancelAt = buildAutoCancelAtUTC(firstDay,slotTime);
-//     booking.assignedProfessional.hiring.autoCancelAt = autoCancelAt;
-
-//     // 4) Auto-cancel time = 07:30 IST of first project day (store UTC Date)
-//     // "firstDay" is 'YYYY-MM-DD' in IST
-//     // const autoCancelAt = moment(`${firstDay} 07:30`, 'YYYY-MM-DD HH:mm')
-//     //   .subtract(5, 'hours')
-//     //   .subtract(30, 'minutes')
-//     //   .toDate(); // this Date represents the same instant (02:00 UTC)
-
-//     // 5) Hiring block
-//     booking.assignedProfessional.hiring = {
-//       markedDate: new Date(),
-//       markedTime: moment().format("LT"),
-//       projectDate: Array.from({ length: noOfDays }, (_, i) =>
-//         moment(startDate).add(i, "days").format("YYYY-MM-DD"),
-//       ),
-//       noOfDay: noOfDays,
-//       teamMember: teamMembers.map((m) => ({
-//         memberId: m._id,
-//         memberName: m.name,
-//       })),
-//       quotationId: quotationObjectId,
-//       status: "active",
-//       autoCancelAt,
-//     };
-
-//     if (!booking?.assignedProfessional?.hiring?.quotationId) {
-//       console.warn("[unlockQuotes] No quotationId found, skipping unlock");
-//       return;
-//     }
-//     // Carry over leadId if missing
-//     if (!booking.leadId && quoteDoc.leadId) {
-//       booking.leadId = quoteDoc.leadId;
-//     }
-
-//     console.log("firstInstallment", firstInstallment);
-
-//     // ✅ UPDATE PAYMENT FIELDS FOR 40% INSTALLMENT
-//     booking.bookingDetails.status = "Pending Hiring";
-//     booking.bookingDetails.startProject = true;
-
-//     booking.bookingDetails.paymentStatus = "Unpaid";
-//     booking.bookingDetails.paidAmount = 0; // nothing paid yet
-//     // booking.bookingDetails.amountYetToPay = firstInstallment; // 40% due now
-//     booking.bookingDetails.amountYetToPay = d.finalTotal; // 40% due now
-
-//     // 6) Payment link (change to razor pay)
-//     const pay_type = "auto-pay";
-//     const paymentLinkUrl = `${redirectionUrl}${bookingId}/${Date.now()}/${pay_type}`;
-//     booking.bookingDetails.paymentLink = {
-//       url: paymentLinkUrl,
-//       isActive: true,
-//       providerRef: generateProviderRef(), // fill if you have gateway id
-//       installmentStage: "first",
-//     };
-
-//     // console.log("paymentLinkUrl", paymentLinkUrl);
-
-//     if (process.env.NODE_ENV !== "production") {
-//       booking.assignedProfessional.hiring.autoCancelAt = new Date(
-//         Date.now() + 2 * 60 * 1000,
-//       ); // +2 mins
-//     }
-//     const USE_REAL_AUTO_CANCEL = true; // 👈 set to true for real-time test
-
-//     if (!USE_REAL_AUTO_CANCEL && process.env.NODE_ENV !== "production") {
-//       booking.assignedProfessional.hiring.autoCancelAt = new Date(
-//         Date.now() + 2 * 60 * 1000,
-//       );
-//       console.log(
-//         "DEV: autoCancelAt set to",
-//         booking.assignedProfessional.hiring.autoCancelAt.toISOString(),
-//       );
-//     } else {
-//       // Use real auto-cancel time
-//       const firstDay = projectDate[0]; // e.g., "2025-09-25"
-//       const autoCancelAt = buildAutoCancelAtUTC(firstDay);
-//       booking.assignedProfessional.hiring.autoCancelAt = autoCancelAt;
-//     }
-
-//     await booking.save();
-//     // await unlockRelatedQuotesByHiring(booking, "auto-unpaid");
-
-//     // await booking.save();
-//     // await Quote.updateMany(
-//     //   { _id: { $in: booking.quotationId }, locked: true },
-//     //   { $set: { locked: false } }
-//     // );
-
-//     // TODO: Send SMS/Email/WhatsApp to customer with paymentLink
-
-//     res.json({
-//       success: true,
-//       message:
-//         "Booking updated to Pending Hiring. Payment link sent to customer.",
-//       bookingId,
-//       paymentLink: paymentLinkUrl,
-//       amountDue: firstInstallment,
-//       totalAmount: totalAmount,
-//       firstPayment: d.firstPayment.status,
-//     });
-//   } catch (err) {
-//     console.error("Error marking pending hiring:", err);
-//     res
-//       .status(500)
-//       .json({ success: false, message: "Server error", error: err.message });
-//   }
-// };
 
 exports.requestStartProjectOtp = async (req, res) => {
   // House painting
@@ -5612,9 +4983,13 @@ exports.requestStartProjectOtp = async (req, res) => {
       return res
         .status(404)
         .json({ success: false, message: "Booking not found" });
-    const bookingStatus = booking.bookingDetails.status
+    const bookingStatus = booking.bookingDetails.status;
 
-    const allowedStatuses = ["Hired", "Customer Cancelled", "Customer Unreachable"];
+    const allowedStatuses = [
+      "Hired",
+      "Customer Cancelled",
+      "Customer Unreachable",
+    ];
     if (!allowedStatuses.includes(bookingStatus)) {
       return res.status(400).json({
         success: false,
@@ -5673,7 +5048,11 @@ exports.verifyStartProjectOtp = async (req, res) => {
         .json({ success: false, message: "Booking not found" });
 
     const details = booking.bookingDetails;
-    const allowedStatuses = ["Hired", "Customer Cancelled", "Customer Unreachable"];
+    const allowedStatuses = [
+      "Hired",
+      "Customer Cancelled",
+      "Customer Unreachable",
+    ];
 
     if (!allowedStatuses.includes(details.status)) {
       return res.status(400).json({
@@ -5689,7 +5068,6 @@ exports.verifyStartProjectOtp = async (req, res) => {
     //     message: "Booking must be 'Hired' to start project",
     //   });
     // }
-
 
     if (!details.startProjectOtp || !details.startProjectOtpExpiry) {
       return res
@@ -5829,8 +5207,9 @@ exports.requestSecondPayment = async (req, res) => {
     // ......................................
     // 🔗 Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
     d.paymentLink = {
       url: paymentLinkUrl,
       isActive: true,
@@ -5983,8 +5362,9 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
 
     // ✅ Generate payment link
     const pay_type = "auto-pay";
-    const paymentLinkUrl = `${redirectionUrl}${booking._id
-      }/${Date.now()}/${pay_type}`;
+    const paymentLinkUrl = `${redirectionUrl}${
+      booking._id
+    }/${Date.now()}/${pay_type}`;
 
     details.paymentLink = {
       url: paymentLinkUrl,
@@ -6099,7 +5479,8 @@ exports.makePayment = async (req, res) => {
     } else {
       // House painting stages: first/second/final (your existing normalizeStage)
       // NOTE: for Razorpay init call you will send installmentStage from frontend
-      if (installmentStage) stage = normalizeStage(installmentStage, serviceType, d);
+      if (installmentStage)
+        stage = normalizeStage(installmentStage, serviceType, d);
       else if (d.paymentLink?.isActive && d.paymentLink?.installmentStage)
         stage = normalizeStage(d.paymentLink.installmentStage, serviceType, d);
       else stage = normalizeStage(null, serviceType, d);
@@ -6177,11 +5558,15 @@ exports.makePayment = async (req, res) => {
     // ============================================================
     if (String(paymentMethod) === "Razorpay") {
       // STEP 1: Create order if payment success payload not provided yet
-      const isVerifyCall = !!(providerRef && razorpayPaymentId && razorpaySignature);
+      const isVerifyCall = !!(
+        providerRef &&
+        razorpayPaymentId &&
+        razorpaySignature
+      );
 
       if (!isVerifyCall) {
         // Create Razorpay order
-        const receipt = makeShortReceipt(bookingId, stage);;
+        const receipt = makeShortReceipt(bookingId, stage);
         const purpose = getPurpose(serviceNorm, stage);
 
         const rzpClient = getRazorpayClient();
@@ -6250,7 +5635,10 @@ exports.makePayment = async (req, res) => {
       }
 
       // OPTIONAL: ensure the orderId matches active paymentLink (recommended)
-      if (d.paymentLink?.providerRef && d.paymentLink.providerRef !== providerRef) {
+      if (
+        d.paymentLink?.providerRef &&
+        d.paymentLink.providerRef !== providerRef
+      ) {
         return res.status(400).json({
           success: false,
           message: "Order mismatch for this booking/payment link.",
@@ -6263,7 +5651,9 @@ exports.makePayment = async (req, res) => {
     // ============================================================
     if (providerRef) {
       booking.payments = booking.payments || [];
-      const already = booking.payments.some((p) => p.providerRef === providerRef);
+      const already = booking.payments.some(
+        (p) => p.providerRef === providerRef,
+      );
       if (already) {
         return res.status(200).json({
           success: true,
@@ -6274,13 +5664,11 @@ exports.makePayment = async (req, res) => {
       }
     }
 
-
     const ledgerMethod =
       String(paymentMethod) === "Razorpay" ? "UPI" : String(paymentMethod); // or "Card"
 
     // ✅ Keep gateway info separately (optional, but recommended)
     const gateway = String(paymentMethod) === "Razorpay" ? "Razorpay" : "";
-
 
     // ============================================================
     // ✅ EXISTING LEDGER UPDATE (same as your code)
@@ -6296,7 +5684,7 @@ exports.makePayment = async (req, res) => {
       providerRef: providerRef || undefined,
       installment: stage,
       razorpayPaymentId: razorpayPaymentId || undefined,
-      purpose: stage
+      purpose: stage,
     });
 
     // deactivate link because payment is recorded
@@ -6307,12 +5695,13 @@ exports.makePayment = async (req, res) => {
     const { prevFinalStatus } = resyncMilestonesFromLedger(
       d,
       ledgerMethod,
-      serviceType
+      serviceType,
     );
 
     // Clear backup once FIRST payment is confirmed paid
     try {
-      const firstNowPaid = String(d.firstPayment?.status || "pending") === "paid";
+      const firstNowPaid =
+        String(d.firstPayment?.status || "pending") === "paid";
       const firstJustPaidNow = prevFirstStatus !== "paid" && firstNowPaid;
 
       if (firstJustPaidNow) {
@@ -6337,18 +5726,22 @@ exports.makePayment = async (req, res) => {
     if (finalJustPaidNow) {
       d.paymentStatus = "Paid";
       if (
-        ["Waiting for final payment", "Project Ongoing", "Job Ongoing"].includes(
-          String(d.status)
-        )
+        [
+          "Waiting for final payment",
+          "Project Ongoing",
+          "Job Ongoing",
+        ].includes(String(d.status))
       ) {
         d.status = "Project Completed";
         d.jobEndedAt = d.jobEndedAt || new Date();
       }
     } else {
       const ratio = finalTotal > 0 ? Number(d.paidAmount || 0) / finalTotal : 0;
-      d.paymentStatus = ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
+      d.paymentStatus =
+        ratio >= 0.799 ? "Partially Completed" : "Partial Payment";
       const statusNorm = (d.status || "").trim().toLowerCase();
-      if (["pending hiring", "pending"].includes(statusNorm)) d.status = "Hired";
+      if (["pending hiring", "pending"].includes(statusNorm))
+        d.status = "Hired";
     }
 
     booking.isEnquiry = false;
@@ -6364,7 +5757,8 @@ exports.makePayment = async (req, res) => {
       const assigned = isAssignedToVendor(booking);
       if (assigned) {
         const isDeepCleaning = serviceNorm === "deep_cleaning";
-        const shouldSkipForDeepCleaning = isDeepCleaning && String(stage) === "first"; // keep your logic
+        const shouldSkipForDeepCleaning =
+          isDeepCleaning && String(stage) === "first"; // keep your logic
         if (!shouldSkipForDeepCleaning) {
           await storeVendorPaymentNotification({
             vendorId: booking.assignedProfessional?.professionalId,
@@ -6929,11 +6323,11 @@ exports.updateManualPayment = async (req, res) => {
     // ---------- ADDITIONAL AMOUNT (round-off / extra) ----------
     const gateCompleted = isDeepCleaning
       ? firstReq > 0 &&
-      d.firstPayment.status === "paid" &&
-      isStageExactlyPaid(d.firstPayment)
+        d.firstPayment.status === "paid" &&
+        isStageExactlyPaid(d.firstPayment)
       : secondReq > 0 &&
-      d.secondPayment.status === "paid" &&
-      isStageExactlyPaid(d.secondPayment);
+        d.secondPayment.status === "paid" &&
+        isStageExactlyPaid(d.secondPayment);
 
     if (isAdditionalAmount === true && !gateCompleted) {
       return res.status(400).json({
@@ -7076,7 +6470,6 @@ exports.updateManualPayment = async (req, res) => {
     //   }
     // }
 
-
     // ✅ COMPLETE ONLY WHEN FINAL is exactly paid (amount + prePayment)
     const finalIsExactlyPaid =
       stage === "final" && isStageExactlyPaid(d.finalPayment);
@@ -7140,7 +6533,7 @@ exports.updateManualPayment = async (req, res) => {
             stage,
             amount,
             method: d.paymentMethod,
-            providerRef: providerRef
+            providerRef: providerRef,
           });
         }
       }
@@ -7948,7 +7341,8 @@ exports.updateEnquiry = async (req, res) => {
       return res.status(400).json({ message: "Booking is not an enquiry" });
     }
 
-    const { address, selectedSlot, formName, service } = data;
+    const { customer, address, selectedSlot, formName, service, finalize } =
+      data;
 
     //---------------------------------------------
     // DETECT SERVICE TYPE
@@ -7957,41 +7351,43 @@ exports.updateEnquiry = async (req, res) => {
       booking.serviceType ||
       detectServiceType(formName, service || booking.service);
 
+    // Enrich customer (name/phone may have been collected at OTP time only)
+    if (customer) {
+      booking.customer = booking.customer || {};
+      booking.customer.customerId =
+        customer.customerId ?? booking.customer.customerId;
+      booking.customer.name = customer.name ?? booking.customer.name;
+      booking.customer.phone = customer.phone ?? booking.customer.phone;
+    }
+
     //========================================================
-    // 📌 RULE: HOUSE PAINTING — ONLY UPDATE ADDRESS + SLOT
+    // 📌 HOUSE PAINTING — address + slot + siteVisitCharges
     //========================================================
     if (serviceType === "house_painting") {
-      console.log("Updating ONLY address & slot for house painting enquiry");
-
-      // Update Address
       if (address) {
+        booking.address = booking.address || {};
         booking.address.houseFlatNumber =
           address.houseFlatNumber ?? booking.address.houseFlatNumber;
-
         booking.address.streetArea =
           address.streetArea ?? booking.address.streetArea;
-
         booking.address.landMark = address.landMark ?? booking.address.landMark;
-
         booking.address.city = address.city ?? booking.address.city;
-
         booking.address.location = address.location ?? booking.address.location;
       }
 
-      // Update Slot
       if (selectedSlot) {
+        booking.selectedSlot = booking.selectedSlot || {};
         booking.selectedSlot.slotDate =
           selectedSlot.slotDate ?? booking.selectedSlot.slotDate;
-
         booking.selectedSlot.slotTime =
           selectedSlot.slotTime ?? booking.selectedSlot.slotTime;
       }
 
       if (formName) booking.formName = formName;
 
-      // ✅ ADD THIS
       const { bookingDetails = {} } = data;
       booking.bookingDetails = booking.bookingDetails || {};
+
       if (
         bookingDetails.siteVisitCharges !== undefined &&
         bookingDetails.siteVisitCharges !== null
@@ -8000,121 +7396,162 @@ exports.updateEnquiry = async (req, res) => {
           bookingDetails.siteVisitCharges || 0,
         );
       }
-      await booking.save();
 
-      return res.status(200).json({
-        success: true,
-        message: "House painting enquiry updated (address & slot only)",
-        booking,
-      });
+      // On finalize from checkout: house painting sends a single "House Painters & Waterproofing" line
+      if (finalize && Array.isArray(service) && service.length) {
+        booking.service = service.map((s) => ({
+          category: s.category || "House Painting",
+          subCategory: s.subCategory || "",
+          serviceName: s.serviceName || "",
+          price: Number(s.price || 0),
+          quantity: Number(s.quantity || 1),
+          teamMembersRequired: Number(s.teamMembersRequired) || 0,
+          duration: Number(s.duration) || 0,
+          packageId: s.packageId,
+          coinDeduction: Number(s.coinsForVendor ?? s.coinDeduction) || 0,
+        }));
+      }
+
+      // Allow caller to flip isEnquiry (used by the site-visit-free confirm flow)
+      if (typeof data.isEnquiry === "boolean")
+        booking.isEnquiry = data.isEnquiry;
     }
-
     //========================================================
-    // 📌 DEEP CLEANING — FULL UPDATE LOGIC
+    // 📌 DEEP CLEANING — full update (service + amounts)
     //========================================================
+    else {
+      const { bookingDetails = {}, isEnquiry } = data;
 
-    const { bookingDetails = {}, isEnquiry } = data;
+      booking.bookingDetails = booking.bookingDetails || {};
+      booking.bookingDetails.firstPayment =
+        booking.bookingDetails.firstPayment || {};
+      booking.bookingDetails.finalPayment =
+        booking.bookingDetails.finalPayment || {};
 
-    // Ensure nested structures
-    booking.bookingDetails = booking.bookingDetails || {};
-    booking.bookingDetails.firstPayment =
-      booking.bookingDetails.firstPayment || {};
-    booking.bookingDetails.finalPayment =
-      booking.bookingDetails.finalPayment || {};
+      if (service?.length) {
+        booking.service = service.map((s) => ({
+          category: s.category || "",
+          subCategory: s.subCategory || "",
+          serviceName: s.serviceName || "",
+          price: Number(s.price || 0),
+          quantity: Number(s.quantity || 0),
+          teamMembersRequired: Number(s.teamMembersRequired || 0),
+          duration: s.duration || 0,
+          packageId: s.packageId,
+          coinDeduction: Number(s.coinDeduction ?? s.coinsForVendor) || 0,
+        }));
+      }
 
-    //----------------------------
-    // SERVICE UPDATE
-    //----------------------------
-    if (service?.length) {
-      booking.service = service.map((s) => ({
-        category: s.category || "",
-        subCategory: s.subCategory || "",
-        serviceName: s.serviceName || "",
-        price: Number(s.price || 0),
-        quantity: Number(s.quantity || 0),
-        teamMembersRequired: Number(s.teamMembersRequired || 0),
-        duration: s.duration || 0,
-        packageId: s.packageId,
-        coinDeduction: Number(s.coinDeduction) || 0,
-      }));
+      const bookingAmount = Number(bookingDetails.bookingAmount || 0);
+      const finalTotal = Number(bookingDetails.finalTotal || 0);
+      const paidAmount = Number(bookingDetails.paidAmount || 0);
+      const amountYetToPay = Math.max(0, finalTotal - bookingAmount);
+
+      booking.bookingDetails.finalTotal = finalTotal;
+      booking.bookingDetails.bookingAmount = bookingAmount;
+      booking.bookingDetails.paidAmount = paidAmount;
+      booking.bookingDetails.amountYetToPay = amountYetToPay;
+
+      booking.bookingDetails.firstPayment.requestedAmount = bookingAmount;
+      booking.bookingDetails.firstPayment.amount = 0;
+      booking.bookingDetails.firstPayment.remaining = bookingAmount;
+      booking.bookingDetails.firstPayment.method = "None";
+      booking.bookingDetails.firstPayment.status = "pending";
+      booking.bookingDetails.firstPayment.paidAt = null;
+
+      booking.bookingDetails.finalPayment.amount = 0;
+      booking.bookingDetails.finalPayment.status = "pending";
+      booking.bookingDetails.finalPayment.paidAt = null;
+      booking.bookingDetails.finalPayment.requestedAmount = 0;
+      booking.bookingDetails.finalPayment.remaining = 0;
+      booking.bookingDetails.finalPayment.method = "None";
+
+      if (!booking.bookingDetails.priceChanges) {
+        booking.bookingDetails.priceChanges = [];
+      }
+      if (bookingDetails.priceChange) {
+        booking.bookingDetails.priceChanges.push(bookingDetails.priceChange);
+      }
+
+      if (address) {
+        booking.address = { ...booking.address, ...address };
+      }
+      if (selectedSlot) {
+        booking.selectedSlot = { ...booking.selectedSlot, ...selectedSlot };
+      }
+
+      if (typeof isEnquiry === "boolean") booking.isEnquiry = isEnquiry;
+      if (formName) booking.formName = formName;
     }
-
-    //----------------------------
-    // BACKEND CONTROLLED AMOUNT LOGIC
-    //----------------------------
-    const bookingAmount = Number(bookingDetails.bookingAmount || 0);
-    const finalTotal = Number(bookingDetails.finalTotal || 0);
-    const paidAmount = Number(bookingDetails.paidAmount || 0);
-
-    // ✅ Deep cleaning enquiry AYTP should be based on FinalTotal - BookingAmount (your existing logic)
-    const amountYetToPay = Math.max(0, finalTotal - bookingAmount);
-
-    booking.bookingDetails.finalTotal = finalTotal;
-    booking.bookingDetails.bookingAmount = bookingAmount;
-    booking.bookingDetails.paidAmount = paidAmount;
-    booking.bookingDetails.amountYetToPay = amountYetToPay;
-
-    //----------------------------
-    // PAYMENT MILESTONE LOGIC
-    //----------------------------
-    // ✅ FIRST PAYMENT: requestedAmount = bookingAmount, amount = 0, remaining = bookingAmount
-    booking.bookingDetails.firstPayment.requestedAmount = bookingAmount;
-    booking.bookingDetails.firstPayment.amount = 0;
-    booking.bookingDetails.firstPayment.remaining = bookingAmount;
-    booking.bookingDetails.firstPayment.method = "None";
-    booking.bookingDetails.firstPayment.status = "pending";
-    booking.bookingDetails.firstPayment.paidAt = null;
-
-    // ✅ FINAL PAYMENT (always reset)
-    booking.bookingDetails.finalPayment.amount = 0;
-    booking.bookingDetails.finalPayment.status = "pending";
-    booking.bookingDetails.finalPayment.paidAt = null;
-    booking.bookingDetails.finalPayment.requestedAmount = 0;
-    booking.bookingDetails.finalPayment.remaining = 0;
-    booking.bookingDetails.finalPayment.method = "None";
-
-    /* ==================================
-         🔥 PRICE CHANGES UPDATE
-         ================================== */
-    // Initialize priceChanges array if it doesn't exist
-    if (!booking.bookingDetails.priceChanges) {
-      booking.bookingDetails.priceChanges = [];
-    }
-
-    // Append new price change if provided (from frontend)
-    if (bookingDetails.priceChange) {
-      booking.bookingDetails.priceChanges.push(bookingDetails.priceChange);
-    }
-
-    //----------------------------
-    // ADDRESS UPDATE
-    //----------------------------
-    if (address) {
-      booking.address = {
-        ...booking.address,
-        ...address,
-      };
-    }
-
-    //----------------------------
-    // SLOT UPDATE
-    //----------------------------
-    if (selectedSlot) {
-      booking.selectedSlot = {
-        ...booking.selectedSlot,
-        ...selectedSlot,
-      };
-    }
-
-    if (typeof isEnquiry === "boolean") booking.isEnquiry = isEnquiry;
-    if (formName) booking.formName = formName;
 
     await booking.save();
 
+    //========================================================
+    // 📌 FINALIZE — create Razorpay order (mirrors createBooking)
+    //     Payment-verify (makePayment) flips isEnquiry:false on success.
+    //========================================================
+    let razorpayOrder = null;
+
+    if (finalize) {
+      let purpose = null;
+      if (serviceType === "deep_cleaning") {
+        purpose = "dc_first";
+      } else if (serviceType === "house_painting") {
+        const sv = Number(booking.bookingDetails?.siteVisitCharges || 0);
+        if (sv > 0) purpose = "site_visit";
+      }
+
+      if (purpose) {
+        try {
+          razorpayOrder = await createRazorpayOrderForBooking({
+            bookingId: booking._id,
+            purpose,
+          });
+
+          const pay_type = "auto-pay";
+          const paymentLinkUrl = `${redirectionUrl}${booking._id}/${Date.now()}/${pay_type}`;
+
+          await UserBooking.findByIdAndUpdate(
+            booking._id,
+            {
+              $set: {
+                "bookingDetails.paymentLink": {
+                  url: paymentLinkUrl,
+                  isActive: true,
+                  providerRef: generateProviderRef(),
+                  installmentStage:
+                    purpose === "dc_first" ? "first" : "site_visit",
+                  razorpayOrderId: razorpayOrder?.orderId,
+                  amount: razorpayOrder?.amount,
+                  currency: razorpayOrder?.currency || "INR",
+                  purpose,
+                },
+              },
+            },
+            { new: true },
+          );
+        } catch (e) {
+          console.error("updateEnquiry: Razorpay order creation failed", e);
+          return res.status(500).json({
+            success: false,
+            message: "Failed to create payment order",
+            error: e.message,
+          });
+        }
+      }
+    }
+
+    const updatedBooking = await UserBooking.findById(booking._id).lean();
+
     return res.status(200).json({
       success: true,
-      message: "Enquiry updated successfully",
-      booking,
+      message: finalize
+        ? "Enquiry finalized — complete payment to confirm"
+        : "Enquiry updated successfully",
+      bookingId: booking._id,
+      serviceType,
+      booking: updatedBooking,
+      razorpayOrder,
     });
   } catch (error) {
     console.error("Error updating enquiry:", error);
@@ -8382,14 +7819,15 @@ exports.setLeadReminder = async (req, res) => {
 
     const dt = new Date(reminderAt);
     if (Number.isNaN(dt.getTime())) {
-      return res.status(400).json({ success: false, message: "Invalid reminderAt" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid reminderAt" });
     }
 
     // ✅ find latest booking for this lead (if vendorId passed, filter it)
 
-
     const booking = await UserBooking.findOne({
-      _id: leadId
+      _id: leadId,
     }).sort({ createdAt: -1 });
 
     if (!booking) {
@@ -8414,7 +7852,7 @@ exports.setLeadReminder = async (req, res) => {
       thumbnailTitle: "Lead Reminder",
       message: "You have a reminder for a lead",
       status: "unread",
-      metaData: { bookingId: String(leadId), },
+      metaData: { bookingId: String(leadId) },
     };
 
     try {
@@ -8444,11 +7882,17 @@ exports.changeVendor = async (req, res) => {
     const { bookingId, oldVendorId, newVendorId, changedBy, reason } = req.body;
 
     if (!bookingId)
-      return res.status(400).json({ success: false, message: "bookingId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "bookingId is required" });
     if (!oldVendorId)
-      return res.status(400).json({ success: false, message: "oldVendorId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "oldVendorId is required" });
     if (!newVendorId)
-      return res.status(400).json({ success: false, message: "newVendorId is required" });
+      return res
+        .status(400)
+        .json({ success: false, message: "newVendorId is required" });
 
     if (String(oldVendorId) === String(newVendorId)) {
       return res.status(400).json({
@@ -8482,22 +7926,26 @@ exports.changeVendor = async (req, res) => {
       // 2) Required coins (coinDeduction already includes qty)
       const requiredCoins = (booking.service || []).reduce(
         (sum, s) => sum + n(s?.coinDeduction),
-        0
+        0,
       );
 
       if (requiredCoins <= 0) {
-        const err = new Error("Coin deduction not configured for this booking.");
+        const err = new Error(
+          "Coin deduction not configured for this booking.",
+        );
         err.statusCode = 400;
         throw err;
       }
 
       // 3) Old vendor invite entry
       const oldInvite = (booking.invitedVendors || []).find(
-        (iv) => String(iv.professionalId) === String(oldVendorId)
+        (iv) => String(iv.professionalId) === String(oldVendorId),
       );
 
       const oldHadDeduction = !!oldInvite?.coinsDeducted;
-      const refundCoins = oldHadDeduction ? n(oldInvite?.coinsDeductedValue) : 0;
+      const refundCoins = oldHadDeduction
+        ? n(oldInvite?.coinsDeductedValue)
+        : 0;
 
       // 4) Ensure new vendor invite exists
       await UserBooking.updateOne(
@@ -8518,7 +7966,7 @@ exports.changeVendor = async (req, res) => {
             },
           },
         },
-        { session }
+        { session },
       );
 
       // Re-fetch for latest invites
@@ -8530,7 +7978,7 @@ exports.changeVendor = async (req, res) => {
       }
 
       const newInvite = (booking2.invitedVendors || []).find(
-        (iv) => String(iv.professionalId) === String(newVendorId)
+        (iv) => String(iv.professionalId) === String(newVendorId),
       );
       const newAlreadyDeducted = !!newInvite?.coinsDeducted;
 
@@ -8539,27 +7987,31 @@ exports.changeVendor = async (req, res) => {
         const deductRes = await vendorAuthSchema.updateOne(
           { _id: newVendorId, "wallet.coins": { $gte: requiredCoins } },
           { $inc: { "wallet.coins": -requiredCoins } },
-          { session }
+          { session },
         );
 
         if (deductRes.matchedCount === 0) {
-          const vendorNow = await vendorAuthSchema.findById(newVendorId).session(session);
+          const vendorNow = await vendorAuthSchema
+            .findById(newVendorId)
+            .session(session);
           const available = n(vendorNow?.wallet?.coins);
 
           const err = new Error(
-            `New vendor has insufficient wallet coins. Required ${requiredCoins}, available ${available}.`
+            `New vendor has insufficient wallet coins. Required ${requiredCoins}, available ${available}.`,
           );
           err.statusCode = 400;
           throw err;
         }
 
-        const newVendorAfter = await vendorAuthSchema.findById(newVendorId).session(session);
+        const newVendorAfter = await vendorAuthSchema
+          .findById(newVendorId)
+          .session(session);
         const newCoins = n(newVendorAfter?.wallet?.coins);
 
         await vendorAuthSchema.updateOne(
           { _id: newVendorId },
           { $set: { "wallet.canRespondLead": newCoins > 0 } },
-          { session }
+          { session },
         );
 
         // new vendor respond (assigned) so deduct
@@ -8586,7 +8038,7 @@ exports.changeVendor = async (req, res) => {
               },
             },
           ],
-          { session }
+          { session },
         );
       }
 
@@ -8598,16 +8050,18 @@ exports.changeVendor = async (req, res) => {
         await vendorAuthSchema.updateOne(
           { _id: oldVendorId },
           { $inc: { "wallet.coins": refundCoins } },
-          { session }
+          { session },
         );
 
-        const oldVendorAfter = await vendorAuthSchema.findById(oldVendorId).session(session);
+        const oldVendorAfter = await vendorAuthSchema
+          .findById(oldVendorId)
+          .session(session);
         const oldCoins = n(oldVendorAfter?.wallet?.coins);
 
         await vendorAuthSchema.updateOne(
           { _id: oldVendorId },
           { $set: { "wallet.canRespondLead": oldCoins > 0 } },
-          { session }
+          { session },
         );
         // refund to old vendor so add
         await walletTransaction.create(
@@ -8633,7 +8087,7 @@ exports.changeVendor = async (req, res) => {
               },
             },
           ],
-          { session }
+          { session },
         );
       }
 
@@ -8643,7 +8097,7 @@ exports.changeVendor = async (req, res) => {
         .select("_id vendor.vendorName vendor.mobileNumber vendor.profileImage")
         .session(session);
 
-      console.log("vendorAuthSchema", newVendorDoc)
+      console.log("vendorAuthSchema", newVendorDoc);
 
       if (!newVendorDoc) {
         const err = new Error("New vendor not found");
@@ -8675,10 +8129,10 @@ exports.changeVendor = async (req, res) => {
         // mark refund flags on old invite if refunded
         ...(refundCoins > 0 && !oldAlreadyRefunded
           ? {
-            "invitedVendors.$[old].coinsRefunded": true,
-            "invitedVendors.$[old].coinsRefundedAt": now,
-            "invitedVendors.$[old].coinsRefundedValue": refundCoins,
-          }
+              "invitedVendors.$[old].coinsRefunded": true,
+              "invitedVendors.$[old].coinsRefundedAt": now,
+              "invitedVendors.$[old].coinsRefundedValue": refundCoins,
+            }
           : {}),
 
         // new vendor invite status (must be enum) - "accepted" works
@@ -8703,7 +8157,7 @@ exports.changeVendor = async (req, res) => {
             { "old.professionalId": String(oldVendorId) }, // ✅ correct key
             { "new.professionalId": String(newVendorId) }, // ✅ correct key
           ],
-        }
+        },
       );
 
       if (!updatedBooking) {
@@ -8728,9 +8182,6 @@ exports.changeVendor = async (req, res) => {
     session.endSession();
   }
 };
-
-
-
 
 // > { issues while updating remaining amt after successful partial payment [cash/UPI]
 // makePayment API not updating remaining amt to the second installment.amt.
