@@ -2,22 +2,36 @@
 const mongoose = require("mongoose");
 const Reminder = require("../../models/user/reminder");
 
-// Combine a date string (YYYY-MM-DD) and a time string (HH:mm) into a Date.
+// Combine a date string (YYYY-MM-DD) and a time string (HH:mm) into a Date,
+// interpreting the input as Asia/Kolkata (IST, +05:30).
+// All admins for this product are in India; treating the wall-clock input as
+// IST avoids the old bug where the server (running in UTC) would apply its
+// own TZ offset and drop the reminder 5h30 late.
 // Returns null if either part is missing or malformed.
+const IST_OFFSET_MINUTES = 5 * 60 + 30; // +05:30
+
 const combineDateAndTime = (dateStr, timeStr) => {
   if (!dateStr || !timeStr) return null;
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return null;
+  const [y, mo, day] = String(dateStr).split("-").map(Number);
   const [hh, mm] = String(timeStr).split(":").map(Number);
-  if (!Number.isFinite(hh) || !Number.isFinite(mm)) return null;
-  d.setHours(hh, mm, 0, 0);
-  return d;
+  if (![y, mo, day, hh, mm].every(Number.isFinite)) return null;
+
+  // Build the UTC instant for that IST wall-clock: UTC = IST - 05:30
+  const utcMs = Date.UTC(y, mo - 1, day, hh, mm, 0, 0) - IST_OFFSET_MINUTES * 60_000;
+  const d = new Date(utcMs);
+  return Number.isNaN(d.getTime()) ? null : d;
 };
 
 exports.createReminder = async (req, res) => {
   try {
-    const { bookingId, reminderDate, reminderTime, adminId, note } =
-      req.body || {};
+    const {
+      bookingId,
+      reminderDate,
+      reminderTime,
+      reminderAt: reminderAtFromClient,
+      adminId,
+      note,
+    } = req.body || {};
 
     if (!bookingId || !reminderDate || !reminderTime) {
       return res.status(400).json({
@@ -26,7 +40,17 @@ exports.createReminder = async (req, res) => {
       });
     }
 
-    const reminderAt = combineDateAndTime(reminderDate, reminderTime);
+    // Prefer the exact ISO instant from the client (admin's browser already
+    // resolved "18:00" in their local TZ). Fall back to combining the
+    // date+time strings as IST for older clients.
+    let reminderAt = null;
+    if (reminderAtFromClient) {
+      const parsed = new Date(reminderAtFromClient);
+      if (!Number.isNaN(parsed.getTime())) reminderAt = parsed;
+    }
+    if (!reminderAt) {
+      reminderAt = combineDateAndTime(reminderDate, reminderTime);
+    }
     if (!reminderAt) {
       return res.status(400).json({
         success: false,
@@ -103,20 +127,18 @@ exports.getPendingReminders = async (req, res) => {
   }
 };
 
-// Lightweight map of DUE reminders keyed by bookingId. Used by the
-// Enquiries list page to highlight rows.
+// Lightweight map of pending/sent reminders keyed by bookingId. Used by the
+// Enquiries list page to highlight rows with an active reminder.
 //
-// A reminder is returned only when its scheduled moment has arrived — i.e.
-// reminderAt <= now — so the list stays clean until the exact set time. After
-// the cron fires (status flips to "sent") the entry remains visible until the
-// admin dismisses it (status: cancelled).
+// Returns reminders regardless of whether their scheduled moment has arrived,
+// so admins see the "Reminder" badge immediately after setting one. The entry
+// remains visible through the cron firing (status: "sent") and disappears only
+// when the admin dismisses it (status: "cancelled").
 exports.getPendingReminderMap = async (req, res) => {
   try {
-    const now = new Date();
-
     const reminders = await Reminder.find({
       status: { $in: ["pending", "sent"] },
-      reminderAt: { $ne: null, $lte: now },
+      reminderAt: { $ne: null },
     })
       .select("bookingId reminderAt reminderDate reminderTime note status")
       .lean();
