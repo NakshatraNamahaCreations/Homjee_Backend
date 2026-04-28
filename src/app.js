@@ -11,10 +11,21 @@ const {
 const app = express();
 
 // console.log("Razorpay key present:", !!process.env.RAZORPAY_KEY_ID);
+const corsOptions = {
+  origin: [
+    "https://homjeeadmin2026.netlify.app/",
+    "https://websitehomjee2026.netlify.app/",
+    "https://adminpanelhomjee.netlify.app/",
+    "https://websitehomjee.netlify.app/",
+    "http://localhost:5173",
+    "http://localhost:5174",
+  ],
+  optionsSuccessStatus: 200,
+};
 
 app.use(express.json());
 app.use(morgan("dev"));
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(bodyParser.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ limit: "50mb", extended: true }));
 app.use("/public", express.static("public"));
