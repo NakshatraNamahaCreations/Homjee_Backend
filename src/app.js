@@ -11,12 +11,16 @@ const {
 const app = express();
 
 // console.log("Razorpay key present:", !!process.env.RAZORPAY_KEY_ID);
+// NOTE: Origin values must NOT have a trailing slash. The browser's
+// `Origin` header is always `scheme://host[:port]` (no path/slash), so
+// any entry ending in "/" will fail the equality check and CORS will
+// silently reject the preflight.
 const corsOptions = {
   origin: [
-    "https://homjeeadmin2026.netlify.app/",
-    "https://websitehomjee2026.netlify.app/",
-    "https://adminpanelhomjee.netlify.app/",
-    "https://websitehomjee.netlify.app/",
+    "https://homjeeadmin2026.netlify.app",
+    "https://websitehomjee2026.netlify.app",
+    "https://adminpanelhomjee.netlify.app",
+    "https://websitehomjee.netlify.app",
     "http://localhost:5173",
     "http://localhost:5174",
   ],
