@@ -778,13 +778,15 @@ exports.createEnquiryLead = async (req, res) => {
     await booking.save();
 
     // Fire-and-forget admin notification; don't fail the request if it errors.
+    // Distinct notificationType so the admin panel routes the click to
+    // /enquiry-details/:id instead of /lead-details/:id.
     try {
       await notificationSchema.create({
         bookingId: booking._id,
-        notificationType: "NEW_LEAD_CREATED",
-        thumbnailTitle: "New OTP-verified lead",
+        notificationType: "NEW_ENQUIRY_CREATED",
+        thumbnailTitle: "New Enquiry",
         notifyTo: "admin",
-        message: `New ${serviceType.replace(/_/g, " ")} lead from ${customer.name || "customer"} (${customer.phone})`,
+        message: `New ${serviceType.replace(/_/g, " ")} enquiry from ${customer.name || "customer"} (${customer.phone})`,
         status: "unread",
         created_at: new Date(),
       });
@@ -7351,6 +7353,22 @@ exports.updateEnquiry = async (req, res) => {
       booking.serviceType ||
       detectServiceType(formName, service || booking.service);
 
+    // If the finalize call is going to create a Razorpay order, we MUST
+    // keep isEnquiry:true until makePayment verifies the signature. The
+    // client may send isEnquiry:false in the payload (it doesn't yet know
+    // payment hasn't gone through) — overriding that here prevents the
+    // doc from being stuck "not an enquiry" after a failed/cancelled pay,
+    // which used to make subsequent "Proceed to Pay" clicks fail with 400.
+    const incomingSiteVisit = Number(
+      data?.bookingDetails?.siteVisitCharges ??
+        booking.bookingDetails?.siteVisitCharges ??
+        0,
+    );
+    const willPayOnline =
+      !!finalize &&
+      (serviceType === "deep_cleaning" ||
+        (serviceType === "house_painting" && incomingSiteVisit > 0));
+
     // Enrich customer (name/phone may have been collected at OTP time only)
     if (customer) {
       booking.customer = booking.customer || {};
@@ -7412,9 +7430,12 @@ exports.updateEnquiry = async (req, res) => {
         }));
       }
 
-      // Allow caller to flip isEnquiry (used by the site-visit-free confirm flow)
-      if (typeof data.isEnquiry === "boolean")
-        booking.isEnquiry = data.isEnquiry;
+      // Allow caller to flip isEnquiry (used by the site-visit-free confirm
+      // flow). When an online payment is pending, force-keep it true so a
+      // failed/cancelled pay doesn't leave the doc stuck non-enquiry.
+      if (typeof data.isEnquiry === "boolean") {
+        booking.isEnquiry = willPayOnline ? true : data.isEnquiry;
+      }
     }
     //========================================================
     // 📌 DEEP CLEANING — full update (service + amounts)
@@ -7480,7 +7501,10 @@ exports.updateEnquiry = async (req, res) => {
         booking.selectedSlot = { ...booking.selectedSlot, ...selectedSlot };
       }
 
-      if (typeof isEnquiry === "boolean") booking.isEnquiry = isEnquiry;
+      // Force-keep isEnquiry:true when an online payment is pending.
+      if (typeof isEnquiry === "boolean") {
+        booking.isEnquiry = willPayOnline ? true : isEnquiry;
+      }
       if (formName) booking.formName = formName;
     }
 
