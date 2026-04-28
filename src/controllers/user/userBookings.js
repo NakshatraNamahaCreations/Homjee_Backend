@@ -7463,11 +7463,35 @@ exports.updateEnquiry = async (req, res) => {
         }));
       }
 
-      const bookingAmount = Number(bookingDetails.bookingAmount || 0);
-      const finalTotal = Number(bookingDetails.finalTotal || 0);
+      // Compute the cart total from whichever service array we have (the
+      // newly-incoming one takes precedence; otherwise use what's already
+      // on the booking). Mirrors createBooking's logic so finalize works
+      // even when the client hasn't pre-computed bookingAmount/finalTotal.
+      const sourceServices = Array.isArray(service) && service.length
+        ? service
+        : (booking.service || []);
+      const computedTotal = sourceServices.reduce(
+        (sum, s) =>
+          sum + Number(s?.price || 0) * (Number(s?.quantity) || 1),
+        0,
+      );
+
+      // Prefer explicit values from the client; fall back to computed.
+      const explicitFinalTotal = Number(bookingDetails.finalTotal || 0);
+      const finalTotal =
+        explicitFinalTotal > 0 ? explicitFinalTotal : computedTotal;
+
+      const explicitBookingAmount = Number(bookingDetails.bookingAmount || 0);
+      // Deep cleaning collects 20% online as the first installment.
+      const bookingAmount =
+        explicitBookingAmount > 0
+          ? explicitBookingAmount
+          : Math.round(finalTotal * 0.2);
+
       const paidAmount = Number(bookingDetails.paidAmount || 0);
       const amountYetToPay = Math.max(0, finalTotal - bookingAmount);
 
+      booking.bookingDetails.originalTotalAmount = finalTotal;
       booking.bookingDetails.finalTotal = finalTotal;
       booking.bookingDetails.bookingAmount = bookingAmount;
       booking.bookingDetails.paidAmount = paidAmount;
