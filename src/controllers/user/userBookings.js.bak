@@ -20,34 +20,6 @@ const {
 const Razorpay = require("razorpay");
 const { getRazorpayClient } = require("../../payments/razorpay.client");
 const { verifyRazorpaySignature } = require("../../payments/razorpay.util");
-const {
-  computeVendorStatus,
-  ACTIVE_PROJECT_STATUSES: VENDOR_ACTIVE_PROJECT_STATUSES,
-} = require("../../helpers/vendorStatus");
-
-// Local copy of the batch-loader from vendor controller — kept here so
-// gate logic on lead-distribution endpoints doesn't pull in the vendor
-// controller (avoids circular requires).
-async function loadActiveHiringsForVendor(vendorId) {
-  try {
-    if (!vendorId) return [];
-    return await UserBooking.find({
-      "assignedProfessional.professionalId": String(vendorId),
-      "bookingDetails.status": {
-        $in: Array.from(VENDOR_ACTIVE_PROJECT_STATUSES),
-      },
-      $or: [
-        { "assignedProfessional.hiring.status": "active" },
-        { "assignedProfessional.hiring.status": { $exists: false } },
-      ],
-    })
-      .select("assignedProfessional bookingDetails.status")
-      .lean();
-  } catch (e) {
-    console.error("loadActiveHiringsForVendor error:", e);
-    return [];
-  }
-}
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
 const redirectionUrl =
@@ -3449,32 +3421,6 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       return res.status(400).json({ message: "Coordinates required" });
     }
 
-    // If the client passes vendorId, gate lead visibility on the vendor's
-    // computed status. Backwards compatible: omitting vendorId behaves
-    // exactly as before. Surfaces { allowed: false, status } so the app
-    // can show the right "why no leads?" message.
-    const callerVendorId = String(req.query.vendorId || "").trim();
-    if (callerVendorId) {
-      try {
-        const v = await vendorAuthSchema.findById(callerVendorId).lean();
-        if (v) {
-          const activeBookings = await loadActiveHiringsForVendor(v._id);
-          const status = computeVendorStatus(v, { activeBookings });
-          if (status !== "live") {
-            return res.json({
-              success: true,
-              bookings: [],
-              vendorStatus: status,
-              allowed: false,
-            });
-          }
-        }
-      } catch (e) {
-        console.error("vendor status gate (deep_cleaning) failed:", e);
-        // Fall through — never let the gate hard-fail the existing flow.
-      }
-    }
-
     const now = new Date();
 
     const todayStart = new Date(
@@ -3558,30 +3504,6 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
     }
     if (!lat || !long) {
       return res.status(400).json({ message: "Coordinates required" });
-    }
-
-    // Vendor-status gate (same as deep_cleaning version). Optional via
-    // ?vendorId=... — backwards compatible if not passed.
-    const callerVendorId = String(req.query.vendorId || "").trim();
-    if (callerVendorId) {
-      try {
-        const v = await vendorAuthSchema.findById(callerVendorId).lean();
-        if (v) {
-          const activeBookings = await loadActiveHiringsForVendor(v._id);
-          const status = computeVendorStatus(v, { activeBookings });
-          if (status !== "live") {
-            return res.status(200).json({
-              success: true,
-              bookings: [],
-              vendorStatus: status,
-              allowed: false,
-            });
-          }
-        }
-      } catch (e) {
-        console.error("vendor status gate (house_painting) failed:", e);
-        // Fall through — never let the gate hard-fail the existing flow.
-      }
     }
 
     const now = new Date();

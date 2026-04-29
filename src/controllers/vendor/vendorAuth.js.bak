@@ -15,58 +15,6 @@ const {
   reservePhone,
   movePhone,
 } = require("../../helpers/phoneRegistry");
-const {
-  computeVendorStatus,
-  describeStatus,
-  ACTIVE_PROJECT_STATUSES,
-} = require("../../helpers/vendorStatus");
-
-// Batch-fetches the active hiring bookings for a list of vendor ids and
-// returns a Map<vendorId, [bookings]> so each vendor's status can be
-// resolved without an N+1.
-async function buildActiveBookingsMap(vendorIds) {
-  try {
-    if (!Array.isArray(vendorIds) || vendorIds.length === 0) return new Map();
-    const ids = vendorIds.map(String);
-    const bookings = await userBooking
-      .find({
-        "assignedProfessional.professionalId": { $in: ids },
-        "bookingDetails.status": { $in: Array.from(ACTIVE_PROJECT_STATUSES) },
-        $or: [
-          { "assignedProfessional.hiring.status": "active" },
-          { "assignedProfessional.hiring.status": { $exists: false } },
-        ],
-      })
-      .select("assignedProfessional bookingDetails.status")
-      .lean();
-
-    const map = new Map();
-    for (const b of bookings) {
-      const pid = String(b?.assignedProfessional?.professionalId || "");
-      if (!pid) continue;
-      if (!map.has(pid)) map.set(pid, []);
-      map.get(pid).push(b);
-    }
-    return map;
-  } catch (e) {
-    console.error("buildActiveBookingsMap error:", e);
-    return new Map();
-  }
-}
-
-// Adds a derived `status` field (and label/color) to a vendor object.
-// Doesn't mutate the input — returns a shallow-merged plain object.
-function withStatus(vendor, activeBookings = []) {
-  try {
-    const v = vendor?.toObject ? vendor.toObject() : { ...(vendor || {}) };
-    const status = computeVendorStatus(v, { activeBookings });
-    const desc = describeStatus(status);
-    return { ...v, status, statusLabel: desc.label, statusColor: desc.color };
-  } catch (e) {
-    console.error("withStatus error:", e);
-    return vendor;
-  }
-}
 function generateOTP() {
   return crypto.randomInt(1000, 10000);
 }
@@ -1868,17 +1816,10 @@ exports.getVendorByVendorId = async (req, res) => {
       // console.log("Vendor Not Found");
       return res.status(400).json({ message: "Vendor Not Found" });
     }
-
-    // Attach derived status (live / low_coins / team_unavailable / archived).
-    // Pulls just this vendor's active hirings so the team-unavailable
-    // computation has data; failure is swallowed inside withStatus.
-    const map = await buildActiveBookingsMap([vendor._id]);
-    const enriched = withStatus(vendor, map.get(String(vendor._id)) || []);
-
     res.status(200).json({
       status: true,
       message: "Vendor Found",
-      vendor: enriched,
+      vendor,
     });
   } catch (error) {
     console.log(error);
@@ -1993,17 +1934,10 @@ exports.getAllVendors = async (req, res) => {
       return res.status(404).json({ message: "Vendor Not Found" });
     }
 
-    // Batch-fetch active hirings for this page's vendors so each row gets
-    // its derived status without an N+1.
-    const map = await buildActiveBookingsMap(vendor.map((v) => v._id));
-    const enrichedVendors = vendor.map((v) =>
-      withStatus(v, map.get(String(v._id)) || []),
-    );
-
     return res.status(200).json({
       status: true,
       message: "Vendor Found",
-      vendor: enrichedVendors,
+      vendor,
       pagination: {
         page,
         limit,
