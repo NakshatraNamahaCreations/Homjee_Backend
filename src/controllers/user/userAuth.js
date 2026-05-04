@@ -10,6 +10,15 @@ exports.saveUser = async (req, res) => {
       return res.status(400).json({ message: "Mobile number is required" });
     }
 
+    // Schema stores mobileNumber as Number — reject non-numeric input here
+    // so Mongoose doesn't throw a 500 cast error on values like "kiruthika".
+    const digits = String(mobileNumber).trim();
+    if (!/^[0-9]{10}$/.test(digits)) {
+      return res.status(400).json({
+        message: "Mobile number must be 10 digits",
+      });
+    }
+
     // Generate OTP and expiry
     const otp = crypto.randomInt(1000, 10000);
     const expiry = new Date(Date.now() + 60 * 1000);

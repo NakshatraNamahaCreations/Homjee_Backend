@@ -1,231 +1,49 @@
-// const RADIUS_KM = 5;
-// const TRAVEL_MIN = 30;
-
-// const DAY_START = 8 * 60;              // 08:00 AM (slot start from here)
-// const DAY_SERVICE_END = 20.5 * 60;     // 08:30 PM (service must finish by this)
-// const DAY_TRAVEL_END = DAY_SERVICE_END + TRAVEL_MIN; // 09:00 PM (travel-after buffer)
-
-
-// /* ================= HELPERS ================= */
-
-// function toMinutes(time) {
-//   const [t, mer] = time.split(" ");
-//   let [h, m] = t.split(":").map(Number);
-//   if (mer === "PM" && h !== 12) h += 12;
-//   if (mer === "AM" && h === 12) h = 0;
-//   return h * 60 + m;
-// }
-
-// function toTime(min) {
-//   let h = Math.floor(min / 60);
-//   let m = min % 60;
-//   const mer = h >= 12 ? "PM" : "AM";
-//   if (h > 12) h -= 12;
-//   if (h === 0) h = 12;
-//   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${mer}`;
-// }
-
-// function haversine(lat1, lon1, lat2, lon2) {
-//   const R = 6371;
-//   const dLat = ((lat2 - lat1) * Math.PI) / 180;
-//   const dLon = ((lon2 - lon1) * Math.PI) / 180;
-//   const a =
-//     Math.sin(dLat / 2) ** 2 +
-//     Math.cos((lat1 * Math.PI) / 180) *
-//       Math.cos((lat2 * Math.PI) / 180) *
-//       Math.sin(dLon / 2) ** 2;
-//   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-// }
-
-// function getStartMinute(date) {
-//   const today = new Date();
-//   const req = new Date(date);
-
-//   if (
-//     today.getFullYear() !== req.getFullYear() ||
-//     today.getMonth() !== req.getMonth() ||
-//     today.getDate() !== req.getDate()
-//   ) {
-//     return DAY_START;
+// Computes available time slots for a service request.
+//
+// Inputs:
+//   vendors       — already filtered through the eligibility pipeline
+//                   (archived/radius/coins/team/KPI). The engine only
+//                   does TIME-BLOCK math, not eligibility.
+//   bookings      — confirmed bookings on the requested date that
+//                   could clash with the requested time window.
+//   activeHolds   — Redis-held reservations (pending payments) that
+//                   should also block their vendor for that window.
+//   serviceType   — "deep_cleaning" | "house_painting"
+//   serviceDuration — minutes (DC: sum of selected packages, HP: 30)
+//   minTeamMembers  — DC only; ignored for HP
+//   date           — "YYYY-MM-DD"
+//   lat, lng       — customer location (used elsewhere in the pipeline,
+//                    kept here for past compatibility / debug)
+//
+// Output:
+//   {
+//     slots: ["08:00 AM", "09:00 AM", ...],  // backward-compat list
+//     slotsWithVendors: [{ slotTime, vendorIds }],
+//     reasons: { noResources, allBooked },
+//     availableVendorsCount
 //   }
 
-//   const nowMin = today.getHours() * 60 + today.getMinutes();
-//   return Math.ceil(nowMin / 30) * 30;
-// }
-
-// /* ================= MAIN ================= */
-
-// function calculateAvailableSlots({
-//   vendors,
-//   bookings,
-//   serviceType,
-//   serviceDuration,
-//   minTeamMembers,
-//   date,
-//   lat,
-//   lng,
-// }) {
-//   console.log("\n================ SLOT CALCULATION START ================");
-//   console.table({ date, lat, lng, serviceDuration, minTeamMembers });
-
-//   const vendorResources = {};
-//   const reasons = {
-//     outsideRadius: false,
-//     noResources: false,
-//     allBooked: false,
-//   };
-
-//   /* ================= STEP 1: FILTER VENDORS ================= */
-
-//   vendors.forEach((v) => {
-//     if (!v.address) return;
-
-//     const dist = haversine(lat, lng, v.address.latitude, v.address.longitude);
-
-//     console.log(
-//       `📍 Vendor ${v.vendor?.vendorName || v._id} distance: ${dist.toFixed(
-//         2
-//       )} km`
-//     );
-
-//     if (dist > RADIUS_KM) {
-//       reasons.outsideRadius = true;
-//       return;
-//     }
-
-//     if (serviceType === "deep_cleaning") {
-//       const availableTeam = (v.team || []).filter(
-//         (m) => !m.markedLeaves?.includes(date)
-//       );
-
-//       console.log(`   👥 Team available: ${availableTeam.length}`);
-
-//       if (availableTeam.length >= minTeamMembers) {
-//         vendorResources[v._id.toString()] = true;
-//         console.log("   ✅ VENDOR ELIGIBLE (DEEP CLEANING)");
-//       }
-//     } else {
-//       vendorResources[v._id.toString()] = true;
-//       console.log("   ✅ VENDOR ELIGIBLE (HOUSE PAINTING)");
-//     }
-//   });
-
-//   const eligibleVendors = Object.keys(vendorResources);
-
-//   if (!eligibleVendors.length) {
-//     reasons.noResources = true;
-//     return { slots: [], reasons, availableVendorsCount: 0 };
-//   }
-
-//   /* ================= STEP 2: BLOCKED WINDOWS ================= */
-
-//   const blocked = {};
-
-//   bookings.forEach((b) => {
-//     const start = toMinutes(b.selectedSlot.slotTime);
-//     const duration =
-//       b.serviceType === "house_painting"
-//         ? 30
-//         : b.bookingDetails?.serviceDurationMinutes;
-
-//     if (!duration) return;
-
-//     const blockStart = start - TRAVEL_MIN;
-//     const blockEnd = start + duration + TRAVEL_MIN;
-
-//     const vendorId = b.assignedProfessional?.vendorId;
-//     if (!vendorId) return;
-
-//     blocked[vendorId] = blocked[vendorId] || [];
-//     blocked[vendorId].push({ start: blockStart, end: blockEnd });
-
-//     console.log(
-//       `🔒 Vendor ${vendorId} blocked ${toTime(blockStart)} → ${toTime(
-//         blockEnd
-//       )}`
-//     );
-//   });
-
-//   /* ================= STEP 3: SLOT CHECK ================= */
-
-//   const slots = [];
-// const startMin = Math.max(DAY_START, getStartMinute(date));
-
-// // ✅ Last possible START time such that service ends by 8:30 PM
-// const maxStart = DAY_SERVICE_END - serviceDuration;
-
-// console.log("⏱ Slot generation window:", {
-//   startFrom: toTime(startMin),
-//   endAt: toTime(maxStart),
-// });
-
-
-
-//   for (let slotStart = startMin; slotStart <= maxStart; slotStart += 30) {
-//     // 🚫 ABSOLUTE PAST SLOT BLOCK
-//     if (slotStart < getStartMinute(date)) {
-//       console.log(`⏭ Skipping past slot ${toTime(slotStart)}`);
-//       continue;
-//     }
-
-//     // ✅ FIX: travel + service + travel window
-//     const candidateStart = slotStart - TRAVEL_MIN; // travel before
-//     const candidateEnd = slotStart + serviceDuration + TRAVEL_MIN; // service + travel after
-
-//     // ✅ ensure vendor can finish travel-after within day travel end
-//     if (candidateEnd > DAY_TRAVEL_END) continue;
-
-//     const slotLabel = toTime(slotStart);
-//     console.log(`\n🕒 Checking slot: ${slotLabel}`);
-
-//     let available = false;
-
-//     for (const vId of eligibleVendors) {
-//       const blocks = blocked[vId] || [];
-
-//       // ✅ FIX: clash check must use candidateStart/candidateEnd
-//       const clash = blocks.some(
-//         (b) => candidateStart < b.end && candidateEnd > b.start
-//       );
-
-//       if (!clash) {
-//         console.log(`   🟢 Vendor ${vId} can handle this slot`);
-//         available = true;
-//         break;
-//       }
-//     }
-
-//     if (available) slots.push(slotLabel);
-//     else reasons.allBooked = true;
-//   }
-
-//   console.log("\n================ FINAL RESULT ================");
-//   console.log("AVAILABLE SLOTS:", slots);
-//   console.log("ELIGIBLE VENDORS:", eligibleVendors.length);
-//   console.log("================ SLOT CALC END ================\n");
-
-//   return {
-//     slots,
-//     reasons,
-//     availableVendorsCount: eligibleVendors.length,
-//   };
-// }
-
-// module.exports = { calculateAvailableSlots };
-
-// old working code
-const RADIUS_KM = 10; // 10 km radius
 const TRAVEL_MIN = 30;
 
-const DAY_START = 8 * 60; // 08:00 AM
-const DAY_END = 20 * 60; // 08:00 PM
-const DAY_TRAVEL_END = 20.5 * 60; // 08:30 PM
+const DAY_START = 8 * 60;       // 08:00 — earliest service start
+const DAY_END = 20 * 60;        // 20:00 — latest service END (must finish by)
+// DAY_TRAVEL_END = 20*60 + 30 = 20:30. Implied by maxStart math; we don't
+// need a separate constant because maxStart = DAY_END - serviceDuration
+// already guarantees travel-after fits.
 
-/* ================= HELPERS ================= */
+const HP_DURATION = 30;         // House painting site visit fixed at 30 min
+const HP_GRID_MIN = 60;         // Spec: HP slots on the hour
+const DC_GRID_MIN = 30;         // Spec: DC slots on 30-min grid
+
+/* ================= TIME HELPERS ================= */
 
 function toMinutes(time) {
-  const [t, mer] = time.split(" ");
-  let [h, m] = t.split(":").map(Number);
+  if (!time || typeof time !== "string") return null;
+  const parts = time.split(" ");
+  if (parts.length !== 2) return null;
+  const [hhmm, mer] = parts;
+  let [h, m] = hhmm.split(":").map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
   if (mer === "PM" && h !== 12) h += 12;
   if (mer === "AM" && h === 12) h = 0;
   return h * 60 + m;
@@ -233,39 +51,59 @@ function toMinutes(time) {
 
 function toTime(min) {
   let h = Math.floor(min / 60);
-  let m = min % 60;
+  const m = min % 60;
   const mer = h >= 12 ? "PM" : "AM";
   if (h > 12) h -= 12;
   if (h === 0) h = 12;
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")} ${mer}`;
 }
 
-function haversine(lat1, lon1, lat2, lon2) {
+function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLon = ((lon2 - lon1) * Math.PI) / 180;
   const a =
     Math.sin(dLat / 2) ** 2 +
     Math.cos((lat1 * Math.PI) / 180) *
-    Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLon / 2) ** 2;
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function getStartMinute(date) {
-  const today = new Date();
+// Earliest slot we'll show for `date`. For today, round up to the next
+// grid step from "now"; for future dates, the day starts at 8:00 AM.
+function earliestStartForDate(date, gridMin) {
+  const now = new Date();
   const req = new Date(date);
+  const sameDay =
+    now.getFullYear() === req.getFullYear() &&
+    now.getMonth() === req.getMonth() &&
+    now.getDate() === req.getDate();
+  if (!sameDay) return DAY_START;
 
-  if (
-    today.getFullYear() !== req.getFullYear() ||
-    today.getMonth() !== req.getMonth() ||
-    today.getDate() !== req.getDate()
-  ) {
-    return DAY_START;
-  }
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  return Math.ceil(nowMin / gridMin) * gridMin;
+}
 
-  const nowMin = today.getHours() * 60 + today.getMinutes();
-  return Math.ceil(nowMin / 30) * 30;
+/* ================= BLOCK MODEL =================
+   We model each commitment (booking OR hold) as a one-sided window
+       [serviceStart, serviceEnd + TRAVEL_MIN]
+   and use STRICT inequalities on the clash check. This matches the spec's
+   "inter-customer buffer" rule where the outbound + inbound 30-min legs
+   between two adjacent jobs OVERLAP into a single 30-min gap. Two-sided
+   buffers (the old code) would double-count this gap.
+================================================== */
+
+function blockFromCommitment(serviceStartMin, durationMin) {
+  return {
+    start: serviceStartMin,
+    end: serviceStartMin + durationMin + TRAVEL_MIN,
+  };
+}
+
+function durationFromBooking(b) {
+  if (b.serviceType === "house_painting") return HP_DURATION;
+  return Number(b.bookingDetails?.serviceDurationMinutes) || 0;
 }
 
 /* ================= MAIN ================= */
@@ -273,6 +111,7 @@ function getStartMinute(date) {
 function calculateAvailableSlots({
   vendors,
   bookings,
+  activeHolds = [],
   serviceType,
   serviceDuration,
   minTeamMembers,
@@ -280,146 +119,127 @@ function calculateAvailableSlots({
   lat,
   lng,
 }) {
-  // console.log("\n================ SLOT CALCULATION START ================");
-  // console.table({ date, lat, lng, serviceDuration, minTeamMembers });
-
-  const vendorResources = {};
   const reasons = {
-    outsideRadius: false,
     noResources: false,
     allBooked: false,
   };
 
-  /* ================= STEP 1: FILTER VENDORS ================= */
+  if (!Array.isArray(vendors) || vendors.length === 0) {
+    reasons.noResources = true;
+    return {
+      slots: [],
+      slotsWithVendors: [],
+      reasons,
+      availableVendorsCount: 0,
+    };
+  }
 
-  vendors.forEach((v) => {
-    if (!v.address) return;
-
-    const dist = haversine(lat, lng, v.address.latitude, v.address.longitude);
-
-    // console.log(
-    //   `📍 Vendor ${v.vendor?.vendorName || v._id} distance: ${dist.toFixed(
-    //     2
-    //   )} km`
-    // );
-
-    if (dist > RADIUS_KM) {
-      reasons.outsideRadius = true;
-      return;
-    }
-
-    if (serviceType === "deep_cleaning") {
-      const availableTeam = (v.team || []).filter(
-        (m) => !m.markedLeaves?.includes(date)
-      );
-
-      // console.log(`   👥 Team available: ${availableTeam.length}`);
-
-      if (availableTeam.length >= minTeamMembers) {
-        vendorResources[v._id.toString()] = true;
-        // console.log("   ✅ VENDOR ELIGIBLE (DEEP CLEANING)");
-      }
-    } else {
-      vendorResources[v._id.toString()] = true;
-      // console.log("   ✅ VENDOR ELIGIBLE (HOUSE PAINTING)");
-    }
-  });
-
-  const eligibleVendors = Object.keys(vendorResources);
+  // For DC, also enforce per-date team headcount via leaves. (Distance,
+  // archive, coins, KPI gates run in the controller before us — we only
+  // see eligible vendors here. The leave check is date-specific so it
+  // lives here next to the time math.)
+  const eligibleVendors =
+    serviceType === "deep_cleaning"
+      ? vendors.filter((v) => {
+          const team = Array.isArray(v.team) ? v.team : [];
+          const free = team.filter(
+            (m) => !(m.markedLeaves || []).includes(date),
+          );
+          return free.length >= (minTeamMembers || 1);
+        })
+      : vendors;
 
   if (!eligibleVendors.length) {
     reasons.noResources = true;
-    return { slots: [], reasons, availableVendorsCount: 0 };
+    return {
+      slots: [],
+      slotsWithVendors: [],
+      reasons,
+      availableVendorsCount: 0,
+    };
   }
 
-  /* ================= STEP 2: BLOCKED WINDOWS ================= */
+  /* ---- Build per-vendor blocked windows from bookings + holds ---- */
 
-  const blocked = {};
+  const blocked = new Map(); // vendorId -> [{start, end}]
+  const pushBlock = (vendorId, block) => {
+    const key = String(vendorId);
+    if (!blocked.has(key)) blocked.set(key, []);
+    blocked.get(key).push(block);
+  };
 
-  bookings.forEach((b) => {
-    const start = toMinutes(b.selectedSlot.slotTime);
-    const duration =
-      b.serviceType === "house_painting"
-        ? 30
-        : b.bookingDetails?.serviceDurationMinutes;
+  for (const b of bookings) {
+    // FIX: schema field is `professionalId`, not `vendorId`. Old code used
+    // `vendorId` so the entire blocked-windows map was empty in production.
+    const vid = b.assignedProfessional?.professionalId;
+    if (!vid) continue;
 
-    if (!duration) return;
+    const startMin = toMinutes(b.selectedSlot?.slotTime);
+    const dur = durationFromBooking(b);
+    if (startMin == null || !dur) continue;
 
-    const blockStart = start - TRAVEL_MIN;
-    const blockEnd = start + duration + TRAVEL_MIN;
+    pushBlock(vid, blockFromCommitment(startMin, dur));
+  }
 
-    const vendorId = b.assignedProfessional?.vendorId;
-    if (!vendorId) return;
+  for (const h of activeHolds) {
+    const startMin = toMinutes(h.slotTime);
+    const dur = Number(h.durationMinutes) || 0;
+    if (!h.vendorId || startMin == null || !dur) continue;
+    pushBlock(h.vendorId, blockFromCommitment(startMin, dur));
+  }
 
-    blocked[vendorId] = blocked[vendorId] || [];
-    blocked[vendorId].push({ start: blockStart, end: blockEnd });
+  /* ---- Generate the slot grid ---- */
 
-    // console.log(
-    //   `🔒 Vendor ${vendorId} blocked ${toTime(blockStart)} → ${toTime(
-    //     blockEnd
-    //   )}`
-    // );
-  });
-
-  /* ================= STEP 3: SLOT CHECK ================= */
-
-  const slots = [];
-  const startMin = Math.max(DAY_START, getStartMinute(date));
+  const gridMin = serviceType === "house_painting" ? HP_GRID_MIN : DC_GRID_MIN;
+  const startFloor = Math.max(DAY_START, earliestStartForDate(date, gridMin));
   const maxStart = DAY_END - serviceDuration;
 
-  // console.log("⏱ Slot generation window:", {
-  //   startFrom: toTime(startMin),
-  //   endAt: toTime(maxStart),
-  // });
+  const slots = [];
+  const slotsWithVendors = [];
 
-  for (let slotStart = startMin; slotStart <= maxStart; slotStart += 30) {
-    // 🚫 ABSOLUTE PAST SLOT BLOCK
-    if (slotStart < getStartMinute(date)) {
-      // console.log(`⏭ Skipping past slot ${toTime(slotStart)}`);
-      continue;
-    }
+  for (let s = startFloor; s <= maxStart; s += gridMin) {
+    // For HP, align the iteration to the hourly grid even if startFloor
+    // landed on a half-hour due to "now".
+    if (serviceType === "house_painting" && s % HP_GRID_MIN !== 0) continue;
 
-    // ✅ FIX: travel + service + travel window
-    const candidateStart = slotStart - TRAVEL_MIN; // travel before
-    const candidateEnd = slotStart + serviceDuration + TRAVEL_MIN; // service + travel after
+    const candidate = blockFromCommitment(s, serviceDuration);
+    const freeVendorIds = [];
 
-    // ✅ ensure vendor can finish travel-after within day travel end
-    if (candidateEnd > DAY_TRAVEL_END) continue;
-
-    const slotLabel = toTime(slotStart);
-    // console.log(`\n🕒 Checking slot: ${slotLabel}`);
-
-    let available = false;
-
-    for (const vId of eligibleVendors) {
-      const blocks = blocked[vId] || [];
-
-      // ✅ FIX: clash check must use candidateStart/candidateEnd
-      const clash = blocks.some(
-        (b) => candidateStart < b.end && candidateEnd > b.start
+    for (const v of eligibleVendors) {
+      const vBlocks = blocked.get(String(v._id)) || [];
+      // Strict <  /  > so adjacent windows touching at a boundary don't clash.
+      const clash = vBlocks.some(
+        (b) => candidate.start < b.end && candidate.end > b.start,
       );
-
-      if (!clash) {
-        // console.log(`   🟢 Vendor ${vId} can handle this slot`);
-        available = true;
-        break;
-      }
+      if (!clash) freeVendorIds.push(String(v._id));
     }
 
-    if (available) slots.push(slotLabel);
-    else reasons.allBooked = true;
+    if (freeVendorIds.length) {
+      const label = toTime(s);
+      slots.push(label);
+      slotsWithVendors.push({ slotTime: label, vendorIds: freeVendorIds });
+    } else {
+      reasons.allBooked = true;
+    }
   }
-
-  // console.log("\n================ FINAL RESULT ================");
-  // console.log("AVAILABLE SLOTS:", slots);
-  // console.log("ELIGIBLE VENDORS:", eligibleVendors.length);
-  // console.log("================ SLOT CALC END ================\n");
 
   return {
     slots,
+    slotsWithVendors,
     reasons,
     availableVendorsCount: eligibleVendors.length,
   };
 }
 
-module.exports = { calculateAvailableSlots };
+module.exports = {
+  calculateAvailableSlots,
+  haversineKm,
+  toMinutes,
+  toTime,
+  TRAVEL_MIN,
+  DAY_START,
+  DAY_END,
+  HP_DURATION,
+  HP_GRID_MIN,
+  DC_GRID_MIN,
+};

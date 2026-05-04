@@ -70,6 +70,10 @@ const vendorAuthSchema = new mongoose.Schema({
   address: addressDetails,
   bankDetails: accountInfo,
   activeStatus: Boolean,
+  // Per-vendor service radius in km (admin-configurable).
+  // Used by the slot engine to filter vendors by haversine distance to
+  // the customer address. Falls back to 10 km if not set.
+  serviceRadiusKm: { type: Number, default: 10, min: 1 },
   isArchived: { type: Boolean, default: false },
   archivedAt: { type: Date },
   archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "admin" },

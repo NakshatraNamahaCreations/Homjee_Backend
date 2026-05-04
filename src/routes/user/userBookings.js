@@ -17,6 +17,14 @@ router.get("/get-pending-leads", bookingController.getPendingLeads);
 // 🔹 NEW — Get all leads except Pending
 router.get("/get-non-pending-leads", bookingController.getNonPendingLeads);
 
+// 🔹 New Lead — list of vendors already notified for a booking, and admin
+//    re-notify any city vendor (regardless of availability).
+router.get(
+  "/notified-vendors/:bookingId",
+  bookingController.getNotifiedVendorsForBooking
+);
+router.post("/notify-vendor", bookingController.notifyVendorForLead);
+
 router.get(
   "/get-bookings-by-bookingid/:id",
   bookingController.getBookingsByBookingId

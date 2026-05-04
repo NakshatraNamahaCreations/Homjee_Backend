@@ -24,6 +24,11 @@ const {
   computeVendorStatus,
   ACTIVE_PROJECT_STATUSES: VENDOR_ACTIVE_PROJECT_STATUSES,
 } = require("../../helpers/vendorStatus");
+const {
+  validateVendorSlotAvailable,
+  consumeHold,
+  computeBookingDuration,
+} = require("../../services/confirmBooking.service");
 
 // Local copy of the batch-loader from vendor controller — kept here so
 // gate logic on lead-distribution endpoints doesn't pull in the vendor
@@ -1041,6 +1046,32 @@ exports.createBooking = async (req, res) => {
     // ✅ IMPORTANT: do NOT push payments[] now
     const payments = [];
 
+    // Slot-conflict guard: only when a specific vendor is being assigned
+    // up-front. Most website flows leave assignedProfessional empty (vendor
+    // is picked later via invitedVendors → respondConfirmJobVendorLine,
+    // which has its own guard). This catches admin-direct-assign flows.
+    if (assignedProfessional?.professionalId && selectedSlot?.slotDate && selectedSlot?.slotTime) {
+      const dur = computeBookingDuration({
+        serviceType,
+        service: service.map((s) => ({ duration: Number(s.duration) || 0 })),
+      });
+      if (dur) {
+        try {
+          await validateVendorSlotAvailable({
+            vendorId: assignedProfessional.professionalId,
+            date: selectedSlot.slotDate,
+            slotTime: selectedSlot.slotTime,
+            durationMinutes: dur,
+          });
+        } catch (e) {
+          return res.status(e.status || 409).json({
+            success: false,
+            message: e.message || "Slot conflict",
+          });
+        }
+      }
+    }
+
     // ------------------------------
     // Create booking
     // ------------------------------
@@ -1948,6 +1979,30 @@ exports.adminCreateBooking = async (req, res) => {
         amount: paidAmount,
         providerRef: generateProviderRef(),
       });
+    }
+
+    // Slot-conflict guard: admin is assigning a specific vendor — verify
+    // that vendor doesn't already have an overlapping booking at this time.
+    if (assignedProfessional?.professionalId && selectedSlot?.slotDate && selectedSlot?.slotTime) {
+      const dur = computeBookingDuration({
+        serviceType,
+        service: service.map((s) => ({ duration: Number(s.duration) || 0 })),
+      });
+      if (dur) {
+        try {
+          await validateVendorSlotAvailable({
+            vendorId: assignedProfessional.professionalId,
+            date: selectedSlot.slotDate,
+            slotTime: selectedSlot.slotTime,
+            durationMinutes: dur,
+          });
+        } catch (e) {
+          return res.status(e.status || 409).json({
+            success: false,
+            message: e.message || "Slot conflict",
+          });
+        }
+      }
     }
 
     // -----------------------
@@ -3441,38 +3496,41 @@ exports.getOverallPerformance = async (req, res) => {
 exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
   try {
     const { lat, long } = req.params;
-    const isLow = String(req.query.isPerformanceLow || "0") === "1";
-    if (isLow) {
-      return res.json({ success: true, bookings: [] });
-    }
     if (!lat || !long) {
       return res.status(400).json({ message: "Coordinates required" });
     }
 
-    // If the client passes vendorId, gate lead visibility on the vendor's
-    // computed status. Backwards compatible: omitting vendorId behaves
-    // exactly as before. Surfaces { allowed: false, status } so the app
-    // can show the right "why no leads?" message.
+    // Lead visibility rule: every vendor sees the lead list — low coins,
+    // team unavailable, or low performance does NOT hide leads. Only
+    // archived vendors are blocked. The respond-action (accept) is what's
+    // gated on coins/perf; that gate lives in the respond endpoint.
+    // The reported `isPerformanceLow` query flag is intentionally ignored
+    // here for the same reason.
     const callerVendorId = String(req.query.vendorId || "").trim();
+    let vendorStatus = "live";
+    let isArchived = false;
+
     if (callerVendorId) {
       try {
         const v = await vendorAuthSchema.findById(callerVendorId).lean();
         if (v) {
+          isArchived = !!v.isArchived;
           const activeBookings = await loadActiveHiringsForVendor(v._id);
-          const status = computeVendorStatus(v, { activeBookings });
-          if (status !== "live") {
-            return res.json({
-              success: true,
-              bookings: [],
-              vendorStatus: status,
-              allowed: false,
-            });
-          }
+          vendorStatus = computeVendorStatus(v, { activeBookings });
         }
       } catch (e) {
         console.error("vendor status gate (deep_cleaning) failed:", e);
         // Fall through — never let the gate hard-fail the existing flow.
       }
+    }
+
+    if (isArchived) {
+      return res.status(200).json({
+        success: true,
+        bookings: [],
+        vendorStatus: "archived",
+        allowed: false,
+      });
     }
 
     const now = new Date();
@@ -3488,6 +3546,8 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     );
     const dayAfterTomorrowStr = dayAfterTomorrow.toISOString().slice(0, 10);
 
+    // 1) Geo-proximity bookings — always run (low coins / team unavailable /
+    //    low performance do NOT hide leads from the vendor's list).
     const nearbyBookings = await UserBooking.find({
       "address.location": {
         $near: {
@@ -3507,8 +3567,33 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       },
     }).sort({ createdAt: -1 });
 
+    // 2) Admin-invited bookings — included regardless of distance, so manual
+    //    notify from the admin panel reliably reaches the vendor.
+    const invitedBookings = callerVendorId
+      ? await UserBooking.find({
+          isEnquiry: false,
+          "service.category": "Deep Cleaning",
+          "bookingDetails.status": "Pending",
+          "selectedSlot.slotDate": {
+            $gte: todayStart,
+            $lt: dayAfterTomorrowStr,
+          },
+          "invitedVendors.professionalId": String(callerVendorId),
+        }).sort({ createdAt: -1 })
+      : [];
+
+    // Merge + dedupe by _id (geo first to preserve $near distance ordering)
+    const seen = new Set();
+    const mergedBookings = [];
+    for (const b of [...nearbyBookings, ...invitedBookings]) {
+      const id = String(b?._id || "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      mergedBookings.push(b);
+    }
+
     const nowMoment = moment();
-    const filteredBookings = nearbyBookings.filter((booking) => {
+    const filteredBookings = mergedBookings.filter((booking) => {
       const slotDateObj = booking.selectedSlot?.slotDate;
       const slotTimeStr = booking.selectedSlot?.slotTime;
       if (!slotDateObj || !slotTimeStr) return false;
@@ -3532,13 +3617,22 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       return false;
     });
 
+    // Surface vendorStatus so the app can show recharge prompts etc., but
+    // leads are returned regardless of status (only archived was blocked
+    // earlier in this handler).
+    const meta = callerVendorId ? { vendorStatus } : {};
+
     if (!filteredBookings.length) {
-      return res
-        .status(404)
-        .json({ message: "No bookings found near this location" });
+      return res.status(404).json({
+        message: "No bookings found near this location",
+        ...meta,
+      });
     }
 
-    res.status(200).json({ bookings: filteredBookings });
+    res.status(200).json({
+      bookings: filteredBookings,
+      ...meta,
+    });
   } catch (error) {
     console.error("Error finding nearby bookings:", error);
     res.status(500).json({ message: "Server error" });
@@ -3548,40 +3642,42 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
 exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
   try {
     const { lat, long } = req.params;
-    const isLow = String(req.query.isPerformanceLow || "0") === "1";
-    if (isLow) {
-      return res.status(200).json({
-        success: true,
-        isPerformanceLow: true,
-        bookings: [],
-      });
-    }
     if (!lat || !long) {
       return res.status(400).json({ message: "Coordinates required" });
     }
 
-    // Vendor-status gate (same as deep_cleaning version). Optional via
-    // ?vendorId=... — backwards compatible if not passed.
+    // Lead visibility rule: every vendor sees the lead list — low coins,
+    // team unavailable, or low performance does NOT hide leads. Only
+    // archived vendors are blocked. The respond-action (accept) is what's
+    // gated on coins/perf; that gate lives in the respond endpoint.
+    // The reported `isPerformanceLow` query flag is intentionally ignored
+    // here for the same reason.
     const callerVendorId = String(req.query.vendorId || "").trim();
+    let vendorStatus = "live";
+    let isArchived = false;
+
     if (callerVendorId) {
       try {
         const v = await vendorAuthSchema.findById(callerVendorId).lean();
         if (v) {
+          isArchived = !!v.isArchived;
           const activeBookings = await loadActiveHiringsForVendor(v._id);
-          const status = computeVendorStatus(v, { activeBookings });
-          if (status !== "live") {
-            return res.status(200).json({
-              success: true,
-              bookings: [],
-              vendorStatus: status,
-              allowed: false,
-            });
-          }
+          vendorStatus = computeVendorStatus(v, { activeBookings });
         }
       } catch (e) {
         console.error("vendor status gate (house_painting) failed:", e);
         // Fall through — never let the gate hard-fail the existing flow.
       }
+    }
+
+    if (isArchived) {
+      return res.status(200).json({
+        success: true,
+        isPerformanceLow: false,
+        bookings: [],
+        vendorStatus: "archived",
+        allowed: false,
+      });
     }
 
     const now = new Date();
@@ -3590,6 +3686,8 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
       new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1),
     );
 
+    // 1) Geo-proximity bookings — always run (low coins / team unavailable /
+    //    low performance do NOT hide leads from the vendor's list).
     const nearbyBookings = await UserBooking.find({
       "address.location": {
         $near: {
@@ -3606,9 +3704,31 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
       "selectedSlot.slotDate": { $gte: todayStr, $lte: tomorrowStr }, // today & tomorrow inclusive
     }).sort({ createdAt: -1 });
 
+    // 2) Admin-invited bookings — included regardless of distance, so manual
+    //    notify from the admin panel reliably reaches the vendor.
+    const invitedBookings = callerVendorId
+      ? await UserBooking.find({
+          isEnquiry: false,
+          "service.category": "House Painting",
+          "bookingDetails.status": "Pending",
+          "selectedSlot.slotDate": { $gte: todayStr, $lte: tomorrowStr },
+          "invitedVendors.professionalId": String(callerVendorId),
+        }).sort({ createdAt: -1 })
+      : [];
+
+    // Merge + dedupe (geo first to preserve $near ordering)
+    const seen = new Set();
+    const mergedBookings = [];
+    for (const b of [...nearbyBookings, ...invitedBookings]) {
+      const id = String(b?._id || "");
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      mergedBookings.push(b);
+    }
+
     // Keep future times for today, keep all for tomorrow
     const nowMoment = moment();
-    const filteredBookings = nearbyBookings.filter((booking) => {
+    const filteredBookings = mergedBookings.filter((booking) => {
       const slotDateStr = booking.selectedSlot?.slotDate; // "YYYY-MM-DD"
       const slotTimeStr = booking.selectedSlot?.slotTime; // "hh:mm AM/PM"
       if (!slotDateStr || !slotTimeStr) return false;
@@ -3628,16 +3748,23 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
       return false;
     });
 
+    // Surface vendorStatus so the app can show recharge prompts etc., but
+    // leads are returned regardless of status (only archived was blocked
+    // earlier in this handler).
+    const meta = callerVendorId ? { vendorStatus } : {};
+
     if (!filteredBookings.length) {
-      return res
-        .status(404)
-        .json({ message: "No bookings found near this location" });
+      return res.status(404).json({
+        message: "No bookings found near this location",
+        ...meta,
+      });
     }
 
     res.status(200).json({
       success: true,
       isPerformanceLow: false,
       bookings: filteredBookings,
+      ...meta,
     });
   } catch (error) {
     console.error("Error finding nearby bookings:", error);
@@ -3736,6 +3863,30 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
           );
           err.statusCode = 400;
           throw err;
+        }
+
+        // ✅ Slot-conflict guard: this vendor must not already have a
+        // non-cancelled booking whose time window overlaps. Runs inside
+        // the transaction so the read joins the same MVCC snapshot as
+        // the assignedProfessional update below.
+        const slotDate = booking2.selectedSlot?.slotDate;
+        const slotTime = booking2.selectedSlot?.slotTime;
+        const durationMinutes = computeBookingDuration(booking2);
+        if (slotDate && slotTime && durationMinutes) {
+          try {
+            await validateVendorSlotAvailable({
+              vendorId,
+              date: slotDate,
+              slotTime,
+              durationMinutes,
+              excludeBookingId: bookingId,
+              session,
+            });
+          } catch (e) {
+            const err = new Error(e?.message || "Slot conflict");
+            err.statusCode = e?.status || 409;
+            throw err; // aborts the transaction — coins won't be deducted
+          }
         }
       }
 
@@ -3844,6 +3995,23 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
         throw err;
       }
     });
+
+    // After successful commit: drop any Redis hold for this slot and
+    // invalidate the slot-availability cache so the next /available-slots
+    // call reflects the new booking. Best-effort — failures here don't
+    // affect the booking that just succeeded.
+    if (shouldChargeCoins && updatedBooking?.selectedSlot?.slotTime) {
+      try {
+        await consumeHold({
+          vendorId,
+          date: updatedBooking.selectedSlot.slotDate,
+          slotTime: updatedBooking.selectedSlot.slotTime,
+          holdId: req.body.holdId,
+        });
+      } catch (e) {
+        console.warn("[respondConfirm] hold cleanup failed:", e.message);
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -7545,12 +7713,12 @@ exports.updateEnquiry = async (req, res) => {
       // newly-incoming one takes precedence; otherwise use what's already
       // on the booking). Mirrors createBooking's logic so finalize works
       // even when the client hasn't pre-computed bookingAmount/finalTotal.
-      const sourceServices = Array.isArray(service) && service.length
-        ? service
-        : (booking.service || []);
+      const sourceServices =
+        Array.isArray(service) && service.length
+          ? service
+          : booking.service || [];
       const computedTotal = sourceServices.reduce(
-        (sum, s) =>
-          sum + Number(s?.price || 0) * (Number(s?.quantity) || 1),
+        (sum, s) => sum + Number(s?.price || 0) * (Number(s?.quantity) || 1),
         0,
       );
 
@@ -8314,3 +8482,217 @@ exports.changeVendor = async (req, res) => {
 // status jneed to change paid, update payments array, remainig should 0, update method based on current paymentMethod[UPI,Cash]}
 // > {releasing final payment fron vendor app, the remaining gets overriding - need to preserve }
 // > need to keep single controller . either makePayment or updateManualPayment
+
+// ============================================================================
+// New Lead — Notified Vendors APIs
+// ----------------------------------------------------------------------------
+// Business rule: when a new lead is created, the system notifies all eligible
+// vendors in that area (entry per vendor is recorded in invitedVendors[]).
+// Admin can view that list, and additionally notify ANY vendor of the same
+// city — regardless of availability/coins/team/area — until one vendor
+// responds (responseStatus = "accepted"), at which point the lead transitions
+// to ongoing and the assigned vendor takes over.
+// ============================================================================
+
+// Booking statuses where the lead is no longer in "new lead" mode and we
+// should not allow further admin notifications.
+const NEW_LEAD_BLOCKED_STATUSES = new Set([
+  "confirmed",
+  "job ongoing",
+  "survey ongoing",
+  "survey completed",
+  "job completed",
+  "hired",
+  "project ongoing",
+  "project completed",
+  "waiting for final payment",
+  "cancelled",
+  "admin cancelled",
+  "customer cancelled",
+  "cancelled rescheduled",
+]);
+
+exports.getNotifiedVendorsForBooking = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid bookingId" });
+    }
+
+    const booking = await UserBooking.findById(bookingId)
+      .select("invitedVendors")
+      .lean();
+
+    if (!booking) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
+    }
+
+    const invited = Array.isArray(booking.invitedVendors)
+      ? booking.invitedVendors
+      : [];
+
+    const ids = invited
+      .map((iv) => iv?.professionalId)
+      .filter(Boolean)
+      .map((id) => String(id))
+      .filter((id) => mongoose.Types.ObjectId.isValid(id));
+
+    if (!ids.length) {
+      return res.status(200).json({ success: true, count: 0, data: [] });
+    }
+
+    const vendors = await vendorAuthSchema
+      .find({ _id: { $in: ids } })
+      .select("vendor activeStatus isArchived wallet")
+      .lean();
+
+    const byId = new Map(vendors.map((v) => [String(v._id), v]));
+
+    // Preserve invite order (most recent first via invitedAt desc)
+    const data = invited
+      .slice()
+      .sort((a, b) => {
+        const ta = a?.invitedAt ? new Date(a.invitedAt).getTime() : 0;
+        const tb = b?.invitedAt ? new Date(b.invitedAt).getTime() : 0;
+        return tb - ta;
+      })
+      .map((iv) => {
+        const v = byId.get(String(iv?.professionalId || ""));
+        return {
+          vendorId: String(iv?.professionalId || ""),
+          name: v?.vendor?.vendorName || "Unknown Vendor",
+          profileImage: v?.vendor?.profileImage || "",
+          city: v?.vendor?.city || "",
+          serviceType: v?.vendor?.serviceType || "",
+          mobileNumber: v?.vendor?.mobileNumber || null,
+          isArchived: !!v?.isArchived,
+          invitedAt: iv?.invitedAt || null,
+          respondedAt: iv?.respondedAt || null,
+          responseStatus: iv?.responseStatus || "pending",
+        };
+      });
+
+    return res.status(200).json({ success: true, count: data.length, data });
+  } catch (err) {
+    console.error("getNotifiedVendorsForBooking error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
+exports.notifyVendorForLead = async (req, res) => {
+  try {
+    const { bookingId, vendorId } = req.body || {};
+
+    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid bookingId" });
+    }
+    if (!vendorId || !mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid vendorId" });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
+    }
+
+    const status = String(booking?.bookingDetails?.status || "")
+      .toLowerCase()
+      .trim();
+
+    const acceptedAlready = (booking.invitedVendors || []).some(
+      (iv) =>
+        String(iv?.responseStatus || "")
+          .toLowerCase()
+          .trim() === "accepted",
+    );
+
+    if (acceptedAlready || NEW_LEAD_BLOCKED_STATUSES.has(status)) {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Lead has already been responded to or closed — cannot notify more vendors.",
+      });
+    }
+
+    const vendor = await vendorAuthSchema.findById(vendorId).lean();
+    if (!vendor) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vendor not found" });
+    }
+    if (vendor.isArchived) {
+      return res.status(400).json({
+        success: false,
+        message: "Cannot notify an archived vendor.",
+      });
+    }
+
+    const alreadyInvited = (booking.invitedVendors || []).some(
+      (iv) => String(iv?.professionalId) === String(vendorId),
+    );
+
+    if (!alreadyInvited) {
+      // $addToSet uses identity equality on subdocs — guard with the
+      // professionalId-not-equal filter so re-runs don't create duplicates
+      // even if invitedAt timestamps differ.
+      await UserBooking.updateOne(
+        {
+          _id: bookingId,
+          "invitedVendors.professionalId": { $ne: String(vendorId) },
+        },
+        {
+          $push: {
+            invitedVendors: {
+              professionalId: String(vendorId),
+              invitedAt: new Date(),
+              responseStatus: "pending",
+            },
+          },
+        },
+      );
+    }
+
+    // Persist an in-app notification record (vendor's Android app polls this).
+    try {
+      await vendorNotification.create({
+        vendorId: String(vendorId),
+        notificationType: "LEAD",
+        thumbnailTitle: "New Lead Available",
+        message:
+          "A new lead has been shared with you. Open the app to view & respond.",
+        status: "unread",
+        metaData: {
+          bookingId: String(bookingId),
+          notifiedBy: "admin",
+        },
+      });
+    } catch (e) {
+      console.log(
+        "notifyVendorForLead - vendorNotification create failed:",
+        e?.message,
+      );
+    }
+
+    return res.status(200).json({
+      success: true,
+      alreadyInvited,
+      message: alreadyInvited
+        ? "Vendor was already notified — re-notification sent."
+        : "Vendor notified successfully.",
+    });
+  } catch (err) {
+    console.error("notifyVendorForLead error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
