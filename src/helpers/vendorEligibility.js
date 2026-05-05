@@ -20,6 +20,11 @@ const { haversineKm } = require("../services/slotAvailability.service");
 const { getOrComputeVendorKpis } = require("../services/vendorKpiCache.service");
 const { passesPerformanceGate } = require("./vendorKpiGate");
 
+// Product spec: customer must be within 10 km of vendor for the website
+// to surface them. Fixed for all vendors — admin manual-assign path
+// (which bypasses this) is the escape hatch when no vendor is in range.
+const SERVICE_RADIUS_KM = 10;
+
 /**
  * @param {object} args
  * @param {Array}  args.vendors          — raw vendor docs (lean)
@@ -75,10 +80,9 @@ async function filterEligibleVendors({
     }
 
     const dist = haversineKm(lat, lng, v.address.latitude, v.address.longitude);
-    const radius = Number(v.serviceRadiusKm || 10);
-    if (dist > radius) {
+    if (dist > SERVICE_RADIUS_KM) {
       reasons.outsideRadius = true;
-      recordDebug(v, `outside_radius (${dist.toFixed(2)}km > ${radius}km)`);
+      recordDebug(v, `outside_radius (${dist.toFixed(2)}km > ${SERVICE_RADIUS_KM}km)`);
       continue;
     }
 

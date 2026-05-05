@@ -1962,7 +1962,12 @@ exports.getAllVendors = async (req, res) => {
     const filter = {};
 
     if (serviceType && serviceType !== "All Services") {
-      filter["vendor.serviceType"] = serviceType;
+      // Case-insensitive substring match. Stored values vary across vendors
+      // ("Deep Cleaning" / "deep-cleaner" / "House Painting" / "house-painter"),
+      // so callers can pass canonical labels ("Deep Cleaning") OR keyword
+      // tokens ("deep", "paint") and we still match consistently.
+      const escaped = String(serviceType).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      filter["vendor.serviceType"] = new RegExp(escaped, "i");
     }
 
     if (city && city !== "All Cities") {
