@@ -1,6 +1,7 @@
 const Vendor = require("../models/vendor/vendorAuth");
 const Booking = require("../models/user/userBookings");
 const DeepCleaningPackage = require("../models/products/DeepCleaningPackage");
+const PricingConfig = require("../models/serviceConfig/PricingConfig");
 
 const { calculateAvailableSlots } = require("../services/slotAvailability.service");
 const { filterEligibleVendors } = require("../helpers/vendorEligibility");
@@ -35,6 +36,24 @@ function getReasonMessage(reasons) {
 
 function normalizeCity(s = "") {
   return String(s).trim().toLowerCase();
+}
+
+function escapeRegex(s = "") {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// HP vendor coin gate: read PricingConfig.vendorCoins for the city.
+// Caller must validate city is non-empty before calling — without it we
+// can't gate, and silently returning 0 lets ineligible vendors pass.
+async function resolveHousePaintingRequiredCoins(city) {
+  const pricing = await PricingConfig.findOne({
+    city: { $regex: new RegExp(`^${escapeRegex(city)}$`, "i") },
+  }).lean();
+  if (!pricing) {
+    console.warn("[slots] no PricingConfig for city, HP coin gate skipped:", city);
+    return 0;
+  }
+  return Number(pricing.vendorCoins || 0);
 }
 
 function pickCityConfig(pkg, cityName) {
@@ -161,10 +180,33 @@ async function buildSlotResponse({
     perVendor: debug,
   });
 
+  console.log(
+    "[slots] eligibleVendorList:",
+    eligibleVendors.map((v) => ({
+      name: v?.vendor?.vendorName || null,
+      id: String(v._id),
+      coins: Number(v?.wallet?.coins || 0),
+      isArchived: !!v.isArchived,
+      city: v?.vendor?.city || null,
+    })),
+  );
+
   // 4. Bookings on the requested date that could clash.
+  // Include both confirmed bookings AND enquiries with an assigned vendor +
+  // selected slot. Once admin assigns a vendor or a vendor accepts an enquiry,
+  // that slot is blocked for other customers, even before payment confirms.
   const bookings = await Booking.find({
-    isEnquiry: false,
-    "assignedProfessional.professionalId": { $exists: true, $ne: null },
+    $or: [
+      // Confirmed bookings (always block)
+      { isEnquiry: false },
+      // Enquiries with assigned vendor + selected slot (also block)
+      {
+        isEnquiry: true,
+        "assignedProfessional.professionalId": { $exists: true, $ne: null },
+        "selectedSlot.slotDate": { $exists: true, $ne: "" },
+        "selectedSlot.slotTime": { $exists: true, $ne: "" },
+      },
+    ],
     "selectedSlot.slotDate": date,
     "bookingDetails.status": {
       $nin: ["Customer Cancelled", "Admin Cancelled", "Cancelled"],
@@ -269,6 +311,14 @@ exports.getAvailableSlots = async (req, res) => {
       minTeamMembers = resolved.minTeamMembers;
       requiredCoins = resolved.requiredCoins;
       resolvedPackageIds = packageId;
+    } else if (serviceType === "house_painting") {
+      if (!city) {
+        return res.status(400).json({
+          success: false,
+          message: "city is required for house painting to read pricing config",
+        });
+      }
+      requiredCoins = await resolveHousePaintingRequiredCoins(city);
     }
 
     const response = await buildSlotResponse({
@@ -334,6 +384,14 @@ exports.getWebsiteAvailableSlots = async (req, res) => {
       );
       if (!serviceDuration || serviceDuration < 30) serviceDuration = 30;
       if (!minTeamMembers || minTeamMembers < 1) minTeamMembers = 1;
+    } else if (serviceType === "house_painting") {
+      if (!city) {
+        return res.status(400).json({
+          success: false,
+          message: "city is required for house painting to read pricing config",
+        });
+      }
+      requiredCoins = await resolveHousePaintingRequiredCoins(city);
     }
 
     const response = await buildSlotResponse({
