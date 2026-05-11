@@ -2,6 +2,9 @@ const crypto = require("crypto");
 const mongoose = require("mongoose");
 const userBookings = require("../models/user/userBookings");
 const { getRazorpayClient } = require("./razorpay.client");
+const {
+  validateBookingSlotStillAvailable,
+} = require("../helpers/validateBookingSlotStillAvailable");
 
 // ---------------------------------------------------------
 // Helpers
@@ -148,6 +151,17 @@ exports.verifyAndRecordBookingPayment = async ({
                 out.booking = booking.toObject();
                 return;
             }
+
+            // 3b) Slot revalidation — defends against the stale-tab race
+            // where customer A's slot was paid by customer B in the
+            // meantime. Throws { statusCode: 409 } if the slot is over
+            // capacity. Runs inside the transaction so the read joins the
+            // same MVCC snapshot as the payment write.
+            await validateBookingSlotStillAvailable({
+                booking,
+                excludeBookingId: bookingId,
+                session,
+            });
 
             // 4) Decide amount to record
             let paidNow = 0;

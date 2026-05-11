@@ -17,8 +17,9 @@
 //
 // Output:
 //   {
-//     slots: ["08:00 AM", "09:00 AM", ...],  // backward-compat list
+//     slots: ["08:00 AM", "09:00 AM", ...],  // available (backward-compat)
 //     slotsWithVendors: [{ slotTime, vendorIds }],
+//     unavailableSlots: ["10:00 AM", ...],   // booked/held — render disabled
 //     reasons: { noResources, allBooked },
 //     availableVendorsCount
 //   }
@@ -129,6 +130,7 @@ function calculateAvailableSlots({
     return {
       slots: [],
       slotsWithVendors: [],
+      unavailableSlots: [],
       reasons,
       availableVendorsCount: 0,
     };
@@ -154,6 +156,7 @@ function calculateAvailableSlots({
     return {
       slots: [],
       slotsWithVendors: [],
+      unavailableSlots: [],
       reasons,
       availableVendorsCount: 0,
     };
@@ -168,17 +171,35 @@ function calculateAvailableSlots({
     blocked.get(key).push(block);
   };
 
+  // Bookings that have been PAID (isEnquiry=false) but no vendor has
+  // accepted yet (assignedProfessional unset) consume one unit of vendor
+  // capacity at their selected slot, but we don't know which vendor. We
+  // track them as a per-slot-time counter and subtract from freeVendorIds
+  // when computing slot availability — this is what prevents the
+  // "customer paid → slot still showing free for others" bug.
+  // Key: "08:00 AM" → count of unassigned-but-paid commitments.
+  const unassignedCommitments = new Map();
+  const bumpUnassigned = (label) => {
+    if (!label) return;
+    unassignedCommitments.set(label, (unassignedCommitments.get(label) || 0) + 1);
+  };
+
   for (const b of bookings) {
     // FIX: schema field is `professionalId`, not `vendorId`. Old code used
     // `vendorId` so the entire blocked-windows map was empty in production.
     const vid = b.assignedProfessional?.professionalId;
-    if (!vid) continue;
 
-    const startMin = toMinutes(b.selectedSlot?.slotTime);
-    const dur = durationFromBooking(b);
-    if (startMin == null || !dur) continue;
-
-    pushBlock(vid, blockFromCommitment(startMin, dur));
+    if (vid) {
+      const startMin = toMinutes(b.selectedSlot?.slotTime);
+      const dur = durationFromBooking(b);
+      if (startMin == null || !dur) continue;
+      pushBlock(vid, blockFromCommitment(startMin, dur));
+    } else if (b.isEnquiry === false) {
+      // Paid (isEnquiry flipped to false in payment.service.js) but no
+      // vendor accepted yet — committed to ONE eligible vendor, just
+      // don't know which one. Counts as 1 unit at this exact slot time.
+      bumpUnassigned(b.selectedSlot?.slotTime);
+    }
   }
 
   for (const h of activeHolds) {
@@ -196,6 +217,11 @@ function calculateAvailableSlots({
 
   const slots = [];
   const slotsWithVendors = [];
+  // Slots where ALL eligible vendors are booked/held. Returned so the UI
+  // can render them as disabled tiles ("not available") instead of hiding
+  // them entirely. Per spec: customers should see that the slot exists
+  // but can't pick it.
+  const unavailableSlots = [];
 
   for (let s = startFloor; s <= maxStart; s += gridMin) {
     // For HP, align the iteration to the hourly grid even if startFloor
@@ -214,11 +240,19 @@ function calculateAvailableSlots({
       if (!clash) freeVendorIds.push(String(v._id));
     }
 
-    if (freeVendorIds.length) {
-      const label = toTime(s);
+    const label = toTime(s);
+    // Subtract paid-but-unassigned bookings at this exact slot time — they
+    // each consume one of the freeVendorIds even though we don't know which.
+    // If commitments equal/exceed free vendors, the slot has no real capacity
+    // left, so render it unavailable.
+    const consumed = unassignedCommitments.get(label) || 0;
+    const trueFreeCount = freeVendorIds.length - consumed;
+
+    if (trueFreeCount > 0) {
       slots.push(label);
       slotsWithVendors.push({ slotTime: label, vendorIds: freeVendorIds });
     } else {
+      unavailableSlots.push(label);
       reasons.allBooked = true;
     }
   }
@@ -226,6 +260,7 @@ function calculateAvailableSlots({
   return {
     slots,
     slotsWithVendors,
+    unavailableSlots,
     reasons,
     availableVendorsCount: eligibleVendors.length,
   };

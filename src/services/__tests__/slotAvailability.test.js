@@ -262,6 +262,150 @@ describe("slotAvailability — DC team headcount via leaves", () => {
   });
 });
 
+describe("slotAvailability — unavailableSlots (booked-out tiles)", () => {
+  test("slot where the only vendor is booked appears in unavailableSlots, not slots", () => {
+    const v = vendor({ id: "v1", team: 1 });
+    const r = calculateAvailableSlots({
+      vendors: [v],
+      bookings: [
+        booking({
+          vendorId: "v1",
+          slotTime: "10:00 AM",
+          durationMinutes: 30,
+          serviceType: "house_painting",
+        }),
+      ],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).not.toContain("10:00 AM");
+    expect(r.unavailableSlots).toContain("10:00 AM");
+    expect(r.reasons.allBooked).toBe(true);
+  });
+
+  test("when no vendors exist at all, unavailableSlots is still empty (noResources case)", () => {
+    // Empty eligible pool → engine short-circuits before generating the
+    // grid, so neither slots nor unavailableSlots are populated.
+    const r = calculateAvailableSlots({
+      vendors: [],
+      bookings: [],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).toEqual([]);
+    expect(r.unavailableSlots).toEqual([]);
+    expect(r.reasons.noResources).toBe(true);
+  });
+});
+
+describe("slotAvailability — paid-but-unassigned bookings consume capacity", () => {
+  // After payment, isEnquiry is flipped to false but assignedProfessional
+  // isn't set until a vendor accepts. The engine must treat these as 1
+  // unit of vendor capacity consumed at the booked slot time — otherwise
+  // other customers see the slot as free even though it's been paid for.
+
+  function paidUnassigned({ slotTime, serviceType = "house_painting" }) {
+    return {
+      serviceType,
+      isEnquiry: false, // paid
+      selectedSlot: { slotTime, slotDate: TOMORROW },
+      bookingDetails: { serviceDurationMinutes: 30, status: "Confirmed" },
+      // assignedProfessional NOT set — no vendor accepted yet
+    };
+  }
+
+  test("2 vendors + 1 paid booking at 08:00 AM → slot still available (1 vendor remains)", () => {
+    const v1 = vendor({ id: "v1", team: 1 });
+    const v2 = vendor({ id: "v2", team: 1 });
+    const r = calculateAvailableSlots({
+      vendors: [v1, v2],
+      bookings: [paidUnassigned({ slotTime: "08:00 AM" })],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).toContain("08:00 AM");
+  });
+
+  test("2 vendors + 2 paid bookings at 08:00 AM → slot is unavailable (capacity exhausted)", () => {
+    const v1 = vendor({ id: "v1", team: 1 });
+    const v2 = vendor({ id: "v2", team: 1 });
+    const r = calculateAvailableSlots({
+      vendors: [v1, v2],
+      bookings: [
+        paidUnassigned({ slotTime: "08:00 AM" }),
+        paidUnassigned({ slotTime: "08:00 AM" }),
+      ],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).not.toContain("08:00 AM");
+    expect(r.unavailableSlots).toContain("08:00 AM");
+    expect(r.reasons.allBooked).toBe(true);
+  });
+
+  test("1 vendor + 1 paid booking at 08:00 AM → slot is unavailable", () => {
+    const v1 = vendor({ id: "v1", team: 1 });
+    const r = calculateAvailableSlots({
+      vendors: [v1],
+      bookings: [paidUnassigned({ slotTime: "08:00 AM" })],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).not.toContain("08:00 AM");
+    expect(r.unavailableSlots).toContain("08:00 AM");
+  });
+
+  test("unpaid enquiry (isEnquiry:true) without assignedProfessional does NOT consume capacity", () => {
+    // Customer hasn't paid yet; they're holding the slot via Redis (handled
+    // separately by activeHolds). The booking record alone shouldn't block.
+    const v1 = vendor({ id: "v1", team: 1 });
+    const r = calculateAvailableSlots({
+      vendors: [v1],
+      bookings: [
+        {
+          serviceType: "house_painting",
+          isEnquiry: true, // unpaid enquiry
+          selectedSlot: { slotTime: "08:00 AM", slotDate: TOMORROW },
+          bookingDetails: { serviceDurationMinutes: 30, status: "Pending" },
+        },
+      ],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).toContain("08:00 AM");
+  });
+});
+
 describe("slotAvailability — time helpers", () => {
   test("toMinutes / toTime round-trip", () => {
     expect(toMinutes("10:00 AM")).toBe(600);

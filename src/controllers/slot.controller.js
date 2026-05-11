@@ -216,6 +216,29 @@ async function buildSlotResponse({
   // 5. Active Redis holds for the date (pending payments).
   const activeHolds = await listActiveHoldsForDate(date);
 
+  // Diagnostic: which blocking channels are populated for this date.
+  // If both are 0 with multiple eligible vendors, every slot will look
+  // available — answers "why is the slot still showing?" from logs.
+  const bookingsBlocking = bookings.filter(
+    (b) => b.assignedProfessional?.professionalId,
+  );
+  console.log("[slots] blockers:", {
+    date,
+    bookingsLoaded: bookings.length,
+    bookingsBlocking: bookingsBlocking.length,
+    bookingsSkippedNoVendor: bookings.length - bookingsBlocking.length,
+    activeHolds: activeHolds.length,
+    sample: {
+      bookings: bookingsBlocking.slice(0, 3).map((b) => ({
+        vendorId: b.assignedProfessional?.professionalId,
+        slot: b.selectedSlot?.slotTime,
+        status: b.bookingDetails?.status,
+        isEnquiry: !!b.isEnquiry,
+      })),
+      holds: activeHolds.slice(0, 3),
+    },
+  });
+
   // 6. Slot engine.
   const result = calculateAvailableSlots({
     vendors: eligibleVendors,
@@ -234,6 +257,8 @@ async function buildSlotResponse({
     success: true,
     slots: result.slots,
     slotsWithVendors: result.slotsWithVendors,
+    // Booked/held slots — UI shows these as disabled tiles instead of hiding.
+    unavailableSlots: result.unavailableSlots || [],
     availableVendorsCount: result.availableVendorsCount,
     reason: result.slots.length
       ? null

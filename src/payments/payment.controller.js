@@ -32,6 +32,9 @@ exports.verify = async (req, res) => {
         });
     } catch (err) {
         console.error("verify error:", err);
-        return res.status(400).json({ success: false, message: err.message });
+        // Preserve 409 for slot-no-longer-available so the FE can show
+        // the "pick another slot" UX instead of a generic failure.
+        const status = err?.statusCode || 400;
+        return res.status(status).json({ success: false, message: err.message });
     }
 };

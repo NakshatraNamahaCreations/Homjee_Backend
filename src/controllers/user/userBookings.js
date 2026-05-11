@@ -29,6 +29,9 @@ const {
   consumeHold,
   computeBookingDuration,
 } = require("../../services/confirmBooking.service");
+const {
+  computeBookingCoinPolicy,
+} = require("../../helpers/bookingCoinPolicy");
 
 // Local copy of the batch-loader from vendor controller — kept here so
 // gate logic on lead-distribution endpoints doesn't pull in the vendor
@@ -3801,7 +3804,10 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
     const normalizedStatus = norm(status);
 
     // ✅ only these statuses should charge coins
-    const shouldChargeCoins = ["confirmed", "accepted"].includes(
+    // (renamed: this flags "vendor is accepting"; whether to actually deduct
+    // coins is decided by computeBookingCoinPolicy — HP with siteVisitCharge=0
+    // accepts but doesn't deduct.)
+    const isAcceptingStatus = ["confirmed", "accepted"].includes(
       normalizedStatus,
     );
 
@@ -3848,16 +3854,20 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
       );
       const alreadyDeducted = !!inviteEntry?.coinsDeducted;
 
-      // 2) Compute required coins (✅ coinDeduction already includes quantity)
+      // 2) Compute coin policy + slot guard for the accept path.
+      // Policy resolves: HP+siteVisit=0 → no deduction; HP+siteVisit>0 →
+      // PricingConfig.vendorCoins (unified with eligibility); DC → service sum.
       let requiredCoins = 0;
-      if (shouldChargeCoins) {
-        requiredCoins = (booking2.service || []).reduce(
-          (sum, s) => sum + n(s.coinDeduction),
-          0,
-        );
+      let shouldDeductCoins = false;
+      if (isAcceptingStatus) {
+        const policy = await computeBookingCoinPolicy(booking2);
+        requiredCoins = policy.requiredCoins;
+        shouldDeductCoins = policy.shouldChargeCoins;
 
-        // ✅ If coin deduction is not configured properly, do NOT allow Confirm/Accept
-        if (requiredCoins <= 0) {
+        // Reject only when we DO need to charge coins but the value is unset.
+        // HP-with-zero-siteVisit returns shouldChargeCoins=false and is allowed
+        // through with requiredCoins=0 (per spec).
+        if (shouldDeductCoins && requiredCoins <= 0) {
           const err = new Error(
             "Coin deduction not configured for this booking.",
           );
@@ -3865,10 +3875,10 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
           throw err;
         }
 
-        // ✅ Slot-conflict guard: this vendor must not already have a
-        // non-cancelled booking whose time window overlaps. Runs inside
-        // the transaction so the read joins the same MVCC snapshot as
-        // the assignedProfessional update below.
+        // Slot-conflict guard runs on every accept — independent of coin
+        // deduction — so two vendors can't double-book the same vendor slot
+        // even when site visit is free. Inside the transaction so the read
+        // joins the same MVCC snapshot as the assignedProfessional update.
         const slotDate = booking2.selectedSlot?.slotDate;
         const slotTime = booking2.selectedSlot?.slotTime;
         const durationMinutes = computeBookingDuration(booking2);
@@ -3890,9 +3900,10 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
         }
       }
 
-      // 3) HARD BLOCK: If confirming/accepting, vendor must have enough coins (unless already deducted)
-      // ✅ Use atomic deduction to prevent race conditions
-      if (shouldChargeCoins && !alreadyDeducted) {
+      // 3) HARD BLOCK: If accepting AND policy says deduct, ensure vendor
+      // has enough coins. Skipped for HP+siteVisit=0 (shouldDeductCoins=false).
+      // Atomic Mongo filter prevents race conditions across concurrent accepts.
+      if (shouldDeductCoins && !alreadyDeducted) {
         const deductRes = await vendorAuthSchema.updateOne(
           { _id: vendorId, "wallet.coins": { $gte: requiredCoins } },
           { $inc: { "wallet.coins": -requiredCoins } },
@@ -3969,8 +3980,10 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
       if (patch.cancelledBy)
         setOps["invitedVendors.$[iv].cancelledBy"] = patch.cancelledBy;
 
-      // If we charged coins in this call, mark deducted fields
-      if (shouldChargeCoins && !alreadyDeducted) {
+      // If we charged coins in this call, mark deducted fields.
+      // For HP+siteVisit=0, shouldDeductCoins is false → these fields stay
+      // false/0 so cancellation refund logic correctly returns nothing.
+      if (shouldDeductCoins && !alreadyDeducted) {
         // requiredCoins will be > 0 here (validated above)
         setOps["invitedVendors.$[iv].coinsDeducted"] = true;
         setOps["invitedVendors.$[iv].coinsDeductedAt"] = new Date();
@@ -4000,7 +4013,7 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
     // invalidate the slot-availability cache so the next /available-slots
     // call reflects the new booking. Best-effort — failures here don't
     // affect the booking that just succeeded.
-    if (shouldChargeCoins && updatedBooking?.selectedSlot?.slotTime) {
+    if (isAcceptingStatus && updatedBooking?.selectedSlot?.slotTime) {
       try {
         await consumeHold({
           vendorId,
@@ -8217,13 +8230,15 @@ exports.changeVendor = async (req, res) => {
         throw err;
       }
 
-      // 2) Required coins (coinDeduction already includes qty)
-      const requiredCoins = (booking.service || []).reduce(
-        (sum, s) => sum + n(s?.coinDeduction),
-        0,
-      );
+      // 2) Required coins via shared policy.
+      // HP+siteVisit=0 → shouldDeduct=false (no deduction, no refund);
+      // HP+siteVisit>0 → uses PricingConfig.vendorCoins (unified with eligibility);
+      // DC → sums service[].coinDeduction.
+      const policy = await computeBookingCoinPolicy(booking);
+      const requiredCoins = policy.requiredCoins;
+      const shouldDeductCoins = policy.shouldChargeCoins;
 
-      if (requiredCoins <= 0) {
+      if (shouldDeductCoins && requiredCoins <= 0) {
         const err = new Error(
           "Coin deduction not configured for this booking.",
         );
@@ -8276,8 +8291,9 @@ exports.changeVendor = async (req, res) => {
       );
       const newAlreadyDeducted = !!newInvite?.coinsDeducted;
 
-      // 5) Deduct from NEW vendor (only if not already deducted)
-      if (!newAlreadyDeducted) {
+      // 5) Deduct from NEW vendor (only if policy says deduct + not already deducted).
+      // Skipped for HP+siteVisit=0 — symmetric with respondConfirmJobVendorLine.
+      if (shouldDeductCoins && !newAlreadyDeducted) {
         const deductRes = await vendorAuthSchema.updateOne(
           { _id: newVendorId, "wallet.coins": { $gte: requiredCoins } },
           { $inc: { "wallet.coins": -requiredCoins } },
@@ -8434,7 +8450,7 @@ exports.changeVendor = async (req, res) => {
         "invitedVendors.$[new].respondedAt": now,
       };
 
-      if (!newAlreadyDeducted) {
+      if (shouldDeductCoins && !newAlreadyDeducted) {
         setOps["invitedVendors.$[new].coinsDeducted"] = true;
         setOps["invitedVendors.$[new].coinsDeductedAt"] = now;
         setOps["invitedVendors.$[new].coinsDeductedValue"] = requiredCoins;
