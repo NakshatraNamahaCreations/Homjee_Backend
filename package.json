@@ -4,7 +4,8 @@
   "main": "server.js",
   "scripts": {
     "start": "nodemon server.js",
-    "test": "jest"
+    "test": "jest",
+    "postinstall": "node node_modules/puppeteer/install.mjs"
   },
   "keywords": [],
   "author": "",
