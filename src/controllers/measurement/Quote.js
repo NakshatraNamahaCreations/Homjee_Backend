@@ -3,6 +3,7 @@ const Measurement = require("../../models/measurement/Measurement");
 const Quote = require("../../models/measurement/Quote");
 const mongoose = require("mongoose");
 const userBookings = require("../../models/user/userBookings");
+const { generateAndSendQuotePdf } = require("../../helpers/quotePdf");
 const { Types } = mongoose;
 
 const toNum = (v) => (Number.isFinite(+v) ? +v : 0);
@@ -885,26 +886,23 @@ exports.updateQuoteMeta = async (req, res) => {
 
     await q.save();
 
-    // send quotation to whatsapp
+    // Generate PDF and send to customer on WhatsApp.
+    // Failure here must NOT roll back the quote save — vendor can resend later.
+    let delivery = { sent: false, error: null };
     try {
-      const pdfUrl = `${process.env.PUBLIC_BASE_URL}/api/quotes/${quote._id}/pdf`;
-      const msg =
-        `Hi ${"Kiruthika"}\n` +
-        `Your quotation is ready.\n` +
-        `Quotation ID: ${quote.quoteNo}\n` +
-        `Total: ₹${quote.totals.grandTotal}\n` +
-        `Download PDF: ${pdfUrl}`;
-
-      await sendWhatsAppText({
-        to: 8526190332, // "91xxxxxxxxxx"
-        body: msg,
-      });
+      const { pdfUrl, sentToCustomerAt, dryRun } = await generateAndSendQuotePdf(q._id);
+      delivery = dryRun
+        ? { sent: false, dryRun: true, pdfUrl }
+        : { sent: true, pdfUrl, sentToCustomerAt };
     } catch (e) {
-      console.log("WhatsApp failed but quotation created:", e.message);
-      // don’t fail quotation creation — just log it
+      console.error("Quote WhatsApp send failed:", e.message);
+      q.pdfSendError = e.message || "Send failed";
+      await q.save();
+      delivery = { sent: false, error: e.message || "Send failed" };
     }
 
-    res.json({ message: "OK", data: q });
+    const fresh = await Quote.findById(q._id);
+    res.json({ message: "OK", data: fresh, delivery });
   } catch (err) {
     console.error("updateQuoteMeta error:", err);
     res.status(500).json({ message: "Server error" });

@@ -107,6 +107,11 @@ const QuoteSchema = new mongoose.Schema(
     },
     finalizedAt: Date,
     locked: { type: Boolean, default: false },
+
+    pdfUrl: { type: String, default: null },
+    pdfGeneratedAt: { type: Date, default: null },
+    sentToCustomerAt: { type: Date, default: null },
+    pdfSendError: { type: String, default: null },
   },
   { timestamps: true }
 );
