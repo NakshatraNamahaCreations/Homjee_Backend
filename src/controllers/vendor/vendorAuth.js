@@ -15,7 +15,7 @@ const {
   reservePhone,
   movePhone,
 } = require("../../helpers/phoneRegistry");
-const { canonicalizeCity } = require("../../helpers/serviceCity");
+const { canonicalizeCity, buildCityMatchRegex } = require("../../helpers/serviceCity");
 const {
   computeVendorStatus,
   describeStatus,
@@ -1979,7 +1979,10 @@ exports.getAllVendors = async (req, res) => {
     }
 
     if (city && city !== "All Cities") {
-      filter["vendor.city"] = city;
+      // Match every alias of the resolved service city (e.g. a lead in
+      // "Pimpri-Chinchwad" finds vendors stored under "Pune" and vice versa)
+      // since vendor.city is inconsistent free text.
+      filter["vendor.city"] = buildCityMatchRegex(city) || city;
     }
 
     if (search) {
