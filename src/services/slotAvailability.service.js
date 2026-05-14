@@ -36,6 +36,12 @@ const HP_DURATION = 30;         // House painting site visit fixed at 30 min
 const HP_GRID_MIN = 60;         // Spec: HP slots on the hour
 const DC_GRID_MIN = 30;         // Spec: DC slots on 30-min grid
 
+// Same-day bookings need a 2-hour lead time before the earliest bookable
+// slot so the vendor can realistically reach the customer. Enforced here so
+// every client (website, admin) gets an identical grid — previously only the
+// website filtered this, leaving the admin showing slots in the next 2 hours.
+const SAME_DAY_LEAD_MIN = 120;
+
 /* ================= TIME HELPERS ================= */
 
 function toMinutes(time) {
@@ -71,8 +77,9 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Earliest slot we'll show for `date`. For today, round up to the next
-// grid step from "now"; for future dates, the day starts at 8:00 AM.
+// Earliest slot we'll show for `date`. For today, apply the same-day lead
+// time and round up to the next grid step; for future dates, the day starts
+// at 8:00 AM.
 function earliestStartForDate(date, gridMin) {
   const now = new Date();
   const req = new Date(date);
@@ -83,7 +90,7 @@ function earliestStartForDate(date, gridMin) {
   if (!sameDay) return DAY_START;
 
   const nowMin = now.getHours() * 60 + now.getMinutes();
-  return Math.ceil(nowMin / gridMin) * gridMin;
+  return Math.ceil((nowMin + SAME_DAY_LEAD_MIN) / gridMin) * gridMin;
 }
 
 /* ================= BLOCK MODEL =================
