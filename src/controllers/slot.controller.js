@@ -5,6 +5,7 @@ const PricingConfig = require("../models/serviceConfig/PricingConfig");
 
 const { calculateAvailableSlots } = require("../services/slotAvailability.service");
 const { filterEligibleVendors } = require("../helpers/vendorEligibility");
+const { canonicalizeCity, buildCityMatchRegex } = require("../helpers/serviceCity");
 const { listActiveHoldsForDate } = require("../services/slotHold.service");
 const {
   getCachedSlots,
@@ -148,9 +149,11 @@ async function buildSlotResponse({
   vendorQuery["vendor.serviceType"] =
     serviceType === "deep_cleaning" ? /clean/i : /paint/i;
   if (city) {
-    // Escape regex specials in user-controlled input before building the pattern.
-    const cityEsc = String(city).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    vendorQuery["vendor.city"] = new RegExp(cityEsc, "i");
+    // Match the vendor against every alias of the customer's service city
+    // (e.g. Pune <-> Pimpri-Chinchwad) so inconsistent stored city strings
+    // don't drop legitimate vendors. Radius is still the final geo check.
+    const cityRegex = buildCityMatchRegex(city);
+    if (cityRegex) vendorQuery["vendor.city"] = cityRegex;
   }
   const vendors = await Vendor.find(vendorQuery).lean();
 
@@ -281,7 +284,10 @@ async function buildSlotResponse({
 
 exports.getAvailableSlots = async (req, res) => {
   try {
-    const { serviceType, packageId, date, lat, lng, city } = req.body;
+    const { serviceType, packageId, date, lat, lng } = req.body;
+    // Canonicalize so PricingConfig / cityConfigs / vendor lookups all run
+    // on the same service-area name regardless of the locality sent.
+    const city = canonicalizeCity(req.body.city);
 
     if (!serviceType || !date || lat == null || lng == null) {
       return res.status(400).json({
@@ -375,7 +381,10 @@ exports.getAvailableSlots = async (req, res) => {
 
 exports.getWebsiteAvailableSlots = async (req, res) => {
   try {
-    const { serviceType, services, date, lat, lng, city } = req.body;
+    const { serviceType, services, date, lat, lng } = req.body;
+    // Canonicalize so PricingConfig / cityConfigs / vendor lookups all run
+    // on the same service-area name regardless of the locality sent.
+    const city = canonicalizeCity(req.body.city);
 
     if (!serviceType || !date || lat == null || lng == null) {
       return res.status(400).json({

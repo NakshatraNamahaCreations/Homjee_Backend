@@ -15,6 +15,7 @@ const {
   reservePhone,
   movePhone,
 } = require("../../helpers/phoneRegistry");
+const { canonicalizeCity } = require("../../helpers/serviceCity");
 const {
   computeVendorStatus,
   describeStatus,
@@ -547,7 +548,9 @@ exports.createVendor = async (req, res) => {
         serviceType: vendor.serviceType || "",
         capacity: vendor.capacity || "",
         serviceArea: vendor.serviceArea || "",
-        city: vendor.city || "",
+        // Canonicalize to a service-area name (e.g. Pimpri-Chinchwad -> Pune)
+        // so the record matches the slot pipeline's city filter.
+        city: canonicalizeCity(vendor.city),
       },
       documents: {
         aadhaarNumber: documents.aadhaarNumber || "",
@@ -639,6 +642,11 @@ exports.updateVendor = async (req, res) => {
     setIfPresent(update, vendor, "dateOfBirth", "vendor.dateOfBirth");
     setIfPresent(update, vendor, "yearOfWorking", "vendor.yearOfWorking");
     setIfPresent(update, vendor, "city", "vendor.city");
+    // Canonicalize to a service-area name (e.g. Pimpri-Chinchwad -> Pune)
+    // so the record matches the slot pipeline's city filter.
+    if (update["vendor.city"] != null) {
+      update["vendor.city"] = canonicalizeCity(update["vendor.city"]);
+    }
     setIfPresent(update, vendor, "serviceType", "vendor.serviceType");
     setIfPresent(update, vendor, "capacity", "vendor.capacity");
     setIfPresent(update, vendor, "serviceArea", "vendor.serviceArea");
