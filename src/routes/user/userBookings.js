@@ -25,6 +25,14 @@ router.get(
 );
 router.post("/notify-vendor", bookingController.notifyVendorForLead);
 
+// 🔹 Aggregate "Amount Yet to be Paid" across all ongoing leads
+//    (booking payment done, final payment pending). Date-independent.
+//    Optional ?vendorId=… narrows to a single vendor.
+router.get(
+  "/amount-yet-to-pay",
+  bookingController.getAmountYetToPayAggregate
+);
+
 router.get(
   "/get-bookings-by-bookingid/:id",
   bookingController.getBookingsByBookingId

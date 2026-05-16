@@ -254,6 +254,9 @@ const invitedVendorSchema = new mongoose.Schema({
       "unreachable",
       "pending_hiring",
       "mark_hiring",
+      // Set by first-accept-wins: another vendor accepted this lead first,
+      // so this invite is closed without action from the vendor.
+      "superseded",
     ],
     default: "pending",
   },

@@ -97,6 +97,9 @@ async function computeDeepCleaningKpis({ vendorId, lat, long, timeframe }) {
       averageRating,
       totalRatings,
       strikes,
+      onTimeStartedRate: 0,
+      onTimeStartedLeads: 0,
+      startedLeads: 0,
     };
   }
 
@@ -110,6 +113,16 @@ async function computeDeepCleaningKpis({ vendorId, lat, long, timeframe }) {
   let respondedLeads = 0;
   let cancelledLeads = 0;
   let totalRespondedGsv = 0;
+
+  // On-Time % metric (replaces Response % for Deep Cleaning in the
+  // admin panel + vendor app). Since leads are now broadcast to all
+  // eligible vendors, response rate is statistically meaningless
+  // (each vendor's denominator inflates with leads they were never
+  // going to win). On-Time % measures execution quality instead:
+  //   started within 30 min of the customer's chosen slot.
+  let startedLeads = 0;
+  let onTimeStartedLeads = 0;
+  const ON_TIME_THRESHOLD_MIN = 30;
 
   for (const booking of bookings) {
     const invite = (booking.invitedVendors || []).find(
@@ -133,6 +146,40 @@ async function computeDeepCleaningKpis({ vendorId, lat, long, timeframe }) {
       totalRespondedGsv += bookingGsv;
     }
 
+    // On-Time tracking: only count leads where THIS vendor was the
+    // assigned professional AND a start was recorded.
+    const assignedToVendor =
+      String(booking?.assignedProfessional?.professionalId || "") ===
+      String(vendorId);
+    if (assignedToVendor) {
+      const startedDate = booking?.assignedProfessional?.startedDate;
+      const startedTime = booking?.assignedProfessional?.startedTime;
+      const slotDate = booking?.selectedSlot?.slotDate;
+      const slotTime = booking?.selectedSlot?.slotTime;
+      if (startedDate && slotDate && slotTime) {
+        startedLeads += 1;
+        // startedDate is a Date (UTC). startedTime is "hh:mm AM/PM" if
+        // present; if absent, fall back to startedDate's wall-clock.
+        const startMoment = startedTime
+          ? moment(
+              `${moment(startedDate).format("YYYY-MM-DD")} ${startedTime}`,
+              "YYYY-MM-DD hh:mm A",
+            )
+          : moment(startedDate);
+        const slotMoment = moment(
+          `${slotDate} ${slotTime}`,
+          "YYYY-MM-DD hh:mm A",
+        );
+        if (
+          startMoment.isValid() &&
+          slotMoment.isValid() &&
+          startMoment.diff(slotMoment, "minutes") < ON_TIME_THRESHOLD_MIN
+        ) {
+          onTimeStartedLeads += 1;
+        }
+      }
+    }
+
     // Vendor-cancelled within 3 hours of the booked slot — counts as a strike.
     if (
       status === "customer_cancelled" &&
@@ -153,6 +200,8 @@ async function computeDeepCleaningKpis({ vendorId, lat, long, timeframe }) {
     respondedLeads > 0 ? (cancelledLeads / respondedLeads) * 100 : 0;
   const averageGsv =
     respondedLeads > 0 ? totalRespondedGsv / respondedLeads : 0;
+  const onTimeStartedRate =
+    startedLeads > 0 ? (onTimeStartedLeads / startedLeads) * 100 : 0;
 
   return {
     responseRate: round2(responseRate),
@@ -164,6 +213,11 @@ async function computeDeepCleaningKpis({ vendorId, lat, long, timeframe }) {
     averageRating: round2(averageRating),
     totalRatings,
     strikes,
+    // On-Time metric — vendor app + admin panel should display this
+    // instead of responseRate for Deep Cleaning.
+    onTimeStartedRate: round2(onTimeStartedRate),
+    onTimeStartedLeads,
+    startedLeads,
   };
 }
 

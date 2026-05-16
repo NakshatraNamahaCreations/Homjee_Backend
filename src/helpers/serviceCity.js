@@ -24,6 +24,13 @@ const SERVICE_CITIES = {
     "chinchwad",
     "pimpri-chinchwad",
     "pimpri chinchwad",
+    // Pune IT suburb. Google sometimes returns "Hinjawadi"/"Hinjewadi"
+    // as the locality without a "Pune" sibling component, so the
+    // pickServiceCityFromComponents scanner can't snap to Pune on its
+    // own. Listed as an alias here so vendors registered under "Pune"
+    // still match customers here.
+    "hinjawadi",
+    "hinjewadi",
   ],
   Mumbai: ["mumbai", "bombay", "mumbai suburban", "mumbai city"],
   Delhi: [

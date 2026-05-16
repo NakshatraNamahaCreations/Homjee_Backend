@@ -5,6 +5,7 @@ const { getRazorpayClient } = require("./razorpay.client");
 const {
   validateBookingSlotStillAvailable,
 } = require("../helpers/validateBookingSlotStillAvailable");
+const { fanOutLeadToEligibleVendors } = require("../services/leadFanout.service");
 
 // ---------------------------------------------------------
 // Helpers
@@ -251,6 +252,22 @@ exports.verifyAndRecordBookingPayment = async ({
         });
 
         session.endSession();
+
+        // Payment committed — fan out the freshly-confirmed lead to all
+        // eligible vendors in the area. Best-effort: a fan-out failure
+        // must NOT mask a successful payment, so we don't await throws.
+        try {
+            const freshBooking = await userBookings.findById(bookingId).lean();
+            if (freshBooking && freshBooking.isEnquiry === false) {
+                await fanOutLeadToEligibleVendors(freshBooking);
+            }
+        } catch (fanoutErr) {
+            console.error(
+                "[payment.verify] fanOutLeadToEligibleVendors threw:",
+                fanoutErr?.message,
+            );
+        }
+
         return out;
     } catch (e) {
         try {

@@ -184,11 +184,21 @@ function calculateAvailableSlots({
   // track them as a per-slot-time counter and subtract from freeVendorIds
   // when computing slot availability — this is what prevents the
   // "customer paid → slot still showing free for others" bug.
-  // Key: "08:00 AM" → count of unassigned-but-paid commitments.
+  // Key: canonical "08:00 AM" → count of unassigned-but-paid commitments.
+  //
+  // We canonicalize via toTime(toMinutes(label)) on BOTH sides so a stored
+  // "10:00 AM" / "10:00 am" / "10:00 AM " / "10:0 AM" all collide on the
+  // same bucket. Without this, the counter "looked" populated in logs but
+  // the lookup at slot-display time missed → slot was wrongly available.
   const unassignedCommitments = new Map();
+  const canonLabel = (label) => {
+    const m = toMinutes(label);
+    return m == null ? null : toTime(m);
+  };
   const bumpUnassigned = (label) => {
-    if (!label) return;
-    unassignedCommitments.set(label, (unassignedCommitments.get(label) || 0) + 1);
+    const k = canonLabel(label);
+    if (!k) return;
+    unassignedCommitments.set(k, (unassignedCommitments.get(k) || 0) + 1);
   };
 
   for (const b of bookings) {
@@ -207,6 +217,13 @@ function calculateAvailableSlots({
       // don't know which one. Counts as 1 unit at this exact slot time.
       bumpUnassigned(b.selectedSlot?.slotTime);
     }
+  }
+
+  if (unassignedCommitments.size) {
+    console.log(
+      "[slots] unassignedCommitments by slot:",
+      [...unassignedCommitments.entries()],
+    );
   }
 
   for (const h of activeHolds) {

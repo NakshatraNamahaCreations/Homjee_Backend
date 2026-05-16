@@ -32,6 +32,9 @@ const {
 const {
   computeBookingCoinPolicy,
 } = require("../../helpers/bookingCoinPolicy");
+const {
+  fanOutLeadToEligibleVendors,
+} = require("../../services/leadFanout.service");
 
 // Local copy of the batch-loader from vendor controller — kept here so
 // gate logic on lead-distribution endpoints doesn't pull in the vendor
@@ -1195,6 +1198,15 @@ exports.createBooking = async (req, res) => {
     // Respond
     // ------------------------------
     const updatedBooking = await UserBooking.findById(booking._id).lean();
+
+    // If this booking is already a confirmed lead (no online payment
+    // pending), fan out to eligible vendors now. For the payment path,
+    // the fan-out fires from payment.service after isEnquiry flips.
+    if (updatedBooking && updatedBooking.isEnquiry === false) {
+      fanOutLeadToEligibleVendors(updatedBooking).catch((err) =>
+        console.error("[createBooking] fanout failed:", err?.message),
+      );
+    }
 
     return res.status(201).json({
       message: willPayOnline
@@ -3274,6 +3286,11 @@ exports.getOverallPerformance = async (req, res) => {
     ----------------------------- */
     let dcResponded = 0;
     let dcCancelled = 0;
+    // On-Time aggregates: how many DC leads had a start recorded and
+    // how many of those started within 30 min of the slot. Drives the
+    // new On-Time % metric that replaces Response % in DC dashboards.
+    let dcStarted = 0;
+    let dcOnTimeStarted = 0;
     let dcVendorRatings = new Map();
 
     // Process deep cleaning leads
@@ -3294,6 +3311,32 @@ exports.getOverallPerformance = async (req, res) => {
 
         if (diff >= 0 && diff <= 3) {
           dcCancelled++;
+        }
+      }
+
+      // On-Time accumulation
+      const startedDate = lead?.assignedProfessional?.startedDate;
+      const startedTime = lead?.assignedProfessional?.startedTime;
+      const slotDate = lead?.selectedSlot?.slotDate;
+      const slotTime = lead?.selectedSlot?.slotTime;
+      if (startedDate && slotDate && slotTime) {
+        dcStarted++;
+        const slotMoment = moment(
+          `${slotDate} ${slotTime}`,
+          "YYYY-MM-DD hh:mm A",
+        );
+        const startMoment = startedTime
+          ? moment(
+              `${moment(startedDate).format("YYYY-MM-DD")} ${startedTime}`,
+              "YYYY-MM-DD hh:mm A",
+            )
+          : moment(startedDate);
+        if (
+          slotMoment.isValid() &&
+          startMoment.isValid() &&
+          startMoment.diff(slotMoment, "minutes") < 30
+        ) {
+          dcOnTimeStarted++;
         }
       }
 
@@ -3381,6 +3424,7 @@ exports.getOverallPerformance = async (req, res) => {
             survey: 0,
             hired: 0,
             cancelled: 0,
+            onTimeStarted: 0,
             gsv: 0,
             ratingSum:
               ratings.totalRatings > 0
@@ -3396,7 +3440,36 @@ exports.getOverallPerformance = async (req, res) => {
         v.totalLeads++;
 
         if (prof.acceptedDate) v.responded++;
-        if (prof.startedDate) v.survey++;
+        if (prof.startedDate) {
+          v.survey++;
+          // On-Time tracking: started within 30 min of customer's slot.
+          // Per spec — drives the new On-Time % metric for Deep Cleaning,
+          // which replaces Response % in the dashboards (Response % can't
+          // be meaningfully computed once leads broadcast to all vendors).
+          const slotDate = lead?.selectedSlot?.slotDate;
+          const slotTime = lead?.selectedSlot?.slotTime;
+          const startedDate = lead?.assignedProfessional?.startedDate;
+          const startedTime = lead?.assignedProfessional?.startedTime;
+          if (slotDate && slotTime && startedDate) {
+            const slotMoment = moment(
+              `${slotDate} ${slotTime}`,
+              "YYYY-MM-DD hh:mm A",
+            );
+            const startMoment = startedTime
+              ? moment(
+                  `${moment(startedDate).format("YYYY-MM-DD")} ${startedTime}`,
+                  "YYYY-MM-DD hh:mm A",
+                )
+              : moment(startedDate);
+            if (
+              slotMoment.isValid() &&
+              startMoment.isValid() &&
+              startMoment.diff(slotMoment, "minutes") < 30
+            ) {
+              v.onTimeStarted++;
+            }
+          }
+        }
 
         const status = normalize(lead.bookingDetails?.status);
         const isHired =
@@ -3441,6 +3514,11 @@ exports.getOverallPerformance = async (req, res) => {
         cancellationRate: v.responded
           ? parseFloat(((v.cancelled / v.responded) * 100).toFixed(2))
           : 0,
+        // On-Time % = on-time-started / total-started, per spec.
+        // Used by DC dashboards instead of responseRate.
+        onTimeStartedRate: v.survey
+          ? parseFloat(((v.onTimeStarted / v.survey) * 100).toFixed(2))
+          : 0,
         avgRating:
           v.ratingCount > 0
             ? parseFloat((v.ratingSum / v.ratingCount).toFixed(2))
@@ -3479,6 +3557,13 @@ exports.getOverallPerformance = async (req, res) => {
         cancellationPercentage: dcResponded
           ? Math.min((dcCancelled / dcResponded) * 100, 100)
           : 0,
+        // On-Time % aggregate (DC dashboards display this instead of
+        // Response %). On-time = job started within 30 min of slot.
+        onTimeStartedPercentage: dcStarted
+          ? parseFloat(((dcOnTimeStarted / dcStarted) * 100).toFixed(2))
+          : 0,
+        onTimeStartedLeads: dcOnTimeStarted,
+        startedLeads: dcStarted,
         averageGsv: parseFloat(dcAvgGsv.toFixed(2)),
         averageRating: parseFloat(dcAverageRating.toFixed(2)),
         strikes: dcTotalStrikes,
@@ -3570,29 +3655,56 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       },
     }).sort({ createdAt: -1 });
 
-    // 2) Admin-invited bookings — included regardless of distance, so manual
-    //    notify from the admin panel reliably reaches the vendor.
+    // 2) Admin-invited bookings — included regardless of distance AND
+    //    regardless of whether the slot is in the past, so manual notify
+    //    from the admin panel reliably reaches the vendor (per spec:
+    //    vendor will coordinate with customer to reschedule).
+    //    Widened lookback to 7 days so missed past-time leads still surface.
+    const invitedLookbackStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 7),
+    )
+      .toISOString()
+      .slice(0, 10);
     const invitedBookings = callerVendorId
       ? await UserBooking.find({
           isEnquiry: false,
           "service.category": "Deep Cleaning",
           "bookingDetails.status": "Pending",
           "selectedSlot.slotDate": {
-            $gte: todayStart,
+            $gte: invitedLookbackStart,
             $lt: dayAfterTomorrowStr,
           },
           "invitedVendors.professionalId": String(callerVendorId),
+          // Don't show leads that were taken by someone else or that this
+          // vendor already declined/superseded — only actionable ones.
+          "invitedVendors": {
+            $elemMatch: {
+              professionalId: String(callerVendorId),
+              responseStatus: { $in: ["pending"] },
+            },
+          },
         }).sort({ createdAt: -1 })
       : [];
 
-    // Merge + dedupe by _id (geo first to preserve $near distance ordering)
+    // Tag invited bookings so the post-filter can let them through even
+    // when their slot time has already passed — admin manual-notify
+    // shouldn't be silently dropped by a future-time gate.
+    const invitedIds = new Set(invitedBookings.map((b) => String(b._id)));
+
+    // Merge + dedupe by _id (geo first to preserve $near distance ordering).
+    // Each booking is decorated with `notifiedByAdmin` so the vendor app's
+    // low-coin+low-perf gate skips admin-invited leads — admin-notified
+    // vendors must see the lead regardless of their eligibility state
+    // (they still can't accept without coins; that's a separate gate).
     const seen = new Set();
     const mergedBookings = [];
     for (const b of [...nearbyBookings, ...invitedBookings]) {
       const id = String(b?._id || "");
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      mergedBookings.push(b);
+      const plain = typeof b.toObject === "function" ? b.toObject() : b;
+      plain.notifiedByAdmin = invitedIds.has(id);
+      mergedBookings.push(plain);
     }
 
     const nowMoment = moment();
@@ -3601,6 +3713,12 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       const slotTimeStr = booking.selectedSlot?.slotTime;
       if (!slotDateObj || !slotTimeStr) return false;
 
+      // Admin manually invited this vendor → surface the lead even if the
+      // slot is already in the past, so the vendor can call the customer
+      // and reschedule. Without this, manually-notified past leads would
+      // show "notified" in the admin panel but never reach the vendor.
+      if (invitedIds.has(String(booking._id))) return true;
+
       const slotDateMoment = moment(slotDateObj);
       const slotDateStr = slotDateMoment.format("YYYY-MM-DD");
       const slotDateTime = moment(
@@ -3608,7 +3726,7 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
         "YYYY-MM-DD hh:mm A",
       );
 
-      // Today: keep only future-times
+      // Today: keep only future-times (organic discovery only)
       if (slotDateMoment.isSame(nowMoment, "day")) {
         return slotDateTime.isAfter(nowMoment);
       }
@@ -3707,34 +3825,64 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
       "selectedSlot.slotDate": { $gte: todayStr, $lte: tomorrowStr }, // today & tomorrow inclusive
     }).sort({ createdAt: -1 });
 
-    // 2) Admin-invited bookings — included regardless of distance, so manual
-    //    notify from the admin panel reliably reaches the vendor.
+    // 2) Admin-invited bookings — included regardless of distance AND
+    //    regardless of whether the slot is in the past, so manual notify
+    //    from the admin panel reliably reaches the vendor (per spec:
+    //    vendor will coordinate with customer to reschedule).
+    //    Widened lookback to 7 days so missed past-time leads still surface.
+    const invitedLookbackStart = ymdLocal(
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7),
+    );
     const invitedBookings = callerVendorId
       ? await UserBooking.find({
           isEnquiry: false,
           "service.category": "House Painting",
           "bookingDetails.status": "Pending",
-          "selectedSlot.slotDate": { $gte: todayStr, $lte: tomorrowStr },
+          "selectedSlot.slotDate": {
+            $gte: invitedLookbackStart,
+            $lte: tomorrowStr,
+          },
           "invitedVendors.professionalId": String(callerVendorId),
+          // Only actionable invites (not declined / superseded / etc.)
+          "invitedVendors": {
+            $elemMatch: {
+              professionalId: String(callerVendorId),
+              responseStatus: { $in: ["pending"] },
+            },
+          },
         }).sort({ createdAt: -1 })
       : [];
 
-    // Merge + dedupe (geo first to preserve $near ordering)
+    // Tag invited bookings so the post-filter can let them through even
+    // when their slot time has already passed.
+    const invitedIds = new Set(invitedBookings.map((b) => String(b._id)));
+
+    // Merge + dedupe (geo first to preserve $near ordering). Each booking
+    // is decorated with `notifiedByAdmin` so the vendor app's
+    // low-coin+low-perf gate skips admin-invited leads — admin-notified
+    // vendors must see the lead regardless of their eligibility state.
     const seen = new Set();
     const mergedBookings = [];
     for (const b of [...nearbyBookings, ...invitedBookings]) {
       const id = String(b?._id || "");
       if (!id || seen.has(id)) continue;
       seen.add(id);
-      mergedBookings.push(b);
+      const plain = typeof b.toObject === "function" ? b.toObject() : b;
+      plain.notifiedByAdmin = invitedIds.has(id);
+      mergedBookings.push(plain);
     }
 
-    // Keep future times for today, keep all for tomorrow
+    // Keep future times for today, keep all for tomorrow, and always
+    // keep admin-invited leads regardless of time.
     const nowMoment = moment();
     const filteredBookings = mergedBookings.filter((booking) => {
       const slotDateStr = booking.selectedSlot?.slotDate; // "YYYY-MM-DD"
       const slotTimeStr = booking.selectedSlot?.slotTime; // "hh:mm AM/PM"
       if (!slotDateStr || !slotTimeStr) return false;
+
+      // Manually-notified leads bypass the time gate so vendor can
+      // call the customer to reschedule.
+      if (invitedIds.has(String(booking._id))) return true;
 
       const slotDateMoment = moment(slotDateStr, "YYYY-MM-DD");
       const slotDateTime = moment(
@@ -4006,6 +4154,31 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
         const err = new Error("Booking not found");
         err.statusCode = 404;
         throw err;
+      }
+
+      // First-accept-wins: when a vendor accepts, supersede every other
+      // pending invite so the lead disappears from their feeds and they
+      // can't hit Accept after the fact. Same transaction → other vendors
+      // can't sneak in between this and the assignedProfessional set above.
+      if (isAcceptingStatus) {
+        await UserBooking.updateOne(
+          { _id: bookingId },
+          {
+            $set: {
+              "invitedVendors.$[other].responseStatus": "superseded",
+              "invitedVendors.$[other].respondedAt": new Date(),
+            },
+          },
+          {
+            session,
+            arrayFilters: [
+              {
+                "other.professionalId": { $ne: String(vendorId) },
+                "other.responseStatus": "pending",
+              },
+            ],
+          },
+        );
       }
     });
 
@@ -8600,6 +8773,75 @@ exports.getNotifiedVendorsForBooking = async (req, res) => {
   }
 };
 
+// Aggregate Amount Yet to be Paid across all ongoing leads.
+// "Ongoing" = booking payment done (firstPayment.status === "paid" OR
+// paidAmount > 0) AND status is not Cancelled/Completed AND
+// amountYetToPay > 0. Date-independent per spec: this represents real
+// outstanding receivables right now, not a periodised metric.
+exports.getAmountYetToPayAggregate = async (req, res) => {
+  try {
+    const vendorId = String(req.query.vendorId || "").trim();
+
+    const match = {
+      isEnquiry: false,
+      "bookingDetails.amountYetToPay": { $gt: 0 },
+      // Either the first installment is recorded as paid, or some payment
+      // has already been collected — i.e. the booking is genuinely
+      // ongoing and we have receivables to chase.
+      $or: [
+        { "bookingDetails.firstPayment.status": "paid" },
+        { "bookingDetails.paidAmount": { $gt: 0 } },
+      ],
+      "bookingDetails.status": {
+        $nin: [
+          "Cancelled",
+          "Customer Cancelled",
+          "Admin Cancelled",
+          "Project Completed",
+          "Completed",
+        ],
+      },
+    };
+
+    if (vendorId) {
+      match["assignedProfessional.professionalId"] = vendorId;
+    }
+
+    const result = await UserBooking.aggregate([
+      { $match: match },
+      {
+        $group: {
+          _id: null,
+          totalYetToPay: { $sum: "$bookingDetails.amountYetToPay" },
+          totalGsv: { $sum: "$bookingDetails.finalTotal" },
+          totalPaid: { $sum: "$bookingDetails.paidAmount" },
+          ongoingLeads: { $sum: 1 },
+        },
+      },
+    ]);
+
+    const agg = result[0] || {
+      totalYetToPay: 0,
+      totalGsv: 0,
+      totalPaid: 0,
+      ongoingLeads: 0,
+    };
+
+    return res.status(200).json({
+      success: true,
+      amountYetToPay: Number(agg.totalYetToPay || 0),
+      totalGsv: Number(agg.totalGsv || 0),
+      totalPaid: Number(agg.totalPaid || 0),
+      ongoingLeads: Number(agg.ongoingLeads || 0),
+    });
+  } catch (err) {
+    console.error("getAmountYetToPayAggregate error:", err);
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error" });
+  }
+};
+
 exports.notifyVendorForLead = async (req, res) => {
   try {
     const { bookingId, vendorId } = req.body || {};
@@ -8652,6 +8894,34 @@ exports.notifyVendorForLead = async (req, res) => {
         success: false,
         message: "Cannot notify an archived vendor.",
       });
+    }
+
+    // Block notifying a vendor whose slot is already booked at this lead's
+    // time — otherwise the vendor sees the lead, taps Accept, and gets a
+    // 409 from respondConfirmJobVendorLine. Reject here with a clear
+    // message so the admin picks a different vendor up front.
+    const slotDate = booking?.selectedSlot?.slotDate;
+    const slotTime = booking?.selectedSlot?.slotTime;
+    if (slotDate && slotTime) {
+      const durationMinutes = computeBookingDuration(booking);
+      if (durationMinutes) {
+        try {
+          await validateVendorSlotAvailable({
+            vendorId: String(vendorId),
+            date: slotDate,
+            slotTime,
+            durationMinutes,
+            excludeBookingId: String(bookingId),
+          });
+        } catch (e) {
+          return res.status(e.status || 409).json({
+            success: false,
+            message:
+              e.message ||
+              "Vendor already has a booking at this slot — choose a different vendor or slot.",
+          });
+        }
+      }
     }
 
     const alreadyInvited = (booking.invitedVendors || []).some(
