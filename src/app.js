@@ -21,6 +21,7 @@ const corsOptions = {
     "https://websitehomjee2026.netlify.app",
     "https://adminpanelhomjee.netlify.app",
     "https://websitehomjee.netlify.app",
+    "https://homjeeadminpanel2026.netlify.app/",
     "http://localhost:5173",
     "http://localhost:5174",
     "https://cloudflare-workers-autoconfig-homjee-website.ops-nnc.workers.dev",
