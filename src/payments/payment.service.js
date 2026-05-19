@@ -6,6 +6,7 @@ const {
   validateBookingSlotStillAvailable,
 } = require("../helpers/validateBookingSlotStillAvailable");
 const { fanOutLeadToEligibleVendors } = require("../services/leadFanout.service");
+const { invalidateForDate } = require("../services/slotCache.service");
 
 // ---------------------------------------------------------
 // Helpers
@@ -260,6 +261,19 @@ exports.verifyAndRecordBookingPayment = async ({
             const freshBooking = await userBookings.findById(bookingId).lean();
             if (freshBooking && freshBooking.isEnquiry === false) {
                 await fanOutLeadToEligibleVendors(freshBooking);
+                // Bust the slot-availability cache for this date so the next
+                // customer's slot query reflects the new paid commitment
+                // (without this, the 60s cache lets two customers both see
+                // the same slot as "available" — Issue #2).
+                const slotDate = freshBooking?.selectedSlot?.slotDate;
+                if (slotDate) {
+                    invalidateForDate(slotDate).catch((err) =>
+                        console.error(
+                            "[payment.verify] invalidateForDate failed:",
+                            err?.message,
+                        ),
+                    );
+                }
             }
         } catch (fanoutErr) {
             console.error(

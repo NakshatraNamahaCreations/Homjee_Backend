@@ -35,6 +35,83 @@ const {
 const {
   fanOutLeadToEligibleVendors,
 } = require("../../services/leadFanout.service");
+const { filterEligibleVendors } = require("../../helpers/vendorEligibility");
+const { buildCityMatchRegex } = require("../../helpers/serviceCity");
+const { invalidateForDate } = require("../../services/slotCache.service");
+
+// Find vendors who pass the same eligibility pipeline as the slot picker
+// (radius/coins/team/KPI) AND are free at the given slot. Used by
+// notifyVendorForLead to recommend alternatives when the admin picks a
+// vendor whose slot is already booked. Returns lightweight cards
+// (no PII beyond name/phone/coins) suitable for an admin panel modal.
+async function findFreeAlternativeVendors({
+  booking,
+  excludeVendorId,
+  slotDate,
+  slotTime,
+  durationMinutes,
+}) {
+  if (!booking || !slotDate || !slotTime || !durationMinutes) return [];
+  const serviceType = booking.serviceType;
+  const lat = booking?.address?.location?.coordinates?.[1];
+  const lng = booking?.address?.location?.coordinates?.[0];
+  const city = booking?.address?.city;
+  if (!serviceType || lat == null || lng == null) return [];
+
+  const vendorQuery = {
+    "vendor.serviceType":
+      serviceType === "deep_cleaning" ? /clean/i : /paint/i,
+  };
+  if (city) {
+    const cityRegex = buildCityMatchRegex(city);
+    if (cityRegex) vendorQuery["vendor.city"] = cityRegex;
+  }
+  const vendors = await vendorAuthSchema.find(vendorQuery).lean();
+  if (!vendors.length) return [];
+
+  const { requiredCoins } = await computeBookingCoinPolicy(booking);
+  const minTeamMembers =
+    serviceType === "deep_cleaning"
+      ? (booking.service || []).reduce(
+          (m, s) => Math.max(m, Number(s?.teamMembersRequired || 0)),
+          1,
+        )
+      : 1;
+
+  const { eligibleVendors } = await filterEligibleVendors({
+    vendors,
+    lat,
+    lng,
+    requiredCoins,
+    serviceType,
+    minTeamMembers,
+    includeDebug: false,
+  });
+
+  const free = [];
+  for (const v of eligibleVendors) {
+    if (String(v._id) === String(excludeVendorId)) continue;
+    try {
+      await validateVendorSlotAvailable({
+        vendorId: String(v._id),
+        date: slotDate,
+        slotTime,
+        durationMinutes,
+        excludeBookingId: String(booking._id),
+      });
+      free.push({
+        _id: String(v._id),
+        name: v?.vendor?.vendorName || "",
+        phone: v?.vendor?.mobileNumber || "",
+        coinBalance: Number(v?.coinBalance || 0),
+      });
+      if (free.length >= 10) break; // cap payload — admin only needs a few
+    } catch (_) {
+      // Vendor has a conflict at this slot too — skip.
+    }
+  }
+  return free;
+}
 
 // Local copy of the batch-loader from vendor controller — kept here so
 // gate logic on lead-distribution endpoints doesn't pull in the vendor
@@ -1206,6 +1283,15 @@ exports.createBooking = async (req, res) => {
       fanOutLeadToEligibleVendors(updatedBooking).catch((err) =>
         console.error("[createBooking] fanout failed:", err?.message),
       );
+      // Bust the slot cache so the next customer's slot query reflects
+      // this commitment (Issue #2 — without this, the 60s cache lets two
+      // customers both see the same slot as available).
+      const sDate = updatedBooking?.selectedSlot?.slotDate;
+      if (sDate) {
+        invalidateForDate(sDate).catch((err) =>
+          console.error("[createBooking] cache invalidate failed:", err?.message),
+        );
+      }
     }
 
     return res.status(201).json({
@@ -2091,6 +2177,32 @@ exports.adminCreateBooking = async (req, res) => {
     };
 
     await booking.save();
+
+    // Auto fan-out to all eligible city vendors when admin creates a real
+    // lead (isEnquiry === false). Skipped for enquiries — those convert
+    // later (via payment.service or admin promote) and fan out then.
+    // Fire-and-forget: a fan-out failure must not roll back the booking.
+    if (!isEnquiry) {
+      try {
+        const fresh = await UserBooking.findById(booking._id).lean();
+        if (fresh) {
+          fanOutLeadToEligibleVendors(fresh).catch((err) =>
+            console.error("[adminCreateBooking] fanout failed:", err?.message),
+          );
+        }
+      } catch (e) {
+        console.error("[adminCreateBooking] fanout lookup failed:", e?.message);
+      }
+    }
+
+    // Bust the slot cache for this booking's date so the next slot query
+    // for any nearby customer reflects this new commitment (Issue #2).
+    const newSlotDate = booking?.selectedSlot?.slotDate;
+    if (newSlotDate) {
+      invalidateForDate(newSlotDate).catch((err) =>
+        console.error("[adminCreateBooking] cache invalidate failed:", err?.message),
+      );
+    }
 
     return res.status(201).json({
       message: "Admin booking created successfully",
@@ -3659,9 +3771,9 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     //    regardless of whether the slot is in the past, so manual notify
     //    from the admin panel reliably reaches the vendor (per spec:
     //    vendor will coordinate with customer to reschedule).
-    //    Widened lookback to 7 days so missed past-time leads still surface.
+    //    Lookback widened to 30 days so older past-time invites still surface.
     const invitedLookbackStart = new Date(
-      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 7),
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 30),
     )
       .toISOString()
       .slice(0, 10);
@@ -3829,9 +3941,9 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
     //    regardless of whether the slot is in the past, so manual notify
     //    from the admin panel reliably reaches the vendor (per spec:
     //    vendor will coordinate with customer to reschedule).
-    //    Widened lookback to 7 days so missed past-time leads still surface.
+    //    Lookback widened to 30 days so older past-time invites still surface.
     const invitedLookbackStart = ymdLocal(
-      new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7),
+      new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30),
     );
     const invitedBookings = callerVendorId
       ? await UserBooking.find({
@@ -8899,7 +9011,9 @@ exports.notifyVendorForLead = async (req, res) => {
     // Block notifying a vendor whose slot is already booked at this lead's
     // time — otherwise the vendor sees the lead, taps Accept, and gets a
     // 409 from respondConfirmJobVendorLine. Reject here with a clear
-    // message so the admin picks a different vendor up front.
+    // message PLUS a list of alternative vendors who ARE free at this
+    // slot, so the admin panel can show them and the admin can pick one
+    // without leaving the screen.
     const slotDate = booking?.selectedSlot?.slotDate;
     const slotTime = booking?.selectedSlot?.slotTime;
     if (slotDate && slotTime) {
@@ -8914,11 +9028,32 @@ exports.notifyVendorForLead = async (req, res) => {
             excludeBookingId: String(bookingId),
           });
         } catch (e) {
-          return res.status(e.status || 409).json({
+          const status = e.status || 409;
+          // On slot conflict, surface free alternatives so the admin
+          // doesn't have to bounce back to the lead screen.
+          let alternativeVendors = [];
+          if (status === 409) {
+            try {
+              alternativeVendors = await findFreeAlternativeVendors({
+                booking,
+                excludeVendorId: String(vendorId),
+                slotDate,
+                slotTime,
+                durationMinutes,
+              });
+            } catch (altErr) {
+              console.error(
+                "notifyVendorForLead - alternative lookup failed:",
+                altErr?.message,
+              );
+            }
+          }
+          return res.status(status).json({
             success: false,
             message:
               e.message ||
               "Vendor already has a booking at this slot — choose a different vendor or slot.",
+            alternativeVendors,
           });
         }
       }
