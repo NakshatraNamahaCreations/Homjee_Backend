@@ -212,7 +212,18 @@ async function buildSlotResponse({
     ],
     "selectedSlot.slotDate": date,
     "bookingDetails.status": {
-      $nin: ["Customer Cancelled", "Admin Cancelled", "Cancelled"],
+      // "Cancelled Rescheduled" is the OLD shell left behind when admin/
+      // customer reschedules a paid booking (a new booking is cloned at the
+      // new slot). Excluding it here is what stops the original slot from
+      // staying blocked after a reschedule — without this, V1's "rescheduled
+      // away" 1:00 PM commitment + the new booking would double-count and
+      // lock other customers out of that slot.
+      $nin: [
+        "Customer Cancelled",
+        "Admin Cancelled",
+        "Cancelled",
+        "Cancelled Rescheduled",
+      ],
     },
   }).lean();
 

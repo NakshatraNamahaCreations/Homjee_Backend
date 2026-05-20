@@ -494,18 +494,48 @@ router.post(
         return res.json({ availableSlots: [], availableTeamCount });
       }
 
-      /* 4️⃣ Fetch future bookings (exclude current) */
-      const futureBookings = await UserBooking.find({
-        "assignedProfessional.professionalId": vendorId,
+      /* 4️⃣ Fetch bookings on the target date that block THIS vendor.
+         Two categories must block:
+           (a) Already-assigned bookings (vendor accepted earlier).
+           (b) Paid leads where this vendor was invited and has NOT yet
+               responded — if the vendor reschedules INTO that slot, they
+               won't be able to accept the pending lead anymore (it would
+               clash with the rescheduled booking). Spec: "block the slots
+               in vendor app while rescheduling so the vendor doesn't lock
+               themselves out of a pending lead."
+         The current booking being rescheduled is excluded from both
+         categories so its own slot stays selectable. */
+      const blockingBookings = await UserBooking.find({
+        $or: [
+          { "assignedProfessional.professionalId": vendorId },
+          {
+            isEnquiry: false,
+            invitedVendors: {
+              $elemMatch: {
+                professionalId: vendorId,
+                responseStatus: "pending",
+              },
+            },
+          },
+        ],
         "selectedSlot.slotDate": targetDate,
         _id: { $ne: bookingId },
         "bookingDetails.status": {
-          $nin: ["Cancelled", "Customer Cancelled", "Admin Cancelled"],
+          // "Cancelled Rescheduled" is the OLD shell left after a prior
+          // reschedule — its slot no longer belongs to this vendor. Without
+          // excluding it, the vendor's reschedule grid wrongly blocks slots
+          // that are actually free.
+          $nin: [
+            "Cancelled",
+            "Customer Cancelled",
+            "Admin Cancelled",
+            "Cancelled Rescheduled",
+          ],
         },
       });
 
       /* 5️⃣ Build blocked ranges */
-      const blockedRanges = (futureBookings || []).map((b) => {
+      const blockedRanges = (blockingBookings || []).map((b) => {
         const start = moment(
           `${b.selectedSlot.slotDate} ${b.selectedSlot.slotTime}`,
           "YYYY-MM-DD h:mm A"

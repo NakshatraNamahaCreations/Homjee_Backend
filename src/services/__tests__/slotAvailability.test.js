@@ -406,6 +406,85 @@ describe("slotAvailability — paid-but-unassigned bookings consume capacity", (
   });
 });
 
+describe("slotAvailability — own-customer hold attribution", () => {
+  // Reproduces the 2-vendor-Pune bug: Customer A pays for 1:00 PM (no
+  // vendor assigned yet), then Customer B grabs a hold on V1 at the same
+  // slot for their own checkout. The slot still has capacity for one more
+  // booker (V2) until both customers' commitments resolve — but the
+  // engine must NOT consume Customer B's hold to satisfy Customer A's
+  // booking. That would double-credit and falsely free the slot when in
+  // fact V1 is held by B and V2 is implicitly committed to A.
+
+  test("paid booking by A + active hold by B at same slot → both commitments counted", () => {
+    const v1 = vendor({ id: "v1", team: 1 });
+    const v2 = vendor({ id: "v2", team: 1 });
+    const r = calculateAvailableSlots({
+      vendors: [v1, v2],
+      bookings: [
+        {
+          serviceType: "house_painting",
+          isEnquiry: false,
+          customer: { customerId: "customerA" },
+          selectedSlot: { slotTime: "01:00 PM", slotDate: TOMORROW },
+          bookingDetails: { serviceDurationMinutes: 30, status: "Confirmed" },
+        },
+      ],
+      activeHolds: [
+        {
+          vendorId: "v1",
+          slotTime: "01:00 PM",
+          durationMinutes: 30,
+          customerId: "customerB",
+        },
+      ],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    // V1 held by B + A's unassigned booking → both vendors committed.
+    expect(r.slots).not.toContain("01:00 PM");
+    expect(r.unavailableSlots).toContain("01:00 PM");
+  });
+
+  test("paid booking by A + A's own lingering hold on V1 → only one commitment", () => {
+    // Race window: payment committed, hold release hasn't run yet.
+    // Without same-customer attribution, A would double-count (bump +
+    // pushBlock), wrongly blocking the slot even when V2 is free.
+    const v1 = vendor({ id: "v1", team: 1 });
+    const v2 = vendor({ id: "v2", team: 1 });
+    const r = calculateAvailableSlots({
+      vendors: [v1, v2],
+      bookings: [
+        {
+          serviceType: "house_painting",
+          isEnquiry: false,
+          customer: { customerId: "customerA" },
+          selectedSlot: { slotTime: "01:00 PM", slotDate: TOMORROW },
+          bookingDetails: { serviceDurationMinutes: 30, status: "Confirmed" },
+        },
+      ],
+      activeHolds: [
+        {
+          vendorId: "v1",
+          slotTime: "01:00 PM",
+          durationMinutes: 30,
+          customerId: "customerA", // same customer — leftover pre-payment hold
+        },
+      ],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).toContain("01:00 PM");
+  });
+});
+
 describe("slotAvailability — time helpers", () => {
   test("toMinutes / toTime round-trip", () => {
     expect(toMinutes("10:00 AM")).toBe(600);

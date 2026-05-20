@@ -28,6 +28,11 @@ const CANCELLED_STATUSES = [
   "Customer Cancelled",
   "Admin Cancelled",
   "Cancelled",
+  // "Cancelled Rescheduled" is the OLD shell left after a reschedule —
+  // the active booking now lives at the new slot. Must be excluded here
+  // so the slot-still-available count for payment-verify matches what
+  // the slot-availability engine sees (which also excludes it).
+  "Cancelled Rescheduled",
 ];
 
 function escapeRegex(s = "") {

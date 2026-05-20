@@ -126,6 +126,11 @@ async function listActiveHoldsForDate(date) {
           slotTime: parsed.slotTime,
           durationMinutes: parsed.durationMinutes,
           holdId: parsed.holdId,
+          // customerId is needed by the slot engine so a paid-but-
+          // unassigned booking can be attributed to the SAME customer's
+          // hold (instead of any hold at that slot — which over-decrements
+          // the unassigned counter and falsely frees the slot for others).
+          customerId: parsed.customerId || null,
         });
       } catch (_) {
         // ignore malformed entries

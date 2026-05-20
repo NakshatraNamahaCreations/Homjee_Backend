@@ -202,29 +202,29 @@ function calculateAvailableSlots({
   };
 
   // ── Holds first ──
-  // Each active hold blocks one vendor at one slot. Build a per-slot
-  // counter of how many distinct vendors are held; we'll use it to
-  // suppress the unassignedCommitments bump for the same slot so a
-  // paid-but-unassigned booking + its lingering hold don't double-count.
-  // Without this, a customer who paid for 2 PM with V1 held would
-  // consume BOTH V1 (via hold) AND a generic unassigned slot, making
-  // the slot unbookable for everyone else even when V2 is free.
-  const heldVendorsAtSlot = new Map(); // canonLabel -> count of holds
+  // Each active hold blocks one vendor at one slot. We also index the
+  // held vendors by (slotLabel, customerId) so a paid-but-unassigned
+  // booking belonging to the SAME customer can be matched to its own
+  // leftover hold (instead of falsely consuming any other customer's
+  // hold at that slot — which over-decrements the unassigned counter
+  // and frees the slot for the next browser when it's actually full).
+  const heldVendorsBySlotCustomer = new Map(); // `${label}|${customerId}` -> Set<vendorId>
   for (const h of activeHolds) {
     const startMin = toMinutes(h.slotTime);
     const dur = Number(h.durationMinutes) || 0;
     if (!h.vendorId || startMin == null || !dur) continue;
     pushBlock(h.vendorId, blockFromCommitment(startMin, dur));
     const k = canonLabel(h.slotTime);
-    if (k) heldVendorsAtSlot.set(k, (heldVendorsAtSlot.get(k) || 0) + 1);
+    if (k && h.customerId) {
+      const key = `${k}|${String(h.customerId)}`;
+      if (!heldVendorsBySlotCustomer.has(key)) {
+        heldVendorsBySlotCustomer.set(key, new Set());
+      }
+      heldVendorsBySlotCustomer.get(key).add(String(h.vendorId));
+    }
   }
 
   // ── Then bookings ──
-  // Tracks how many "unassigned" bumps we've already covered by an
-  // active hold at the same slot, so a 2nd paid booking at the same
-  // slot (a real second commitment) still increments the counter.
-  const heldBudget = new Map(heldVendorsAtSlot); // mutable copy
-
   for (const b of bookings) {
     // FIX: schema field is `professionalId`, not `vendorId`. Old code used
     // `vendorId` so the entire blocked-windows map was empty in production.
@@ -238,16 +238,33 @@ function calculateAvailableSlots({
     } else if (b.isEnquiry === false) {
       // Paid (isEnquiry flipped to false in payment.service.js) but no
       // vendor accepted yet — committed to ONE eligible vendor.
-      // If there's a hold at this exact slot, that hold is THIS
-      // booking's leftover pre-payment hold (or some other customer's
-      // in-flight booking that hasn't paid yet — either way it already
-      // consumes one vendor's capacity via pushBlock above), so skip
-      // the bump to avoid double-counting. Each hold absorbs ONE
-      // booking's bump; further bookings at the same slot still bump.
+      //
+      // Attribution rule: if this customer ALSO has an active hold at
+      // this exact slot, the hold IS this booking's leftover pre-payment
+      // hold — pushBlock already blocked that vendor, so don't bump
+      // unassigned (would double-count). Otherwise, bump unassigned so
+      // the slot engine reserves one vendor of capacity for this booking.
+      //
+      // Matching by customerId (not just by slot) is what fixes the
+      // 2-vendor-Pune bug: Customer A's paid booking + Customer B's
+      // active hold at the same slot are TWO real commitments, so we
+      // must bump for A AND block for B.
       const k = canonLabel(b.selectedSlot?.slotTime);
-      if (k && (heldBudget.get(k) || 0) > 0) {
-        heldBudget.set(k, heldBudget.get(k) - 1);
-      } else {
+      const bookingCustomerId = b.customer?.customerId;
+      let consumedByOwnHold = false;
+      if (k && bookingCustomerId) {
+        const key = `${k}|${String(bookingCustomerId)}`;
+        const ownHolds = heldVendorsBySlotCustomer.get(key);
+        if (ownHolds && ownHolds.size > 0) {
+          // Pop one vendor — subsequent paid bookings by the same
+          // customer at the same slot (rare but possible) still need
+          // their own bump or hold match.
+          const next = ownHolds.values().next().value;
+          ownHolds.delete(next);
+          consumedByOwnHold = true;
+        }
+      }
+      if (!consumedByOwnHold) {
         bumpUnassigned(b.selectedSlot?.slotTime);
       }
     }
@@ -259,10 +276,13 @@ function calculateAvailableSlots({
       [...unassignedCommitments.entries()],
     );
   }
-  if (heldVendorsAtSlot.size) {
+  if (heldVendorsBySlotCustomer.size) {
     console.log(
-      "[slots] heldVendorsAtSlot (deducted from unassigned bumps):",
-      [...heldVendorsAtSlot.entries()],
+      "[slots] heldVendorsBySlotCustomer (own-customer hold attribution):",
+      [...heldVendorsBySlotCustomer.entries()].map(([k, set]) => [
+        k,
+        [...set],
+      ]),
     );
   }
 
@@ -324,7 +344,6 @@ function calculateAvailableSlots({
         freeVendors: freeVendorIds.length,
         blockedVendors: blockedVendorIds.length,
         unassignedCommitments: consumed,
-        heldAtSlot: heldVendorsAtSlot.get(label) || 0,
         trueFreeCount,
       });
     }
