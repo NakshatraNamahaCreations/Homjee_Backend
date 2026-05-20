@@ -7,6 +7,7 @@ const {
 } = require("../helpers/validateBookingSlotStillAvailable");
 const { fanOutLeadToEligibleVendors } = require("../services/leadFanout.service");
 const { invalidateForDate } = require("../services/slotCache.service");
+const { releaseCustomerHoldsForSlot } = require("../services/slotHold.service");
 
 // ---------------------------------------------------------
 // Helpers
@@ -261,11 +262,44 @@ exports.verifyAndRecordBookingPayment = async ({
             const freshBooking = await userBookings.findById(bookingId).lean();
             if (freshBooking && freshBooking.isEnquiry === false) {
                 await fanOutLeadToEligibleVendors(freshBooking);
-                // Bust the slot-availability cache for this date so the next
-                // customer's slot query reflects the new paid commitment
-                // (without this, the 60s cache lets two customers both see
-                // the same slot as "available" — Issue #2).
+
                 const slotDate = freshBooking?.selectedSlot?.slotDate;
+                const slotTime = freshBooking?.selectedSlot?.slotTime;
+                const customerId = freshBooking?.customer?.customerId;
+
+                // Release this customer's pre-payment Redis hold so it
+                // stops blocking the slot for the next customer. Without
+                // this, the 10-min hold lingers AND the paid booking
+                // shows up in unassignedCommitments, double-counting the
+                // same customer and locking the slot for everyone else
+                // even when another vendor is free.
+                if (customerId && slotDate && slotTime) {
+                    releaseCustomerHoldsForSlot({
+                        customerId,
+                        date: slotDate,
+                        slotTime,
+                    })
+                        .then((n) => {
+                            if (n) {
+                                console.log(
+                                    "[payment.verify] released",
+                                    n,
+                                    "stale hold(s) for customer",
+                                    String(customerId),
+                                );
+                            }
+                        })
+                        .catch((err) =>
+                            console.error(
+                                "[payment.verify] releaseCustomerHoldsForSlot failed:",
+                                err?.message,
+                            ),
+                        );
+                }
+
+                // Bust the slot-availability cache for this date so the next
+                // customer's slot query reflects both the new commitment and
+                // the hold release.
                 if (slotDate) {
                     invalidateForDate(slotDate).catch((err) =>
                         console.error(

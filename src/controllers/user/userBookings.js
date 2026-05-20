@@ -5022,6 +5022,33 @@ exports.rescheduleBooking = async (req, res) => {
       return res.status(400).json({ message: "vendorId is required" });
     }
 
+    // Block rescheduling INTO a slot the vendor already has another
+    // booking at — otherwise they later try to accept a third lead at
+    // the same time and the conflict check fires too late. Same
+    // validation the customer/admin booking paths use.
+    const durationMinutes = computeBookingDuration(booking);
+    if (durationMinutes) {
+      try {
+        await validateVendorSlotAvailable({
+          vendorId: String(actingVendorId),
+          date: slotDate,
+          slotTime,
+          durationMinutes,
+          excludeBookingId: String(bookingId),
+        });
+      } catch (e) {
+        // On 409, surface a clear message and the conflicting time so
+        // the vendor app can show "pick another slot" without errors.
+        return res.status(e.status || 409).json({
+          success: false,
+          message:
+            e.message ||
+            "You already have another booking at this slot — please pick a different time.",
+          conflict: { slotDate, slotTime, vendorId: String(actingVendorId) },
+        });
+      }
+    }
+
     // ✅ Update booking safely
     const updatedBooking = await UserBooking.findByIdAndUpdate(
       bookingId,
@@ -5033,6 +5060,18 @@ exports.rescheduleBooking = async (req, res) => {
         },
       },
       { new: true },
+    );
+
+    // Bust the slot cache for BOTH the old and new dates so other
+    // customers' slot pickers reflect this vendor's new commitment.
+    const oldDate = booking?.selectedSlot?.slotDate;
+    if (oldDate && oldDate !== slotDate) {
+      invalidateForDate(oldDate).catch((err) =>
+        console.error("[rescheduleBooking] old-date invalidate failed:", err?.message),
+      );
+    }
+    invalidateForDate(slotDate).catch((err) =>
+      console.error("[rescheduleBooking] new-date invalidate failed:", err?.message),
     );
 
     return res.status(200).json({

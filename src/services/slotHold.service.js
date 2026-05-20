@@ -147,9 +147,56 @@ async function scanAll(redis, pattern) {
   return out;
 }
 
+/**
+ * Release every active hold owned by `customerId` at the given (date,
+ * slotTime). Called after a customer's payment succeeds so their
+ * pre-payment hold stops blocking other customers — without this, the
+ * hold lingers for up to 10 minutes AND the paid-but-unassigned booking
+ * also counts as 1 commitment in the slot engine, double-counting the
+ * same customer and locking the slot for everyone else even when
+ * another vendor is free.
+ *
+ * Returns the count of holds released. Best-effort: failure is logged
+ * by the caller, never thrown.
+ */
+async function releaseCustomerHoldsForSlot({ customerId, date, slotTime }) {
+  if (!customerId || !date || !slotTime) return 0;
+  return safeRedis(async (redis) => {
+    const pattern = `${HOLD_KEY_PREFIX}:*:${date}:*`;
+    const keys = await scanAll(redis, pattern);
+    if (!keys.length) return 0;
+
+    const values = await redis.mget(...keys);
+    let released = 0;
+    for (let i = 0; i < keys.length; i++) {
+      const raw = values[i];
+      if (!raw) continue;
+      try {
+        const parsed = JSON.parse(raw);
+        if (
+          String(parsed.customerId || "") === String(customerId) &&
+          String(parsed.slotTime || "") === String(slotTime)
+        ) {
+          const ok = await releaseHold({
+            vendorId: parsed.vendorId,
+            date: parsed.date,
+            slotTime: parsed.slotTime,
+            holdId: parsed.holdId,
+          });
+          if (ok?.ok) released++;
+        }
+      } catch (_) {
+        // skip malformed entries
+      }
+    }
+    return released;
+  }, 0);
+}
+
 module.exports = {
   acquireHold,
   releaseHold,
   listActiveHoldsForDate,
+  releaseCustomerHoldsForSlot,
   HOLD_TTL_SECONDS,
 };
