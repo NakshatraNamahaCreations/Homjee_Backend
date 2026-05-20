@@ -201,6 +201,30 @@ function calculateAvailableSlots({
     unassignedCommitments.set(k, (unassignedCommitments.get(k) || 0) + 1);
   };
 
+  // ── Holds first ──
+  // Each active hold blocks one vendor at one slot. Build a per-slot
+  // counter of how many distinct vendors are held; we'll use it to
+  // suppress the unassignedCommitments bump for the same slot so a
+  // paid-but-unassigned booking + its lingering hold don't double-count.
+  // Without this, a customer who paid for 2 PM with V1 held would
+  // consume BOTH V1 (via hold) AND a generic unassigned slot, making
+  // the slot unbookable for everyone else even when V2 is free.
+  const heldVendorsAtSlot = new Map(); // canonLabel -> count of holds
+  for (const h of activeHolds) {
+    const startMin = toMinutes(h.slotTime);
+    const dur = Number(h.durationMinutes) || 0;
+    if (!h.vendorId || startMin == null || !dur) continue;
+    pushBlock(h.vendorId, blockFromCommitment(startMin, dur));
+    const k = canonLabel(h.slotTime);
+    if (k) heldVendorsAtSlot.set(k, (heldVendorsAtSlot.get(k) || 0) + 1);
+  }
+
+  // ── Then bookings ──
+  // Tracks how many "unassigned" bumps we've already covered by an
+  // active hold at the same slot, so a 2nd paid booking at the same
+  // slot (a real second commitment) still increments the counter.
+  const heldBudget = new Map(heldVendorsAtSlot); // mutable copy
+
   for (const b of bookings) {
     // FIX: schema field is `professionalId`, not `vendorId`. Old code used
     // `vendorId` so the entire blocked-windows map was empty in production.
@@ -213,9 +237,19 @@ function calculateAvailableSlots({
       pushBlock(vid, blockFromCommitment(startMin, dur));
     } else if (b.isEnquiry === false) {
       // Paid (isEnquiry flipped to false in payment.service.js) but no
-      // vendor accepted yet — committed to ONE eligible vendor, just
-      // don't know which one. Counts as 1 unit at this exact slot time.
-      bumpUnassigned(b.selectedSlot?.slotTime);
+      // vendor accepted yet — committed to ONE eligible vendor.
+      // If there's a hold at this exact slot, that hold is THIS
+      // booking's leftover pre-payment hold (or some other customer's
+      // in-flight booking that hasn't paid yet — either way it already
+      // consumes one vendor's capacity via pushBlock above), so skip
+      // the bump to avoid double-counting. Each hold absorbs ONE
+      // booking's bump; further bookings at the same slot still bump.
+      const k = canonLabel(b.selectedSlot?.slotTime);
+      if (k && (heldBudget.get(k) || 0) > 0) {
+        heldBudget.set(k, heldBudget.get(k) - 1);
+      } else {
+        bumpUnassigned(b.selectedSlot?.slotTime);
+      }
     }
   }
 
@@ -225,12 +259,11 @@ function calculateAvailableSlots({
       [...unassignedCommitments.entries()],
     );
   }
-
-  for (const h of activeHolds) {
-    const startMin = toMinutes(h.slotTime);
-    const dur = Number(h.durationMinutes) || 0;
-    if (!h.vendorId || startMin == null || !dur) continue;
-    pushBlock(h.vendorId, blockFromCommitment(startMin, dur));
+  if (heldVendorsAtSlot.size) {
+    console.log(
+      "[slots] heldVendorsAtSlot (deducted from unassigned bumps):",
+      [...heldVendorsAtSlot.entries()],
+    );
   }
 
   /* ---- Generate the slot grid ---- */
