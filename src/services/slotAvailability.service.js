@@ -280,6 +280,11 @@ function calculateAvailableSlots({
   // but can't pick it.
   const unavailableSlots = [];
 
+  // Per-slot diagnostic for unavailable slots. Surfaced in the API
+  // response so the FE / engineer can see exactly why a slot was
+  // marked unavailable without needing terminal log access.
+  const diag = [];
+
   for (let s = startFloor; s <= maxStart; s += gridMin) {
     // For HP, align the iteration to the hourly grid even if startFloor
     // landed on a half-hour due to "now".
@@ -287,6 +292,7 @@ function calculateAvailableSlots({
 
     const candidate = blockFromCommitment(s, serviceDuration);
     const freeVendorIds = [];
+    const blockedVendorIds = [];
 
     for (const v of eligibleVendors) {
       const vBlocks = blocked.get(String(v._id)) || [];
@@ -295,6 +301,7 @@ function calculateAvailableSlots({
         (b) => candidate.start < b.end && candidate.end > b.start,
       );
       if (!clash) freeVendorIds.push(String(v._id));
+      else blockedVendorIds.push(String(v._id));
     }
 
     const label = toTime(s);
@@ -311,6 +318,15 @@ function calculateAvailableSlots({
     } else {
       unavailableSlots.push(label);
       reasons.allBooked = true;
+      diag.push({
+        slot: label,
+        eligibleVendors: eligibleVendors.length,
+        freeVendors: freeVendorIds.length,
+        blockedVendors: blockedVendorIds.length,
+        unassignedCommitments: consumed,
+        heldAtSlot: heldVendorsAtSlot.get(label) || 0,
+        trueFreeCount,
+      });
     }
   }
 
@@ -320,6 +336,13 @@ function calculateAvailableSlots({
     unavailableSlots,
     reasons,
     availableVendorsCount: eligibleVendors.length,
+    debug: {
+      totalEligibleVendors: eligibleVendors.length,
+      eligibleVendorIds: eligibleVendors.map((v) => String(v._id)),
+      bookingsConsidered: bookings.length,
+      activeHoldsConsidered: activeHolds.length,
+      unavailableSlotsExplained: diag,
+    },
   };
 }
 

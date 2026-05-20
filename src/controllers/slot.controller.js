@@ -266,6 +266,12 @@ async function buildSlotResponse({
     reason: result.slots.length
       ? null
       : { ...reasons, message: getReasonMessage(reasons) },
+    // Per-slot diagnostic. Surfaced so anyone can open DevTools → Network
+    // and see exactly why a given slot was hidden: how many vendors were
+    // eligible, how many got blocked by booking/hold, and what counter
+    // pushed trueFreeCount to zero. Safe to leave in prod — small payload,
+    // helps support debug "the slot won't show" tickets.
+    debug: result.debug,
   };
 
   // 7. Cache for 60s — but only successful, non-empty results.
