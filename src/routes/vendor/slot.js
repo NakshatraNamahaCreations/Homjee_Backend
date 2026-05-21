@@ -165,6 +165,10 @@ const UserBooking = require("../../models/user/userBookings");
 const walletTransaction = require("../../models/vendor/wallet");
 const moment = require("moment");
 const mongoose = require("mongoose");
+const {
+  validateVendorSlotAvailable,
+  computeBookingDuration,
+} = require("../../services/confirmBooking.service");
 
 // referring hour basis
 // router.post(
@@ -662,6 +666,47 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
     );
 
     const isResponded = isAssigned || isAcceptedVendor;
+
+    /* --------------------------------------------------
+       CONFLICT GUARD
+       If a vendor is already responsible for this booking (assigned or
+       previously accepted), the new slot must not overlap with any of
+       their OTHER active bookings. Without this gate, admin can drop
+       the lead onto a slot the vendor is already busy with — the vendor
+       app then errors out the next time it tries to act on either lead.
+       Exclude self via bookingId so the booking's own current slot is
+       not counted as a conflict (mode "same-booking" intentionally writes
+       the same _id).
+    -------------------------------------------------- */
+    const targetVendorId =
+      booking.assignedProfessional?.professionalId ||
+      (booking.invitedVendors || []).find(
+        (v) => String(v.responseStatus || "").toLowerCase() === "accepted"
+      )?.professionalId ||
+      null;
+
+    if (targetVendorId) {
+      const durationMinutes = computeBookingDuration(booking);
+      try {
+        await validateVendorSlotAvailable({
+          vendorId: String(targetVendorId),
+          date: slotDate,
+          slotTime,
+          durationMinutes,
+          excludeBookingId: String(bookingId),
+          session,
+        });
+      } catch (e) {
+        await session.abortTransaction();
+        session.endSession();
+        return res.status(e?.status === 409 ? 409 : 400).json({
+          success: false,
+          message:
+            e?.message ||
+            "The selected slot conflicts with another booking for this vendor.",
+        });
+      }
+    }
 
     /* --------------------------------------------------
        CASE 1: NOT RESPONDED → UPDATE SAME BOOKING
