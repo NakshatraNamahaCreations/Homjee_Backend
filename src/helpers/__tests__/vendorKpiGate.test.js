@@ -52,6 +52,10 @@ describe("DC gate", () => {
       strikes: 1,
       totalRatings: 30,
       totalLeads: 50,
+      // DC perf metrics now only gate vendors who've actually responded —
+      // otherwise the cancellationRate is meaningless (0/0). With 40
+      // responded leads at 80% cancellation, the gate applies.
+      respondedLeads: 40,
     };
     const r = passesPerformanceGate(kpis, dcRanges, "deep_cleaning");
     expect(r.pass).toBe(false);
@@ -69,6 +73,22 @@ describe("DC gate", () => {
     };
     const r = passesPerformanceGate(kpis, dcRanges, "deep_cleaning");
     expect(r.pass).toBe(true);
+  });
+
+  test("DC vendor invited to leads but never responded is not gated on perf metrics", () => {
+    const kpis = {
+      averageRating: 0,
+      responseRate: 0,
+      cancellationRate: 0,
+      strikes: 0,
+      totalRatings: 0,
+      totalLeads: 10,
+      respondedLeads: 0,
+    };
+    const r = passesPerformanceGate(kpis, dcRanges, "deep_cleaning");
+    expect(r.pass).toBe(true);
+    expect(r.buckets.responsePercentage).toBe("n/a");
+    expect(r.buckets.cancellationPercentage).toBe("n/a");
   });
 
   test("no admin ranges → no gating (admin hasn't configured yet)", () => {
@@ -105,9 +125,35 @@ describe("HP gate (avgGSV included)", () => {
       strikes: 1,
       totalRatings: 30,
       totalLeads: 50,
+      // HP perf metrics now only gate vendors with at least one closed
+      // job — without hiredLeads > 0, surveyRate/hiringRate/avgGSV are
+      // mechanically 0% and the gate would mass-reject new painters.
+      hiredLeads: 20,
     };
     const r = passesPerformanceGate(kpis, hpRanges, "house_painting");
     expect(r.pass).toBe(false);
     expect(r.failedMetrics).toContain("avgGSV");
+  });
+
+  test("HP vendor with no hires yet is not gated on perf metrics", () => {
+    // Mirrors the prod scenario that motivated this exemption: an
+    // onboarded painter who's been invited to a couple of leads but
+    // hasn't closed any. Old gate locked them out forever.
+    const kpis = {
+      averageRating: 0,
+      surveyRate: 0,
+      hiringRate: 0,
+      averageGsv: 0,
+      strikes: 0,
+      totalRatings: 0,
+      totalLeads: 3,
+      surveyLeads: 1,
+      hiredLeads: 0,
+    };
+    const r = passesPerformanceGate(kpis, hpRanges, "house_painting");
+    expect(r.pass).toBe(true);
+    expect(r.buckets.surveyPercentage).toBe("n/a");
+    expect(r.buckets.hiringPercentage).toBe("n/a");
+    expect(r.buckets.avgGSV).toBe("n/a");
   });
 });

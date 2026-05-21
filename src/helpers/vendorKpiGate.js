@@ -29,6 +29,22 @@ const GATE_DEFS = {
   ],
 };
 
+// HP perf metrics gated together: vendor's surveyRate / hiringRate / avgGSV
+// only mean something once they've actually closed a job. Before that, all
+// three are mechanically 0% and the gate would lock out every brand-new
+// painter (observed live: 3/3 Pune painters were eligible-on-paper but
+// failed the gate because hiredLeads === 0).
+const HP_PERF_METRICS = new Set([
+  "surveyPercentage",
+  "hiringPercentage",
+  "avgGSV",
+]);
+
+const DC_PERF_METRICS = new Set([
+  "responsePercentage",
+  "cancellationPercentage",
+]);
+
 function passesPerformanceGate(kpis, ranges, serviceType) {
   const defs = GATE_DEFS[serviceType];
   if (!defs) return { pass: true, failedMetrics: [], buckets: {} }; // unknown service, don't gate
@@ -37,11 +53,15 @@ function passesPerformanceGate(kpis, ranges, serviceType) {
   // gating would block every vendor on day one).
   if (!ranges) return { pass: true, failedMetrics: [], buckets: {} };
 
-  // New vendors with zero rating history shouldn't be filtered out — they've
-  // had no chance to perform yet. We treat 0 totalRatings as "pass" for
-  // rating + strikes specifically.
+  // "No chance to perform yet" exemptions — same principle for every gating
+  // metric: a 0% rate with a 0 denominator isn't a performance signal, it's
+  // a brand-new vendor. Gate them once they've actually closed a job.
+  //   rating / strikes  → exempt while totalRatings === 0
+  //   HP perf metrics   → exempt while hiredLeads === 0
+  //   DC perf metrics   → exempt while respondedLeads === 0
   const hasRatingHistory = (kpis?.totalRatings || 0) > 0;
-  const hasLeadHistory = (kpis?.totalLeads || 0) > 0;
+  const hpHasPerfHistory = (kpis?.hiredLeads || 0) > 0;
+  const dcHasPerfHistory = (kpis?.respondedLeads || 0) > 0;
 
   const buckets = {};
   const failedMetrics = [];
@@ -51,7 +71,19 @@ function passesPerformanceGate(kpis, ranges, serviceType) {
       buckets[def.metric] = "n/a";
       continue;
     }
-    if (!hasLeadHistory && def.metric !== "rating" && def.metric !== "strikes") {
+    if (
+      serviceType === "house_painting" &&
+      HP_PERF_METRICS.has(def.metric) &&
+      !hpHasPerfHistory
+    ) {
+      buckets[def.metric] = "n/a";
+      continue;
+    }
+    if (
+      serviceType === "deep_cleaning" &&
+      DC_PERF_METRICS.has(def.metric) &&
+      !dcHasPerfHistory
+    ) {
       buckets[def.metric] = "n/a";
       continue;
     }

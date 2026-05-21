@@ -17,17 +17,24 @@ const {
 /* ---------------------------------------------------------------- */
 
 function getReasonMessage(reasons) {
-  if (reasons.archived || reasons.outsideRadius) {
-    return "No vendors available within service radius";
-  }
-  if (reasons.lowCoins) {
-    return "No vendors with sufficient credits to accept this booking";
+  // Surface the DEEPEST gate failure first. The eligibility pipeline runs
+  // cheap → expensive (archived → outsideRadius → lowCoins → teamShort →
+  // kpiFail), so if `kpiFail` fired at least one vendor must have already
+  // passed all the earlier gates. Showing the earliest-set flag instead
+  // (the old behaviour) was misreporting "low credits" when the real
+  // blocker was performance — observed in prod with Pune painters who
+  // had ample coins but no hired-lead history.
+  if (reasons.kpiFail) {
+    return "No vendors meet the performance criteria for this booking";
   }
   if (reasons.teamShort) {
     return "No vendors with the required team size for this service";
   }
-  if (reasons.kpiFail) {
-    return "No vendors meet the performance criteria for this booking";
+  if (reasons.lowCoins) {
+    return "No vendors with sufficient credits to accept this booking";
+  }
+  if (reasons.archived || reasons.outsideRadius) {
+    return "No vendors available within service radius";
   }
   if (reasons.allBooked) {
     return "All available vendors are already booked for this date";
