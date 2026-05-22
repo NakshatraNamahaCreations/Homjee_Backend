@@ -33,13 +33,28 @@ const DAY_END = 20 * 60;        // 20:00 — latest service END (must finish by)
 // already guarantees travel-after fits.
 
 const HP_DURATION = 30;         // House painting site visit fixed at 30 min
-const HP_GRID_MIN = 60;         // Spec: HP slots on the hour
+const HP_GRID_MIN = 60;         // (DC-only now; HP uses HP_ALLOWED_STARTS below)
 const DC_GRID_MIN = 30;         // Spec: DC slots on 30-min grid
 
-// Same-day bookings need a 2-hour lead time before the earliest bookable
-// slot so the vendor can realistically reach the customer. Enforced here so
-// every client (website, admin) gets an identical grid — previously only the
-// website filtered this, leaving the admin showing slots in the next 2 hours.
+// HP customers pick from a fixed daily list rather than every hour: the
+// painter visit is short (30 min) but back-to-back hourly slots flooded
+// the picker. Product spec: 5 anchored start times — 8 AM, 11 AM, 2 PM,
+// 5 PM, 7 PM. Order matters; the slot engine returns them in this order.
+const HP_ALLOWED_STARTS = [
+  8 * 60,   // 08:00 AM
+  11 * 60,  // 11:00 AM
+  14 * 60,  // 02:00 PM
+  17 * 60,  // 05:00 PM
+  19 * 60,  // 07:00 PM
+];
+
+// Same-day bookings for DC need a 2-hour lead time so the vendor can
+// realistically reach the customer. Enforced here so every client
+// (website, admin) gets an identical grid — previously only the website
+// filtered this, leaving the admin showing slots in the next 2 hours.
+//
+// HP has no lead-time gate: the picker simply hides start times that have
+// already passed (rounded up to the next hour). See earliestHpStartForDate.
 const SAME_DAY_LEAD_MIN = 120;
 
 /* ================= TIME HELPERS ================= */
@@ -77,9 +92,7 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// Earliest slot we'll show for `date`. For today, apply the same-day lead
-// time and round up to the next grid step; for future dates, the day starts
-// at 8:00 AM.
+// DC: earliest slot for `date`. Same-day = now + 2 hr lead, rounded to grid.
 function earliestStartForDate(date, gridMin) {
   const now = new Date();
   const req = new Date(date);
@@ -91,6 +104,21 @@ function earliestStartForDate(date, gridMin) {
 
   const nowMin = now.getHours() * 60 + now.getMinutes();
   return Math.ceil((nowMin + SAME_DAY_LEAD_MIN) / gridMin) * gridMin;
+}
+
+// HP: earliest slot for `date`. No lead time — just hide start times that
+// have already passed. Same-day at 11:30 AM → cutoff = 12:00, so 8 AM and
+// 11 AM drop out; 2 PM, 5 PM, 7 PM remain. Future dates start at 8 AM.
+function earliestHpStartForDate(date) {
+  const now = new Date();
+  const req = new Date(date);
+  const sameDay =
+    now.getFullYear() === req.getFullYear() &&
+    now.getMonth() === req.getMonth() &&
+    now.getDate() === req.getDate();
+  if (!sameDay) return DAY_START;
+  const nowMin = now.getHours() * 60 + now.getMinutes();
+  return Math.ceil(nowMin / 60) * 60;
 }
 
 /* ================= BLOCK MODEL =================
@@ -288,9 +316,27 @@ function calculateAvailableSlots({
 
   /* ---- Generate the slot grid ---- */
 
-  const gridMin = serviceType === "house_painting" ? HP_GRID_MIN : DC_GRID_MIN;
-  const startFloor = Math.max(DAY_START, earliestStartForDate(date, gridMin));
   const maxStart = DAY_END - serviceDuration;
+
+  // HP iterates over the fixed 5-slot list (8/11/2/5/7 PM), filtered by
+  // same-day cutoff. DC keeps the existing 30-min sliding grid because its
+  // service durations vary and the customer needs a finer-grained choice.
+  let candidateStarts;
+  if (serviceType === "house_painting") {
+    const earliest = earliestHpStartForDate(date);
+    candidateStarts = HP_ALLOWED_STARTS.filter(
+      (s) => s >= earliest && s <= maxStart,
+    );
+  } else {
+    const startFloor = Math.max(
+      DAY_START,
+      earliestStartForDate(date, DC_GRID_MIN),
+    );
+    candidateStarts = [];
+    for (let s = startFloor; s <= maxStart; s += DC_GRID_MIN) {
+      candidateStarts.push(s);
+    }
+  }
 
   const slots = [];
   const slotsWithVendors = [];
@@ -305,11 +351,7 @@ function calculateAvailableSlots({
   // marked unavailable without needing terminal log access.
   const diag = [];
 
-  for (let s = startFloor; s <= maxStart; s += gridMin) {
-    // For HP, align the iteration to the hourly grid even if startFloor
-    // landed on a half-hour due to "now".
-    if (serviceType === "house_painting" && s % HP_GRID_MIN !== 0) continue;
-
+  for (const s of candidateStarts) {
     const candidate = blockFromCommitment(s, serviceDuration);
     const freeVendorIds = [];
     const blockedVendorIds = [];
@@ -376,4 +418,5 @@ module.exports = {
   HP_DURATION,
   HP_GRID_MIN,
   DC_GRID_MIN,
+  HP_ALLOWED_STARTS,
 };

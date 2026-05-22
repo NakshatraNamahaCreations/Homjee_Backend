@@ -58,10 +58,10 @@ describe("slotAvailability — DC 2 BHK 5h example", () => {
     expect(r.slots).not.toContain("09:30 AM");
   });
 
-  test("9:00 AM HP (30-min) is allowed (buffer touches but doesn't overlap)", () => {
-    // A blocks [10:00, 15:30]. New 30-min booking at 9:00 blocks [9:00, 10:00].
-    // Strict-< boundary touch → no clash. Spec: 9:30 is the earliest blocked
-    // slot so 9:00 must remain bookable for short services.
+  test("8:00 AM HP (30-min) is allowed when DC 10 AM 5h booking exists (touching buffer ok)", () => {
+    // A's DC block: [10:00, 15:30]. 8 AM HP block: [8:00, 9:00]. No overlap.
+    // HP grid is [8, 11, 2, 5, 7 PM] — 8 AM is the earliest pre-DC slot,
+    // so it should remain bookable even though the vendor is busy 10–3:30.
     const r = calculateAvailableSlots({
       vendors: [v],
       bookings: [aBooking],
@@ -73,7 +73,13 @@ describe("slotAvailability — DC 2 BHK 5h example", () => {
       lat: 19.0,
       lng: 73.0,
     });
-    expect(r.slots).toContain("09:00 AM");
+    expect(r.slots).toContain("08:00 AM");
+    // 11 AM and 2 PM fall inside the DC block → not bookable.
+    expect(r.slots).not.toContain("11:00 AM");
+    expect(r.slots).not.toContain("02:00 PM");
+    // 5 PM and 7 PM are after the DC block ends at 3:30 PM → bookable.
+    expect(r.slots).toContain("05:00 PM");
+    expect(r.slots).toContain("07:00 PM");
   });
 
   test("9:00 AM DC washroom (60 min) is blocked (own service runs into vendor's 10:00 commitment)", () => {
@@ -124,10 +130,9 @@ describe("slotAvailability — DC 2 BHK 5h example", () => {
   });
 });
 
-describe("slotAvailability — HP back-to-back (one-sided buffer)", () => {
-  // Spec: A books 2 PM HP. Block 1:30→3:30 (with two-sided model). With
-  // our one-sided model: A blocks [2:00, 3:00]. B at 3:00 PM should be
-  // immediately available; FE expects per spec inter-customer buffer rule.
+describe("slotAvailability — HP fixed 5-slot grid", () => {
+  // Product spec: HP customers pick from 5 anchored start times per day
+  // (8 AM, 11 AM, 2 PM, 5 PM, 7 PM). No hourly fillers between them.
   const v = vendor({ id: "v1", team: 1 });
   const aBooking = booking({
     vendorId: "v1",
@@ -136,7 +141,7 @@ describe("slotAvailability — HP back-to-back (one-sided buffer)", () => {
     serviceType: "house_painting",
   });
 
-  test("HP grid is hourly (no 8:30 AM, 9:30 AM in slot list)", () => {
+  test("HP grid is exactly [8 AM, 11 AM, 2 PM, 5 PM, 7 PM]", () => {
     const r = calculateAvailableSlots({
       vendors: [v],
       bookings: [],
@@ -148,10 +153,31 @@ describe("slotAvailability — HP back-to-back (one-sided buffer)", () => {
       lat: 19.0,
       lng: 73.0,
     });
-    expect(r.slots).toContain("08:00 AM");
-    expect(r.slots).toContain("09:00 AM");
-    expect(r.slots).not.toContain("08:30 AM");
-    expect(r.slots).not.toContain("09:30 AM");
+    expect(r.slots).toEqual([
+      "08:00 AM",
+      "11:00 AM",
+      "02:00 PM",
+      "05:00 PM",
+      "07:00 PM",
+    ]);
+  });
+
+  test("HP grid does NOT include hourly fillers like 9 AM, 10 AM, 1 PM", () => {
+    const r = calculateAvailableSlots({
+      vendors: [v],
+      bookings: [],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).not.toContain("09:00 AM");
+    expect(r.slots).not.toContain("10:00 AM");
+    expect(r.slots).not.toContain("01:00 PM");
+    expect(r.slots).not.toContain("03:00 PM");
   });
 
   test("HP last bookable slot is 7:00 PM", () => {
@@ -170,7 +196,7 @@ describe("slotAvailability — HP back-to-back (one-sided buffer)", () => {
     expect(r.slots).not.toContain("08:00 PM");
   });
 
-  test("3:00 PM slot is bookable right after 2 PM HP booking ends", () => {
+  test("5:00 PM slot is still available after 2 PM HP booking (next anchored slot)", () => {
     const r = calculateAvailableSlots({
       vendors: [v],
       bookings: [aBooking],
@@ -182,8 +208,10 @@ describe("slotAvailability — HP back-to-back (one-sided buffer)", () => {
       lat: 19.0,
       lng: 73.0,
     });
-    // A blocks [2:00, 3:00]; next hourly slot 3:00 PM should be free.
-    expect(r.slots).toContain("03:00 PM");
+    // A blocks [14:00, 15:00]. Next anchored start is 5 PM — outside the
+    // block — so 5 PM remains free even with only one vendor.
+    expect(r.slots).toContain("05:00 PM");
+    expect(r.slots).not.toContain("02:00 PM");
   });
 });
 
@@ -270,7 +298,7 @@ describe("slotAvailability — unavailableSlots (booked-out tiles)", () => {
       bookings: [
         booking({
           vendorId: "v1",
-          slotTime: "10:00 AM",
+          slotTime: "11:00 AM",
           durationMinutes: 30,
           serviceType: "house_painting",
         }),
@@ -283,8 +311,8 @@ describe("slotAvailability — unavailableSlots (booked-out tiles)", () => {
       lat: 19.0,
       lng: 73.0,
     });
-    expect(r.slots).not.toContain("10:00 AM");
-    expect(r.unavailableSlots).toContain("10:00 AM");
+    expect(r.slots).not.toContain("11:00 AM");
+    expect(r.unavailableSlots).toContain("11:00 AM");
     expect(r.reasons.allBooked).toBe(true);
   });
 
@@ -425,14 +453,14 @@ describe("slotAvailability — own-customer hold attribution", () => {
           serviceType: "house_painting",
           isEnquiry: false,
           customer: { customerId: "customerA" },
-          selectedSlot: { slotTime: "01:00 PM", slotDate: TOMORROW },
+          selectedSlot: { slotTime: "02:00 PM", slotDate: TOMORROW },
           bookingDetails: { serviceDurationMinutes: 30, status: "Confirmed" },
         },
       ],
       activeHolds: [
         {
           vendorId: "v1",
-          slotTime: "01:00 PM",
+          slotTime: "02:00 PM",
           durationMinutes: 30,
           customerId: "customerB",
         },
@@ -445,8 +473,8 @@ describe("slotAvailability — own-customer hold attribution", () => {
       lng: 73.0,
     });
     // V1 held by B + A's unassigned booking → both vendors committed.
-    expect(r.slots).not.toContain("01:00 PM");
-    expect(r.unavailableSlots).toContain("01:00 PM");
+    expect(r.slots).not.toContain("02:00 PM");
+    expect(r.unavailableSlots).toContain("02:00 PM");
   });
 
   test("paid booking by A + A's own lingering hold on V1 → only one commitment", () => {
@@ -462,14 +490,14 @@ describe("slotAvailability — own-customer hold attribution", () => {
           serviceType: "house_painting",
           isEnquiry: false,
           customer: { customerId: "customerA" },
-          selectedSlot: { slotTime: "01:00 PM", slotDate: TOMORROW },
+          selectedSlot: { slotTime: "02:00 PM", slotDate: TOMORROW },
           bookingDetails: { serviceDurationMinutes: 30, status: "Confirmed" },
         },
       ],
       activeHolds: [
         {
           vendorId: "v1",
-          slotTime: "01:00 PM",
+          slotTime: "02:00 PM",
           durationMinutes: 30,
           customerId: "customerA", // same customer — leftover pre-payment hold
         },
@@ -481,7 +509,7 @@ describe("slotAvailability — own-customer hold attribution", () => {
       lat: 19.0,
       lng: 73.0,
     });
-    expect(r.slots).toContain("01:00 PM");
+    expect(r.slots).toContain("02:00 PM");
   });
 });
 

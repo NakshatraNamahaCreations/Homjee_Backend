@@ -63,7 +63,7 @@ function vendor({ id, coins = 0, lat = 19.001, lng = 73.001, team = 4, archived 
   };
 }
 
-function bookingFor({ vendorId, slotTime = "09:00 AM", durationMinutes = 30, serviceType = "house_painting" }) {
+function bookingFor({ vendorId, slotTime = "11:00 AM", durationMinutes = 30, serviceType = "house_painting" }) {
   return {
     serviceType,
     selectedSlot: { slotTime, slotDate: TOMORROW },
@@ -103,12 +103,12 @@ describe("TC1 — same location, one eligible vendor", () => {
     expect(r.reasons.lowCoins).toBe(true);
   });
 
-  test("once the only eligible vendor books 9 AM, the same slot is blocked", () => {
+  test("once the only eligible vendor books 11 AM, the same slot is blocked", () => {
     const vA = vendor({ id: "vA", coins: 120 });
 
     const r = calculateAvailableSlots({
       vendors: [vA], // only A passed eligibility
-      bookings: [bookingFor({ vendorId: "vA", slotTime: "09:00 AM" })],
+      bookings: [bookingFor({ vendorId: "vA", slotTime: "11:00 AM" })],
       activeHolds: [],
       serviceType: "house_painting",
       serviceDuration: 30,
@@ -118,10 +118,10 @@ describe("TC1 — same location, one eligible vendor", () => {
       lng: CUST.lng,
     });
 
-    expect(r.slots).not.toContain("09:00 AM");
+    expect(r.slots).not.toContain("11:00 AM");
     // New spec: blocked slots are RETURNED so the UI can render them as
     // disabled tiles. The slot should be visible but unselectable.
-    expect(r.unavailableSlots).toContain("09:00 AM");
+    expect(r.unavailableSlots).toContain("11:00 AM");
     expect(r.reasons.allBooked).toBe(true);
   });
 });
@@ -241,7 +241,7 @@ describe("TC5 — multiple eligible vendors", () => {
 
     const r = calculateAvailableSlots({
       vendors: [vA, vB],
-      bookings: [bookingFor({ vendorId: "vA", slotTime: "09:00 AM" })],
+      bookings: [bookingFor({ vendorId: "vA", slotTime: "11:00 AM" })],
       activeHolds: [],
       serviceType: "house_painting",
       serviceDuration: 30,
@@ -251,9 +251,9 @@ describe("TC5 — multiple eligible vendors", () => {
       lng: CUST.lng,
     });
 
-    expect(r.slots).toContain("09:00 AM");
-    const slot9 = r.slotsWithVendors.find((s) => s.slotTime === "09:00 AM");
-    expect(slot9.vendorIds).toEqual(["vB"]);
+    expect(r.slots).toContain("11:00 AM");
+    const slot11 = r.slotsWithVendors.find((s) => s.slotTime === "11:00 AM");
+    expect(slot11.vendorIds).toEqual(["vB"]);
   });
 });
 
@@ -334,16 +334,16 @@ describe("TC7 — site visit charge > 0 (deduct as configured)", () => {
 // =============================================================================
 // Test Case 8 — Same slot booking by two users
 //   Same location, only one eligible vendor available.
-//   User A books 9 AM. User B's slot list must NOT include 9 AM.
+//   User A books 11 AM. User B's slot list must NOT include 11 AM.
 // =============================================================================
 describe("TC8 — same slot blocked when only one eligible vendor exists", () => {
-  test("9:00 AM is excluded from User B's slot list after User A books that slot", () => {
+  test("11:00 AM is excluded from User B's slot list after User A books that slot", () => {
     const vA = vendor({ id: "vA", coins: 200 });
 
     // Simulate User B's slot fetch AFTER User A's booking exists.
     const r = calculateAvailableSlots({
       vendors: [vA], // only one eligible vendor
-      bookings: [bookingFor({ vendorId: "vA", slotTime: "09:00 AM" })],
+      bookings: [bookingFor({ vendorId: "vA", slotTime: "11:00 AM" })],
       activeHolds: [],
       serviceType: "house_painting",
       serviceDuration: 30,
@@ -353,13 +353,13 @@ describe("TC8 — same slot blocked when only one eligible vendor exists", () =>
       lng: CUST.lng,
     });
 
-    expect(r.slots).not.toContain("09:00 AM");
+    expect(r.slots).not.toContain("11:00 AM");
     // Returned in unavailableSlots so the UI shows it as a disabled tile
     // ("not available"), not hidden — customer can see the slot exists.
-    expect(r.unavailableSlots).toContain("09:00 AM");
-    // Adjacent slot (10:00 AM) should still be available — vendor's block
-    // is [9:00, 10:00] (one-sided post-service buffer, touching boundaries OK).
-    expect(r.slots).toContain("10:00 AM");
+    expect(r.unavailableSlots).toContain("11:00 AM");
+    // Next anchored slot (2:00 PM) is outside the [11:00, 12:00] block,
+    // so it should remain available even with only one eligible vendor.
+    expect(r.slots).toContain("02:00 PM");
   });
 
   test("active hold (pending payment) also blocks the slot for another user", () => {
@@ -369,7 +369,7 @@ describe("TC8 — same slot blocked when only one eligible vendor exists", () =>
     const r = calculateAvailableSlots({
       vendors: [vA],
       bookings: [],
-      activeHolds: [{ vendorId: "vA", slotTime: "09:00 AM", durationMinutes: 30 }],
+      activeHolds: [{ vendorId: "vA", slotTime: "11:00 AM", durationMinutes: 30 }],
       serviceType: "house_painting",
       serviceDuration: 30,
       minTeamMembers: 1,
@@ -378,6 +378,6 @@ describe("TC8 — same slot blocked when only one eligible vendor exists", () =>
       lng: CUST.lng,
     });
 
-    expect(r.slots).not.toContain("09:00 AM");
+    expect(r.slots).not.toContain("11:00 AM");
   });
 });
