@@ -23,6 +23,13 @@ router.get(
   "/notified-vendors/:bookingId",
   bookingController.getNotifiedVendorsForBooking
 );
+// Nearest eligible vendors for a booking — used by the lead detail page
+// when no vendors have been notified yet (e.g. unpaid enquiry, fanout
+// hasn't fired). Same eligibility pipeline as the slot picker.
+router.get(
+  "/nearby-eligible-vendors/:bookingId",
+  bookingController.getNearbyEligibleVendorsForBooking
+);
 router.post("/notify-vendor", bookingController.notifyVendorForLead);
 
 // 🔹 Aggregate "Amount Yet to be Paid" across all ongoing leads

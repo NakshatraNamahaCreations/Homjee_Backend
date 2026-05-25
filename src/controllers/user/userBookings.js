@@ -8924,6 +8924,88 @@ exports.getNotifiedVendorsForBooking = async (req, res) => {
   }
 };
 
+// Returns the nearest *eligible* vendors for a booking — the pool the
+// auto-fanout WOULD notify if it ran right now. Same pipeline as the
+// slot picker (radius + coins + KPI + team). Used by the admin lead
+// detail page to display nearby vendors even when the booking is still
+// an unpaid enquiry and fanout hasn't fired yet.
+//
+// Returns lightweight profile cards (id, name, profileImage, city,
+// serviceType). No PII beyond what the admin already sees elsewhere.
+exports.getNearbyEligibleVendorsForBooking = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+
+    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid bookingId" });
+    }
+
+    const booking = await UserBooking.findById(bookingId).lean();
+    if (!booking) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
+    }
+
+    const serviceType = booking.serviceType;
+    const lat = booking?.address?.location?.coordinates?.[1];
+    const lng = booking?.address?.location?.coordinates?.[0];
+    const city = booking?.address?.city;
+
+    if (!serviceType || lat == null || lng == null) {
+      return res.status(200).json({ success: true, count: 0, data: [] });
+    }
+
+    const vendorQuery = {
+      "vendor.serviceType":
+        serviceType === "deep_cleaning" ? /clean/i : /paint/i,
+    };
+    if (city) {
+      const cityRegex = buildCityMatchRegex(city);
+      if (cityRegex) vendorQuery["vendor.city"] = cityRegex;
+    }
+    const vendors = await vendorAuthSchema.find(vendorQuery).lean();
+    if (!vendors.length) {
+      return res.status(200).json({ success: true, count: 0, data: [] });
+    }
+
+    const { requiredCoins } = await computeBookingCoinPolicy(booking);
+    const minTeamMembers =
+      serviceType === "deep_cleaning"
+        ? (booking.service || []).reduce(
+            (m, s) => Math.max(m, Number(s?.teamMembersRequired || 0)),
+            1,
+          )
+        : 1;
+
+    const { eligibleVendors } = await filterEligibleVendors({
+      vendors,
+      lat,
+      lng,
+      requiredCoins,
+      serviceType,
+      minTeamMembers,
+      includeDebug: false,
+    });
+
+    const data = eligibleVendors.map((v) => ({
+      vendorId: String(v._id),
+      name: v?.vendor?.vendorName || "Unknown Vendor",
+      profileImage: v?.vendor?.profileImage || "",
+      city: v?.vendor?.city || "",
+      serviceType: v?.vendor?.serviceType || "",
+      mobileNumber: v?.vendor?.mobileNumber || null,
+    }));
+
+    return res.status(200).json({ success: true, count: data.length, data });
+  } catch (err) {
+    console.error("getNearbyEligibleVendorsForBooking error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 // Aggregate Amount Yet to be Paid across all ongoing leads.
 // "Ongoing" = booking payment done (firstPayment.status === "paid" OR
 // paidAmount > 0) AND status is not Cancelled/Completed AND
@@ -8933,12 +9015,24 @@ exports.getAmountYetToPayAggregate = async (req, res) => {
   try {
     const vendorId = String(req.query.vendorId || "").trim();
 
+    // Spec: for every lead where Booking Payment is done AND final
+    // payment is yet to be done, sum (Total GSV − Amount Paid).
+    // Date-independent — always all ongoing leads.
+    //
+    // "Booking Payment is done"   →  firstPayment.status === "paid"
+    //                                OR paidAmount > 0 (advance taken)
+    // "final payment is yet to be done" → finalTotal > paidAmount
+    //                                    (comparing two fields needs
+    //                                    $expr, not a regular match)
+    //
+    // We deliberately do NOT use the stored bookingDetails.amountYetToPay
+    // here. That field is written by ~20 different code paths
+    // (advance, second installment, refunds, lead reschedule, …) and
+    // can drift from the true (finalTotal − paidAmount). Computing it
+    // live keeps the dashboard total honest regardless of stored-field
+    // drift.
     const match = {
       isEnquiry: false,
-      "bookingDetails.amountYetToPay": { $gt: 0 },
-      // Either the first installment is recorded as paid, or some payment
-      // has already been collected — i.e. the booking is genuinely
-      // ongoing and we have receivables to chase.
       $or: [
         { "bookingDetails.firstPayment.status": "paid" },
         { "bookingDetails.paidAmount": { $gt: 0 } },
@@ -8952,6 +9046,12 @@ exports.getAmountYetToPayAggregate = async (req, res) => {
           "Completed",
         ],
       },
+      $expr: {
+        $gt: [
+          { $ifNull: ["$bookingDetails.finalTotal", 0] },
+          { $ifNull: ["$bookingDetails.paidAmount", 0] },
+        ],
+      },
     };
 
     if (vendorId) {
@@ -8963,24 +9063,39 @@ exports.getAmountYetToPayAggregate = async (req, res) => {
       {
         $group: {
           _id: null,
-          totalYetToPay: { $sum: "$bookingDetails.amountYetToPay" },
-          totalGsv: { $sum: "$bookingDetails.finalTotal" },
-          totalPaid: { $sum: "$bookingDetails.paidAmount" },
+          totalGsv: {
+            $sum: { $ifNull: ["$bookingDetails.finalTotal", 0] },
+          },
+          totalPaid: {
+            $sum: { $ifNull: ["$bookingDetails.paidAmount", 0] },
+          },
           ongoingLeads: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          totalGsv: 1,
+          totalPaid: 1,
+          ongoingLeads: 1,
+          // Spec formula: Amount Yet to be Paid = Total GSV − Amount Paid
+          amountYetToPay: { $subtract: ["$totalGsv", "$totalPaid"] },
         },
       },
     ]);
 
     const agg = result[0] || {
-      totalYetToPay: 0,
       totalGsv: 0,
       totalPaid: 0,
+      amountYetToPay: 0,
       ongoingLeads: 0,
     };
 
     return res.status(200).json({
       success: true,
-      amountYetToPay: Number(agg.totalYetToPay || 0),
+      // Floor at 0 — over-collection (paid > GSV due to a refund pending)
+      // would otherwise show as a negative receivable, which is confusing.
+      amountYetToPay: Math.max(0, Number(agg.amountYetToPay || 0)),
       totalGsv: Number(agg.totalGsv || 0),
       totalPaid: Number(agg.totalPaid || 0),
       ongoingLeads: Number(agg.ongoingLeads || 0),
