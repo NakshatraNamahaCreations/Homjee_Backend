@@ -22,10 +22,20 @@
 const Booking = require("../models/user/userBookings");
 const { releaseHold } = require("./slotHold.service");
 const { invalidateForDate } = require("./slotCache.service");
-const { toMinutes } = require("./slotAvailability.service");
+const {
+  toMinutes,
+  HP_TRAVEL_MIN,
+  DC_TRAVEL_MIN,
+} = require("./slotAvailability.service");
 
-const TRAVEL_MIN = 30;
+// Per-service-type travel buffer. Mirrors slotAvailability.service so
+// the slot picker, the confirm-time guard, and the cancellation guard
+// all use the same clash math. HP uses 60 min (so a 2 PM HP booking
+// blocks 1 PM and 3 PM as well), DC uses 30 min.
 const HP_DURATION = 30;
+function travelForServiceType(serviceType) {
+  return serviceType === "house_painting" ? HP_TRAVEL_MIN : DC_TRAVEL_MIN;
+}
 
 const CANCELLED_STATUSES = [
   "Customer Cancelled",
@@ -56,6 +66,7 @@ async function validateVendorSlotAvailable({
   date,
   slotTime,
   durationMinutes,
+  serviceType = null,
   excludeBookingId = null,
   session = null,
 }) {
@@ -68,7 +79,10 @@ async function validateVendorSlotAvailable({
 
   const startMin = toMinutes(slotTime);
   if (startMin == null) throw { status: 400, message: `Invalid slotTime: ${slotTime}` };
-  const endMin = startMin + Number(durationMinutes) + TRAVEL_MIN;
+  // Candidate buffer uses the REQUESTED service type. Falls back to DC
+  // travel for legacy callsites that don't pass serviceType — same as
+  // before this change, so no behavior regression for DC.
+  const endMin = startMin + Number(durationMinutes) + travelForServiceType(serviceType);
 
   const query = {
     "assignedProfessional.professionalId": String(vendorId),
@@ -87,7 +101,10 @@ async function validateVendorSlotAvailable({
     if (bStart == null) continue;
     const bDur = computeBookingDuration(b);
     if (!bDur) continue;
-    const bEnd = bStart + bDur + TRAVEL_MIN;
+    // Existing booking uses ITS OWN service type's buffer so an HP
+    // booking always gets the wider 60-min window even when the
+    // candidate is DC, and vice-versa.
+    const bEnd = bStart + bDur + travelForServiceType(b.serviceType);
 
     // Strict-< clash: touching boundaries are OK (matches the slot engine's
     // one-sided buffer model).
@@ -112,12 +129,14 @@ async function confirmAndConsumeHold({
   date,
   slotTime,
   durationMinutes,
+  serviceType,
   holdId,
   excludeBookingId,
 }) {
   await validateVendorSlotAvailable({
     vendorId,
     date,
+    serviceType,
     slotTime,
     durationMinutes,
     excludeBookingId,

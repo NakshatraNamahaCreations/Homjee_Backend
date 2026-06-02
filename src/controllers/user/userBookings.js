@@ -97,6 +97,7 @@ async function findFreeAlternativeVendors({
         date: slotDate,
         slotTime,
         durationMinutes,
+        serviceType: booking.serviceType,
         excludeBookingId: String(booking._id),
       });
       free.push({
@@ -1145,6 +1146,7 @@ exports.createBooking = async (req, res) => {
             date: selectedSlot.slotDate,
             slotTime: selectedSlot.slotTime,
             durationMinutes: dur,
+            serviceType,
           });
         } catch (e) {
           return res.status(e.status || 409).json({
@@ -2096,6 +2098,7 @@ exports.adminCreateBooking = async (req, res) => {
             date: selectedSlot.slotDate,
             slotTime: selectedSlot.slotTime,
             durationMinutes: dur,
+            serviceType,
           });
         } catch (e) {
           return res.status(e.status || 409).json({
@@ -4149,6 +4152,7 @@ exports.respondConfirmJobVendorLine = async (req, res) => {
               date: slotDate,
               slotTime,
               durationMinutes,
+              serviceType: booking2.serviceType,
               excludeBookingId: bookingId,
               session,
             });
@@ -5034,6 +5038,7 @@ exports.rescheduleBooking = async (req, res) => {
           date: slotDate,
           slotTime,
           durationMinutes,
+          serviceType: booking.serviceType,
           excludeBookingId: String(bookingId),
         });
       } catch (e) {
@@ -9179,6 +9184,7 @@ exports.notifyVendorForLead = async (req, res) => {
             date: slotDate,
             slotTime,
             durationMinutes,
+            serviceType: booking.serviceType,
             excludeBookingId: String(bookingId),
           });
         } catch (e) {

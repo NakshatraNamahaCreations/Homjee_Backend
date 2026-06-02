@@ -24,29 +24,28 @@
 //     availableVendorsCount
 //   }
 
-const TRAVEL_MIN = 30;
+// Travel-buffer per service type. Applied symmetrically to BOTH the
+// existing commitment AND the candidate slot (both sides do
+// `start + duration + TRAVEL`), so the effective gap between two adjacent
+// jobs of the SAME service equals TRAVEL_MIN — not 2 × TRAVEL_MIN — but
+// the buffer "reaches" backwards too (a candidate that starts TRAVEL_MIN
+// before an existing commitment also clashes).
+//
+// HP uses 60 min (per product: a 2 PM HP booking must also block 1 PM and
+// 3 PM for the same vendor — i.e. a one-hour-on-each-side buffer around a
+// 30-min site visit). DC keeps 30 min: DC services are long enough that
+// the service duration itself dominates blocking; the existing 30-min
+// post-buffer is sufficient and matches the original spec example
+// (10 AM 5h DC blocks 9:30 AM → 3:30 PM-exclusive).
+const HP_TRAVEL_MIN = 60;
+const DC_TRAVEL_MIN = 30;
 
 const DAY_START = 8 * 60;       // 08:00 — earliest service start
 const DAY_END = 20 * 60;        // 20:00 — latest service END (must finish by)
-// DAY_TRAVEL_END = 20*60 + 30 = 20:30. Implied by maxStart math; we don't
-// need a separate constant because maxStart = DAY_END - serviceDuration
-// already guarantees travel-after fits.
 
 const HP_DURATION = 30;         // House painting site visit fixed at 30 min
-const HP_GRID_MIN = 60;         // (DC-only now; HP uses HP_ALLOWED_STARTS below)
-const DC_GRID_MIN = 30;         // Spec: DC slots on 30-min grid
-
-// HP customers pick from a fixed daily list rather than every hour: the
-// painter visit is short (30 min) but back-to-back hourly slots flooded
-// the picker. Product spec: 5 anchored start times — 8 AM, 11 AM, 2 PM,
-// 5 PM, 7 PM. Order matters; the slot engine returns them in this order.
-const HP_ALLOWED_STARTS = [
-  8 * 60,   // 08:00 AM
-  11 * 60,  // 11:00 AM
-  14 * 60,  // 02:00 PM
-  17 * 60,  // 05:00 PM
-  19 * 60,  // 07:00 PM
-];
+const HP_GRID_MIN = 60;         // HP slots on the hour: 8 AM, 9, 10, ... 7 PM
+const DC_GRID_MIN = 30;         // DC slots on 30-min grid
 
 // Same-day bookings for DC need a 2-hour lead time so the vendor can
 // realistically reach the customer. Enforced here so every client
@@ -122,18 +121,25 @@ function earliestHpStartForDate(date) {
 }
 
 /* ================= BLOCK MODEL =================
-   We model each commitment (booking OR hold) as a one-sided window
-       [serviceStart, serviceEnd + TRAVEL_MIN]
-   and use STRICT inequalities on the clash check. This matches the spec's
-   "inter-customer buffer" rule where the outbound + inbound 30-min legs
-   between two adjacent jobs OVERLAP into a single 30-min gap. Two-sided
-   buffers (the old code) would double-count this gap.
+   Each commitment (booking OR hold) is modelled as a one-sided window
+       [serviceStart, serviceEnd + travel(serviceType)]
+   and clash is detected with STRICT inequalities. Because BOTH the
+   existing commitment and the candidate get the same builder, the buffer
+   reaches symmetrically: a candidate starting `travel` minutes BEFORE an
+   existing commitment also clashes (its own end-buffer overlaps the
+   commitment's start). That's how a 2 PM HP booking ends up blocking
+   1 PM, 2 PM, and 3 PM — the 1 PM candidate's buffered end (2:30) sits
+   inside the existing commitment's window [2:00, 3:30].
 ================================================== */
 
-function blockFromCommitment(serviceStartMin, durationMin) {
+function travelForServiceType(serviceType) {
+  return serviceType === "house_painting" ? HP_TRAVEL_MIN : DC_TRAVEL_MIN;
+}
+
+function blockFromCommitment(serviceStartMin, durationMin, serviceType) {
   return {
     start: serviceStartMin,
-    end: serviceStartMin + durationMin + TRAVEL_MIN,
+    end: serviceStartMin + durationMin + travelForServiceType(serviceType),
   };
 }
 
@@ -236,12 +242,18 @@ function calculateAvailableSlots({
   // leftover hold (instead of falsely consuming any other customer's
   // hold at that slot — which over-decrements the unassigned counter
   // and frees the slot for the next browser when it's actually full).
+  //
+  // Holds aren't tagged with serviceType (they're only created during
+  // this engine's own pre-payment phase), so we use the requested
+  // serviceType for their travel buffer. That's accurate in practice:
+  // a hold only ever competes with same-service candidates because the
+  // slot engine is queried per-service.
   const heldVendorsBySlotCustomer = new Map(); // `${label}|${customerId}` -> Set<vendorId>
   for (const h of activeHolds) {
     const startMin = toMinutes(h.slotTime);
     const dur = Number(h.durationMinutes) || 0;
     if (!h.vendorId || startMin == null || !dur) continue;
-    pushBlock(h.vendorId, blockFromCommitment(startMin, dur));
+    pushBlock(h.vendorId, blockFromCommitment(startMin, dur, serviceType));
     const k = canonLabel(h.slotTime);
     if (k && h.customerId) {
       const key = `${k}|${String(h.customerId)}`;
@@ -262,7 +274,11 @@ function calculateAvailableSlots({
       const startMin = toMinutes(b.selectedSlot?.slotTime);
       const dur = durationFromBooking(b);
       if (startMin == null || !dur) continue;
-      pushBlock(vid, blockFromCommitment(startMin, dur));
+      // Use the existing booking's OWN serviceType for the travel buffer
+      // — an HP booking always gets the wider HP buffer, even when the
+      // engine is currently computing slots for a DC request, so adjacent
+      // hourly slots stay correctly blocked for the same vendor.
+      pushBlock(vid, blockFromCommitment(startMin, dur, b.serviceType));
     } else if (b.isEnquiry === false) {
       // Paid (isEnquiry flipped to false in payment.service.js) but no
       // vendor accepted yet — committed to ONE eligible vendor.
@@ -318,15 +334,19 @@ function calculateAvailableSlots({
 
   const maxStart = DAY_END - serviceDuration;
 
-  // HP iterates over the fixed 5-slot list (8/11/2/5/7 PM), filtered by
-  // same-day cutoff. DC keeps the existing 30-min sliding grid because its
-  // service durations vary and the customer needs a finer-grained choice.
+  // HP slots run hourly from 8 AM through 7 PM (the latest start that
+  // still finishes inside DAY_END). DC keeps its 30-min sliding grid
+  // because DC durations vary and customers benefit from finer choice.
   let candidateStarts;
   if (serviceType === "house_painting") {
-    const earliest = earliestHpStartForDate(date);
-    candidateStarts = HP_ALLOWED_STARTS.filter(
-      (s) => s >= earliest && s <= maxStart,
+    const startFloor = Math.max(
+      DAY_START,
+      earliestHpStartForDate(date),
     );
+    candidateStarts = [];
+    for (let s = startFloor; s <= maxStart; s += HP_GRID_MIN) {
+      candidateStarts.push(s);
+    }
   } else {
     const startFloor = Math.max(
       DAY_START,
@@ -352,7 +372,7 @@ function calculateAvailableSlots({
   const diag = [];
 
   for (const s of candidateStarts) {
-    const candidate = blockFromCommitment(s, serviceDuration);
+    const candidate = blockFromCommitment(s, serviceDuration, serviceType);
     const freeVendorIds = [];
     const blockedVendorIds = [];
 
@@ -412,11 +432,11 @@ module.exports = {
   haversineKm,
   toMinutes,
   toTime,
-  TRAVEL_MIN,
+  HP_TRAVEL_MIN,
+  DC_TRAVEL_MIN,
   DAY_START,
   DAY_END,
   HP_DURATION,
   HP_GRID_MIN,
   DC_GRID_MIN,
-  HP_ALLOWED_STARTS,
 };

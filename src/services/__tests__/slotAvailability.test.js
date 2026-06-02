@@ -59,9 +59,9 @@ describe("slotAvailability — DC 2 BHK 5h example", () => {
   });
 
   test("8:00 AM HP (30-min) is allowed when DC 10 AM 5h booking exists (touching buffer ok)", () => {
-    // A's DC block: [10:00, 15:30]. 8 AM HP block: [8:00, 9:00]. No overlap.
-    // HP grid is [8, 11, 2, 5, 7 PM] — 8 AM is the earliest pre-DC slot,
-    // so it should remain bookable even though the vendor is busy 10–3:30.
+    // A's DC block: [10:00, 15:30]. 8 AM HP candidate (with HP's 60-min
+    // travel buffer): [8:00, 9:30]. 9:30 < 10:00 → no overlap.
+    // 5 PM and 7 PM are after the DC block ends → also bookable.
     const r = calculateAvailableSlots({
       vendors: [v],
       bookings: [aBooking],
@@ -74,12 +74,11 @@ describe("slotAvailability — DC 2 BHK 5h example", () => {
       lng: 73.0,
     });
     expect(r.slots).toContain("08:00 AM");
-    // 11 AM and 2 PM fall inside the DC block → not bookable.
-    expect(r.slots).not.toContain("11:00 AM");
-    expect(r.slots).not.toContain("02:00 PM");
-    // 5 PM and 7 PM are after the DC block ends at 3:30 PM → bookable.
     expect(r.slots).toContain("05:00 PM");
     expect(r.slots).toContain("07:00 PM");
+    // Slots that fall inside the DC block window are not bookable.
+    expect(r.slots).not.toContain("11:00 AM");
+    expect(r.slots).not.toContain("02:00 PM");
   });
 
   test("9:00 AM DC washroom (60 min) is blocked (own service runs into vendor's 10:00 commitment)", () => {
@@ -130,9 +129,12 @@ describe("slotAvailability — DC 2 BHK 5h example", () => {
   });
 });
 
-describe("slotAvailability — HP fixed 5-slot grid", () => {
-  // Product spec: HP customers pick from 5 anchored start times per day
-  // (8 AM, 11 AM, 2 PM, 5 PM, 7 PM). No hourly fillers between them.
+describe("slotAvailability — HP hourly grid + ±1h adjacent-slot buffer", () => {
+  // Product spec: HP slots run hourly from 8 AM through 7 PM. When a
+  // vendor takes one slot, the same vendor's neighbouring hourly slots
+  // (one before AND one after) also lock — covering driver travel time
+  // each way. Example: a 2 PM HP booking blocks 1 PM, 2 PM, 3 PM for
+  // that vendor; 12 PM and 4 PM stay free.
   const v = vendor({ id: "v1", team: 1 });
   const aBooking = booking({
     vendorId: "v1",
@@ -141,7 +143,7 @@ describe("slotAvailability — HP fixed 5-slot grid", () => {
     serviceType: "house_painting",
   });
 
-  test("HP grid is exactly [8 AM, 11 AM, 2 PM, 5 PM, 7 PM]", () => {
+  test("HP grid runs hourly from 8 AM through 7 PM (12 slots)", () => {
     const r = calculateAvailableSlots({
       vendors: [v],
       bookings: [],
@@ -155,14 +157,21 @@ describe("slotAvailability — HP fixed 5-slot grid", () => {
     });
     expect(r.slots).toEqual([
       "08:00 AM",
+      "09:00 AM",
+      "10:00 AM",
       "11:00 AM",
+      "12:00 PM",
+      "01:00 PM",
       "02:00 PM",
+      "03:00 PM",
+      "04:00 PM",
       "05:00 PM",
+      "06:00 PM",
       "07:00 PM",
     ]);
   });
 
-  test("HP grid does NOT include hourly fillers like 9 AM, 10 AM, 1 PM", () => {
+  test("HP grid does NOT include half-hourly fillers", () => {
     const r = calculateAvailableSlots({
       vendors: [v],
       bookings: [],
@@ -174,10 +183,9 @@ describe("slotAvailability — HP fixed 5-slot grid", () => {
       lat: 19.0,
       lng: 73.0,
     });
-    expect(r.slots).not.toContain("09:00 AM");
-    expect(r.slots).not.toContain("10:00 AM");
-    expect(r.slots).not.toContain("01:00 PM");
-    expect(r.slots).not.toContain("03:00 PM");
+    expect(r.slots).not.toContain("08:30 AM");
+    expect(r.slots).not.toContain("09:30 AM");
+    expect(r.slots).not.toContain("02:30 PM");
   });
 
   test("HP last bookable slot is 7:00 PM", () => {
@@ -196,7 +204,7 @@ describe("slotAvailability — HP fixed 5-slot grid", () => {
     expect(r.slots).not.toContain("08:00 PM");
   });
 
-  test("5:00 PM slot is still available after 2 PM HP booking (next anchored slot)", () => {
+  test("2 PM HP booking blocks 1 PM, 2 PM, 3 PM on the same vendor", () => {
     const r = calculateAvailableSlots({
       vendors: [v],
       bookings: [aBooking],
@@ -208,10 +216,25 @@ describe("slotAvailability — HP fixed 5-slot grid", () => {
       lat: 19.0,
       lng: 73.0,
     });
-    // A blocks [14:00, 15:00]. Next anchored start is 5 PM — outside the
-    // block — so 5 PM remains free even with only one vendor.
-    expect(r.slots).toContain("05:00 PM");
+    expect(r.slots).not.toContain("01:00 PM");
     expect(r.slots).not.toContain("02:00 PM");
+    expect(r.slots).not.toContain("03:00 PM");
+  });
+
+  test("2 PM HP booking leaves 12 PM and 4 PM bookable on the same vendor", () => {
+    const r = calculateAvailableSlots({
+      vendors: [v],
+      bookings: [aBooking],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).toContain("12:00 PM");
+    expect(r.slots).toContain("04:00 PM");
   });
 });
 

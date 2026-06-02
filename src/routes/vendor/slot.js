@@ -693,6 +693,7 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
           date: slotDate,
           slotTime,
           durationMinutes,
+          serviceType: booking.serviceType,
           excludeBookingId: String(bookingId),
           session,
         });
