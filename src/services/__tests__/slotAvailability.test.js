@@ -236,6 +236,71 @@ describe("slotAvailability — HP hourly grid + ±1h adjacent-slot buffer", () =
     expect(r.slots).toContain("12:00 PM");
     expect(r.slots).toContain("04:00 PM");
   });
+
+  test("when V1 is booked at 2 PM, B can still book 2 PM via V2 (slot stays available)", () => {
+    // Customer A's lead is hired by V1 at 2 PM HP. V2 is also eligible
+    // and free in the same location. Customer B opens the slot picker —
+    // 2 PM must still be listed (offered to V2), not hidden as "all
+    // booked". The slot's vendorIds list narrows to [V2] only so the
+    // assign-on-accept path picks the right vendor.
+    const v1 = vendor({ id: "v1", team: 1 });
+    const v2 = vendor({ id: "v2", team: 1 });
+    const aBooking2PMOnV1 = booking({
+      vendorId: "v1",
+      slotTime: "02:00 PM",
+      durationMinutes: 30,
+      serviceType: "house_painting",
+    });
+    const r = calculateAvailableSlots({
+      vendors: [v1, v2],
+      bookings: [aBooking2PMOnV1],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).toContain("02:00 PM");
+    const slot2pm = r.slotsWithVendors.find((s) => s.slotTime === "02:00 PM");
+    expect(slot2pm).toBeDefined();
+    expect(slot2pm.vendorIds).toEqual(["v2"]);
+  });
+
+  test("when ALL eligible vendors are booked at 2 PM, slot moves to unavailableSlots", () => {
+    // Counter-check: if every eligible vendor is taken at 2 PM, the
+    // slot must NOT appear in `slots` — it goes to `unavailableSlots`
+    // so the UI can render it as disabled.
+    const v1 = vendor({ id: "v1", team: 1 });
+    const v2 = vendor({ id: "v2", team: 1 });
+    const r = calculateAvailableSlots({
+      vendors: [v1, v2],
+      bookings: [
+        booking({
+          vendorId: "v1",
+          slotTime: "02:00 PM",
+          durationMinutes: 30,
+          serviceType: "house_painting",
+        }),
+        booking({
+          vendorId: "v2",
+          slotTime: "02:00 PM",
+          durationMinutes: 30,
+          serviceType: "house_painting",
+        }),
+      ],
+      activeHolds: [],
+      serviceType: "house_painting",
+      serviceDuration: 30,
+      minTeamMembers: 1,
+      date: TOMORROW,
+      lat: 19.0,
+      lng: 73.0,
+    });
+    expect(r.slots).not.toContain("02:00 PM");
+    expect(r.unavailableSlots).toContain("02:00 PM");
+  });
 });
 
 describe("slotAvailability — bug fix: professionalId not vendorId", () => {
