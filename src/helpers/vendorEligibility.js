@@ -20,10 +20,15 @@ const { haversineKm } = require("../services/slotAvailability.service");
 const { getOrComputeVendorKpis } = require("../services/vendorKpiCache.service");
 const { passesPerformanceGate } = require("./vendorKpiGate");
 
-// Product spec: customer must be within 10 km of vendor for the website
-// to surface them. Fixed for all vendors — admin manual-assign path
-// (which bypasses this) is the escape hatch when no vendor is in range.
-const SERVICE_RADIUS_KM = 10;
+// Default service radius (km) when a vendor doesn't have one set. Every
+// vendor doc carries its OWN `serviceRadiusKm` field (default 10 in the
+// model). We respect that per-vendor value so a vendor in a small pocket
+// of the city (e.g. Undri-only) can set a tight radius and not get
+// surfaced for distant leads — while a vendor who serves a wide area can
+// keep theirs at 10+. Before this, every vendor used a hardcoded 10 km
+// cap regardless of their setting, so every Pune painter matched every
+// Pune lead and the admin "Vendors Notified" card always showed all 3.
+const DEFAULT_SERVICE_RADIUS_KM = 10;
 
 /**
  * @param {object} args
@@ -80,9 +85,16 @@ async function filterEligibleVendors({
     }
 
     const dist = haversineKm(lat, lng, v.address.latitude, v.address.longitude);
-    if (dist > SERVICE_RADIUS_KM) {
+    const vendorRadius =
+      Number(v.serviceRadiusKm) > 0
+        ? Number(v.serviceRadiusKm)
+        : DEFAULT_SERVICE_RADIUS_KM;
+    if (dist > vendorRadius) {
       reasons.outsideRadius = true;
-      recordDebug(v, `outside_radius (${dist.toFixed(2)}km > ${SERVICE_RADIUS_KM}km)`);
+      recordDebug(
+        v,
+        `outside_radius (${dist.toFixed(2)}km > vendor's ${vendorRadius}km)`,
+      );
       continue;
     }
 
