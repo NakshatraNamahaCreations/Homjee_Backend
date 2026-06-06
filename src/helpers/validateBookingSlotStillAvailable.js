@@ -22,7 +22,7 @@
 const userBookings = require("../models/user/userBookings");
 const Vendor = require("../models/vendor/vendorAuth");
 const PricingConfig = require("../models/serviceConfig/PricingConfig");
-const { filterEligibleVendors } = require("./vendorEligibility");
+const { filterEligibleVendors, extractPincode } = require("./vendorEligibility");
 
 const CANCELLED_STATUSES = [
   "Customer Cancelled",
@@ -142,6 +142,7 @@ async function validateBookingSlotStillAvailable({
     requiredCoins,
     serviceType,
     minTeamMembers,
+    bookingPincode: extractPincode(booking?.address?.streetArea),
   });
 
   if (otherPaidCount >= eligibleVendors.length) {

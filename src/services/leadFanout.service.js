@@ -13,7 +13,7 @@
 const Vendor = require("../models/vendor/vendorAuth");
 const UserBooking = require("../models/user/userBookings");
 const vendorNotification = require("../models/notification/vendorNotification");
-const { filterEligibleVendors } = require("../helpers/vendorEligibility");
+const { filterEligibleVendors, extractPincode } = require("../helpers/vendorEligibility");
 const { buildCityMatchRegex } = require("../helpers/serviceCity");
 const { computeBookingCoinPolicy } = require("../helpers/bookingCoinPolicy");
 
@@ -69,6 +69,7 @@ async function fanOutLeadToEligibleVendors(booking) {
       requiredCoins,
       serviceType,
       minTeamMembers,
+      bookingPincode: extractPincode(booking?.address?.streetArea),
       includeDebug: false,
     });
 

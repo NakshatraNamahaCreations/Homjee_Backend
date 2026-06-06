@@ -30,6 +30,16 @@ const { passesPerformanceGate } = require("./vendorKpiGate");
 // Pune lead and the admin "Vendors Notified" card always showed all 3.
 const DEFAULT_SERVICE_RADIUS_KM = 10;
 
+// Indian PIN codes are 6 digits. Booking + vendor address fields are
+// stored as freeform strings ("…Undri, Pune, Maharashtra 411060, India"),
+// so we extract the first 6-digit token. Returns null if not found.
+const PINCODE_REGEX = /\b(\d{6})\b/;
+function extractPincode(addressString) {
+  if (!addressString || typeof addressString !== "string") return null;
+  const m = addressString.match(PINCODE_REGEX);
+  return m ? m[1] : null;
+}
+
 /**
  * @param {object} args
  * @param {Array}  args.vendors          — raw vendor docs (lean)
@@ -47,10 +57,17 @@ async function filterEligibleVendors({
   requiredCoins = 0,
   serviceType,
   minTeamMembers = 1,
+  // Booking pincode. When set AND the vendor's address also contains a
+  // 6-digit pincode, the two MUST match — vendors in a different pincode
+  // are rejected before we even check radius/coins/KPI. If either is
+  // missing, we fall through to the regular radius gate so legacy data
+  // (no pincode in the address string) still works.
+  bookingPincode = null,
   includeDebug = false,
 }) {
   const reasons = {
     archived: false,
+    pincodeMismatch: false,
     outsideRadius: false,
     lowCoins: false,
     teamShort: false,
@@ -82,6 +99,24 @@ async function filterEligibleVendors({
     if (!v.address || v.address.latitude == null || v.address.longitude == null) {
       recordDebug(v, "no_address");
       continue;
+    }
+
+    // Pincode gate. Runs BEFORE the radius check because it's cheap and
+    // strictly tighter: a vendor whose pincode doesn't match the
+    // booking's pincode is not surfaced even if their base address
+    // happens to fall inside the radius. Falls through silently when
+    // either side lacks a parseable pincode, so legacy address strings
+    // without an explicit pincode aren't accidentally filtered out.
+    if (bookingPincode) {
+      const vendorPincode = extractPincode(v.address?.location);
+      if (vendorPincode && vendorPincode !== bookingPincode) {
+        reasons.pincodeMismatch = true;
+        recordDebug(
+          v,
+          `pincode_mismatch (vendor=${vendorPincode}, booking=${bookingPincode})`,
+        );
+        continue;
+      }
     }
 
     const dist = haversineKm(lat, lng, v.address.latitude, v.address.longitude);
@@ -157,4 +192,4 @@ async function filterEligibleVendors({
   return { eligibleVendors, reasons, debug };
 }
 
-module.exports = { filterEligibleVendors };
+module.exports = { filterEligibleVendors, extractPincode };

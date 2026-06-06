@@ -35,7 +35,10 @@ const {
 const {
   fanOutLeadToEligibleVendors,
 } = require("../../services/leadFanout.service");
-const { filterEligibleVendors } = require("../../helpers/vendorEligibility");
+const {
+  filterEligibleVendors,
+  extractPincode,
+} = require("../../helpers/vendorEligibility");
 const { buildCityMatchRegex } = require("../../helpers/serviceCity");
 const { invalidateForDate } = require("../../services/slotCache.service");
 
@@ -85,6 +88,7 @@ async function findFreeAlternativeVendors({
     requiredCoins,
     serviceType,
     minTeamMembers,
+    bookingPincode: extractPincode(booking?.address?.streetArea),
     includeDebug: false,
   });
 
@@ -8992,6 +8996,7 @@ exports.getNearbyEligibleVendorsForBooking = async (req, res) => {
       requiredCoins,
       serviceType,
       minTeamMembers,
+      bookingPincode: extractPincode(booking?.address?.streetArea),
       includeDebug: false,
     });
 
