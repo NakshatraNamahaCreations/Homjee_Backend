@@ -47,7 +47,18 @@ function getLatLng(booking) {
   // Mongoose stores Point coords as [lng, lat]
   const coords = booking?.address?.location?.coordinates;
   if (!Array.isArray(coords) || coords.length < 2) return { lat: null, lng: null };
-  return { lng: Number(coords[0]), lat: Number(coords[1]) };
+  const lng = Number(coords[0]);
+  const lat = Number(coords[1]);
+  // Treat (0, 0) as "no usable coords". The Checkout payload falls back
+  // to 0 when the Google Places autocomplete didn't fire (so the address
+  // string is present but lat/lng never got captured). Running the geo
+  // eligibility pipeline from (0,0) would put every real vendor outside
+  // the radius and crater the eligible-vendor count to zero — which then
+  // collides with any other paid booking on the same slot and rejects
+  // every new booking. Detecting the sentinel here keeps the gate honest.
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return { lat: null, lng: null };
+  if (lat === 0 && lng === 0) return { lat: null, lng: null };
+  return { lng, lat };
 }
 
 /**
