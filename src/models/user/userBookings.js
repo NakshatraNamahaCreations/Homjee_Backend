@@ -374,6 +374,12 @@ const userBookingSchema = new mongoose.Schema({
     required: true,
   },
   selectedSlot: selectedSlot,
+  // First slot the customer booked. Preserved across reschedules so the
+  // admin can see the original booking time on a rescheduled lead. Set
+  // by the reschedule endpoint on the first reschedule; left alone on
+  // subsequent reschedules (so the FIRST slot stays, not the immediately
+  // previous one).
+  originalSlot: selectedSlot,
   isEnquiry: Boolean,
   isRead: { type: Boolean, default: false }, //New Field
   isDismmised: { type: Boolean, default: false }, //New Field

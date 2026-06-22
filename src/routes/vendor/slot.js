@@ -714,12 +714,26 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
     -------------------------------------------------- */
 
     if (!isResponded) {
+      // Capture the FIRST slot the customer ever booked so admin can
+      // still see the original time after one or more reschedules. Only
+      // write originalSlot if it isn't already set — preserves the very
+      // first slot across multiple reschedules instead of overwriting
+      // it with the most recent previous slot.
+      const originalSlotPatch =
+        booking?.originalSlot?.slotDate || booking?.originalSlot?.slotTime
+          ? {}
+          : {
+              "originalSlot.slotDate": booking?.selectedSlot?.slotDate || "",
+              "originalSlot.slotTime": booking?.selectedSlot?.slotTime || "",
+            };
+
       await UserBooking.updateOne(
         { _id: bookingId },
         {
           $set: {
             "selectedSlot.slotDate": slotDate,
             "selectedSlot.slotTime": slotTime,
+            ...originalSlotPatch,
           },
         },
         { session }
@@ -870,6 +884,20 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
       selectedSlot: {
         slotDate,
         slotTime,
+      },
+      // Carry the original-slot history forward onto the cloned booking.
+      // Prefer whatever was already stamped on the old booking (so the
+      // very first slot survives chained reschedules). Fall back to the
+      // old booking's selectedSlot when this is the first reschedule.
+      originalSlot: {
+        slotDate:
+          booking?.originalSlot?.slotDate ||
+          booking?.selectedSlot?.slotDate ||
+          "",
+        slotTime:
+          booking?.originalSlot?.slotTime ||
+          booking?.selectedSlot?.slotTime ||
+          "",
       },
 
       invitedVendors: [],

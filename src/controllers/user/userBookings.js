@@ -847,6 +847,60 @@ exports.createEnquiryLead = async (req, res) => {
       });
     }
 
+    // Returning-customer guard: if an active enquiry for the same phone +
+    // service already exists (not yet paid, not dismissed, not in any
+    // cancelled/completed terminal state), reuse it. Admin asked us to
+    // stop spawning a fresh enquiry every time the same customer hits the
+    // OTP flow for the same category — duplicates clutter the New
+    // Enquiries list and split the lead history.
+    const TERMINAL_STATUSES = [
+      "Cancelled",
+      "Customer Cancelled",
+      "Admin Cancelled",
+      "Cancelled Rescheduled",
+      "Project Completed",
+      "Job Completed",
+      "Completed",
+    ];
+    const existing = await UserBooking.findOne({
+      "customer.phone": customer.phone,
+      serviceType,
+      isEnquiry: true,
+      $and: [
+        {
+          $or: [
+            { isDismmised: { $exists: false } },
+            { isDismmised: false },
+            { isDismmised: null },
+          ],
+        },
+      ],
+      "bookingDetails.status": { $nin: TERMINAL_STATUSES },
+    })
+      .sort({ createdDate: -1 })
+      .lean();
+
+    if (existing?._id) {
+      // Refresh the user name on the existing enquiry if the caller
+      // supplied a newer/non-empty one. Everything else (address, slot,
+      // services) stays as-is so we don't blow away in-progress edits.
+      const patch = {};
+      const newName = (customer.name || "").trim();
+      if (newName && newName !== existing?.customer?.name) {
+        patch["customer.name"] = newName;
+      }
+      if (Object.keys(patch).length) {
+        await UserBooking.updateOne({ _id: existing._id }, { $set: patch });
+      }
+      return res.status(200).json({
+        success: true,
+        message: "Existing enquiry reused — no duplicate created",
+        bookingId: existing._id,
+        serviceType,
+        reused: true,
+      });
+    }
+
     const booking = new UserBooking({
       customer: {
         customerId: customer.customerId || String(user._id),
