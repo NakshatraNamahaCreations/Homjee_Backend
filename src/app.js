@@ -21,7 +21,11 @@ const corsOptions = {
     "https://websitehomjee2026.netlify.app",
     "https://adminpanelhomjee.netlify.app",
     "https://websitehomjee.netlify.app",
-    "https://homjeeadminpanel2026.netlify.app/",
+    // Dropped trailing slash — see the note above; the browser's Origin
+    // header never has one, so the old entry was a dead match.
+    "https://homjeeadminpanel2026.netlify.app",
+    "https://homjeeadminpanel122.netlify.app",
+    "https://homjee-website.netlify.app",
     "http://localhost:5173",
     "http://localhost:5174",
     "https://cloudflare-workers-autoconfig-homjee-website.ops-nnc.workers.dev",
