@@ -30,6 +30,16 @@ router.get(
   "/nearby-eligible-vendors/:bookingId",
   bookingController.getNearbyEligibleVendorsForBooking
 );
+// Re-run the auto-fanout for an existing lead. Useful when a vendor was
+// added AFTER the lead was paid, so the original fanout couldn't have
+// invited them — admin clicks "Refresh Notified Vendors" on the lead
+// detail page, this re-runs the eligibility pipeline against the
+// current vendor pool and pushes any newly-matching vendor into
+// invitedVendors. Idempotent — already-invited vendors are skipped.
+router.post(
+  "/refanout-lead/:bookingId",
+  bookingController.refanoutLead
+);
 router.post("/notify-vendor", bookingController.notifyVendorForLead);
 
 // 🔹 Aggregate "Amount Yet to be Paid" across all ongoing leads

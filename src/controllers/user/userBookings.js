@@ -9070,6 +9070,42 @@ exports.getNearbyEligibleVendorsForBooking = async (req, res) => {
   }
 };
 
+// Re-runs the auto-fanout for an existing booking. Used when admins
+// notice a vendor who SHOULD have been notified (e.g. their pincode
+// matches the lead) is missing from invitedVendors — usually because
+// the vendor was onboarded AFTER the lead was created, so the original
+// fanout couldn't have known about them. Idempotent: vendors already in
+// invitedVendors are skipped, no duplicates pushed.
+exports.refanoutLead = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    if (!bookingId || !mongoose.Types.ObjectId.isValid(bookingId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid bookingId" });
+    }
+
+    const booking = await UserBooking.findById(bookingId).lean();
+    if (!booking) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
+    }
+    if (booking.isEnquiry !== false) {
+      return res.status(400).json({
+        success: false,
+        message: "Booking is still an enquiry — fanout only runs on paid leads",
+      });
+    }
+
+    const result = await fanOutLeadToEligibleVendors(booking);
+    return res.status(200).json({ success: true, ...result });
+  } catch (err) {
+    console.error("refanoutLead error:", err);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 // Aggregate Amount Yet to be Paid across all ongoing leads.
 // "Ongoing" = booking payment done (firstPayment.status === "paid" OR
 // paidAmount > 0) AND status is not Cancelled/Completed AND
