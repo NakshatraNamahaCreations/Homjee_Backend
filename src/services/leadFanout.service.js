@@ -33,8 +33,30 @@ async function fanOutLeadToEligibleVendors(booking) {
 
     const bookingId = String(booking._id);
     const serviceType = booking.serviceType;
-    const lat = booking.address?.latitude;
-    const lng = booking.address?.longitude;
+    // Read coords from BOTH the legacy flat fields and the GeoJSON
+    // `address.location.coordinates: [lng, lat]`. Newer bookings only
+    // populate the GeoJSON pair (no flat latitude/longitude on the
+    // address subdoc), so the old `address.latitude` lookup silently
+    // returned undefined and the fanout aborted with "missing_geo" —
+    // which left admin's New Leads detail page stuck on the fallback
+    // list, no Vendor Received timestamps.
+    const flatLat = booking.address?.latitude;
+    const flatLng = booking.address?.longitude;
+    const geoCoords = Array.isArray(booking.address?.location?.coordinates)
+      ? booking.address.location.coordinates
+      : null;
+    const lat =
+      flatLat != null
+        ? Number(flatLat)
+        : geoCoords && geoCoords.length === 2
+          ? Number(geoCoords[1])
+          : null;
+    const lng =
+      flatLng != null
+        ? Number(flatLng)
+        : geoCoords && geoCoords.length === 2
+          ? Number(geoCoords[0])
+          : null;
     const city = booking.address?.city;
 
     if (!serviceType || lat == null || lng == null) {
