@@ -9076,6 +9076,12 @@ exports.getNearbyEligibleVendorsForBooking = async (req, res) => {
 // the vendor was onboarded AFTER the lead was created, so the original
 // fanout couldn't have known about them. Idempotent: vendors already in
 // invitedVendors are skipped, no duplicates pushed.
+//
+// We bypass the isEnquiry guard inside fanOutLeadToEligibleVendors here
+// (by stamping isEnquiry: false on a shallow clone) so the admin lead
+// detail page can show "Vendor Received" timestamps for enquiries too.
+// The clone is only for the fanout call — the persisted booking stays
+// untouched, so payment-state semantics elsewhere don't shift.
 exports.refanoutLead = async (req, res) => {
   try {
     const { bookingId } = req.params;
@@ -9091,14 +9097,11 @@ exports.refanoutLead = async (req, res) => {
         .status(404)
         .json({ success: false, message: "Booking not found" });
     }
-    if (booking.isEnquiry !== false) {
-      return res.status(400).json({
-        success: false,
-        message: "Booking is still an enquiry — fanout only runs on paid leads",
-      });
-    }
 
-    const result = await fanOutLeadToEligibleVendors(booking);
+    // Force-fanout view of the booking — the underlying fanout function
+    // short-circuits unless isEnquiry === false. The DB row is unchanged.
+    const fanoutInput = { ...booking, isEnquiry: false };
+    const result = await fanOutLeadToEligibleVendors(fanoutInput);
     return res.status(200).json({ success: true, ...result });
   } catch (err) {
     console.error("refanoutLead error:", err);
