@@ -142,6 +142,9 @@ router.get(
   "/get-vendor-by-vendorId/:id",
   vendorAuthController.getVendorByVendorId
 );
+// FCM device-token registration for push notifications (#3)
+router.post("/register-device-token", vendorAuthController.registerDeviceToken);
+router.post("/remove-device-token", vendorAuthController.removeDeviceToken);
 router.post("/add-coin", vendorAuthController.addCoin);
 router.post("/reduce-coin", vendorAuthController.reduceCoin);
 router.post("/team/remove", vendorAuthController.removeTeamMember);

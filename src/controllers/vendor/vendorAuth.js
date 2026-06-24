@@ -2036,6 +2036,67 @@ exports.getAllVendors = async (req, res) => {
   }
 };
 
+// ── FCM device-token registration (push notifications #3) ───────────────────
+// The vendor app calls this after login (and on token refresh) with its FCM
+// token. We keep an array per vendor so multi-device login works. $addToSet
+// avoids duplicates.
+exports.registerDeviceToken = async (req, res) => {
+  try {
+    const { vendorId, token } = req.body;
+    if (!vendorId || !token) {
+      return res
+        .status(400)
+        .json({ success: false, message: "vendorId and token are required" });
+    }
+
+    const updated = await vendorAuthSchema.findByIdAndUpdate(
+      vendorId,
+      { $addToSet: { fcmTokens: token } },
+      { new: true, projection: { fcmTokens: 1 } },
+    );
+
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vendor not found" });
+    }
+
+    return res
+      .status(200)
+      .json({ success: true, message: "Device token registered" });
+  } catch (error) {
+    console.error("registerDeviceToken error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
+// Remove a token (called on logout so a device stops receiving leads).
+exports.removeDeviceToken = async (req, res) => {
+  try {
+    const { vendorId, token } = req.body;
+    if (!vendorId || !token) {
+      return res
+        .status(400)
+        .json({ success: false, message: "vendorId and token are required" });
+    }
+
+    await vendorAuthSchema.findByIdAndUpdate(vendorId, {
+      $pull: { fcmTokens: token },
+    });
+
+    return res
+      .status(200)
+      .json({ success: true, message: "Device token removed" });
+  } catch (error) {
+    console.error("removeDeviceToken error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
 // ... (Other existing endpoints like loginWithMobile, verifyOTP, etc. remain unchanged)
 // ✅ ADD COIN
 exports.addCoin = async (req, res) => {

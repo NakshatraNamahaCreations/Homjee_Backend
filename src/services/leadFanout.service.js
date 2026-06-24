@@ -16,6 +16,7 @@ const vendorNotification = require("../models/notification/vendorNotification");
 const { filterEligibleVendors, extractPincode } = require("../helpers/vendorEligibility");
 const { buildCityMatchRegex } = require("../helpers/serviceCity");
 const { computeBookingCoinPolicy } = require("../helpers/bookingCoinPolicy");
+const { sendPushToVendors } = require("./pushNotification.service");
 
 function maxTeamRequired(services) {
   return (services || []).reduce(
@@ -136,6 +137,28 @@ async function fanOutLeadToEligibleVendors(booking) {
       },
     }));
     await vendorNotification.insertMany(notificationDocs, { ordered: false });
+
+    // Push notification with sound — the Ola/Uber-style alert (#3). Best-effort
+    // and non-blocking: if Firebase isn't configured the service no-ops, and we
+    // never let a push failure break the fanout. The app builds a high-priority,
+    // sound-on "lead-alerts" channel notification from this.
+    try {
+      const pushVendorIds = eligibleVendors.map((v) => String(v._id));
+      const serviceLabel =
+        serviceType === "deep_cleaning" ? "Deep Cleaning" : "House Painting";
+      await sendPushToVendors(pushVendorIds, {
+        title: "New Lead Available 🔔",
+        body: `A new ${serviceLabel} lead is waiting. Open the app to respond.`,
+        channelId: "lead-alerts",
+        data: {
+          type: "LEAD",
+          bookingId: String(bookingId),
+          serviceType: String(serviceType || ""),
+        },
+      });
+    } catch (e) {
+      console.error("[fanout] push send failed (non-blocking):", e?.message);
+    }
 
     console.log(
       "[fanout] booking",

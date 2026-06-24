@@ -108,6 +108,11 @@ const vendorAuthSchema = new mongoose.Schema({
     default: [],
   },
   markedLeaves: [{ type: String }],
+  // FCM device tokens for push notifications (new-lead alerts with sound).
+  // A vendor can be logged in on multiple devices, so this is an array.
+  // Tokens are added on login/refresh and pruned when FCM reports them
+  // unregistered (see pushNotification.service.js). (#3)
+  fcmTokens: { type: [String], default: [] },
   ratings: {
     average: { type: Number, default: 0, min: 0, max: 5 },
     totalReviews: { type: Number, default: 0 },
