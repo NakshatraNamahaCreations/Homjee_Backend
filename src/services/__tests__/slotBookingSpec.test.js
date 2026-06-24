@@ -279,19 +279,21 @@ describe("TC6 — site visit charge is zero (no deduction)", () => {
     expect(r.eligibleVendors.map((v) => v._id)).toEqual(["v1"]);
   });
 
-  test("policy returns shouldChargeCoins=false for HP+siteVisit=0", async () => {
+  test("policy charges HP even when siteVisit=0 (uses PricingConfig.vendorCoins)", async () => {
     setPricingConfig("Pune", { city: "Pune", vendorCoins: 100, siteVisitCharge: 0 });
 
     const policy = await computeBookingCoinPolicy({
       serviceType: "house_painting",
       bookingDetails: { siteVisitCharges: 0 },
       address: { city: "Pune" },
-      service: [{ coinDeduction: 100 }], // legacy value — should be ignored
+      service: [{ coinDeduction: 100 }],
     });
 
-    expect(policy.shouldChargeCoins).toBe(false);
-    expect(policy.requiredCoins).toBe(0);
-    expect(policy.source).toBe("hp_site_visit_zero");
+    // Per product decision: HP responses always deduct coins, regardless of
+    // site-visit charge. Configured vendorCoins (>0) wins over service coins.
+    expect(policy.shouldChargeCoins).toBe(true);
+    expect(policy.requiredCoins).toBe(100);
+    expect(policy.source).toBe("hp_pricing_config");
   });
 });
 

@@ -4,11 +4,12 @@
 // unification both live in one place.
 //
 // Spec rules encoded here:
-//   - HP + siteVisitCharges === 0  → shouldChargeCoins: false (no deduction).
-//                                    Vendor is still eligible & can accept.
-//   - HP + siteVisitCharges  >  0  → requiredCoins = PricingConfig.vendorCoins
-//                                    for the booking's city (matches the
-//                                    eligibility-side gate).
+//   - HP                           → always charge coins (per product decision,
+//                                    regardless of siteVisitCharges). requiredCoins
+//                                    = PricingConfig.vendorCoins for the booking's
+//                                    city when configured (>0), else falls back to
+//                                    the service-stamped coins so a config gap can
+//                                    never block a response.
 //   - DC                           → requiredCoins = sum of service[].coinDeduction
 //                                    (per-package config; existing logic).
 //
@@ -33,27 +34,23 @@ function sumServiceCoins(services) {
 /**
  * @param {object} booking — full booking doc (Mongoose or lean)
  * @returns {Promise<{requiredCoins:number, shouldChargeCoins:boolean, source:string}>}
- *   source ∈ "hp_pricing_config" | "hp_service_fallback" | "dc_service_sum" | "hp_site_visit_zero"
+ *   source ∈ "hp_pricing_config" | "hp_service_fallback" | "dc_service_sum"
  */
 async function computeBookingCoinPolicy(booking) {
   const serviceType = booking?.serviceType;
 
   if (serviceType === "house_painting") {
-    const siteVisit = n(booking?.bookingDetails?.siteVisitCharges);
-    if (siteVisit === 0) {
-      return {
-        requiredCoins: 0,
-        shouldChargeCoins: false,
-        source: "hp_site_visit_zero",
-      };
-    }
-
+    // Always charge HP responses (the siteVisit=0 skip was removed per the
+    // product decision — vendors pay coins on every HP lead response).
     const city = booking?.address?.city;
     if (city) {
       const pricing = await PricingConfig.findOne({
         city: { $regex: new RegExp(`^${escapeRegex(city)}$`, "i") },
       }).lean();
-      if (pricing) {
+      // Only trust a configured, positive vendorCoins value. A zero/unset
+      // config must NOT win here — otherwise requiredCoins=0 trips the
+      // "Coin deduction not configured" guard and blocks the response.
+      if (pricing && n(pricing.vendorCoins) > 0) {
         return {
           requiredCoins: n(pricing.vendorCoins),
           shouldChargeCoins: true,
@@ -62,9 +59,9 @@ async function computeBookingCoinPolicy(booking) {
       }
     }
 
-    // Fallback: city missing or no PricingConfig for it. Use whatever was
-    // stamped on the booking at creation time so vendors aren't permanently
-    // blocked by a config gap.
+    // Fallback: city missing, no PricingConfig, or vendorCoins not set.
+    // Use whatever was stamped on the booking at creation time (the value
+    // the app shows on the Respond button) so a config gap never blocks.
     return {
       requiredCoins: sumServiceCoins(booking?.service),
       shouldChargeCoins: true,
