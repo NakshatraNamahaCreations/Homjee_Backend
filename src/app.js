@@ -41,6 +41,14 @@ app.use(bodyParser.json({ limit: "50mb" }));
 app.use(bodyParser.urlencoded({ limit: "50mb", extended: true }));
 app.use("/public", express.static("public"));
 
+// Lightweight health check (no DB). Point an external uptime monitor
+// (UptimeRobot / cron-job.org) at /health every ~10 min to keep the Render
+// free instance from spinning down — that cold-start is what makes the
+// vendor app's first leads fetch take 30-50s. (app issue #2)
+app.get(["/health", "/api/health"], (req, res) => {
+  res.status(200).json({ status: "ok", ts: Date.now() });
+});
+
 // razor pay
 app.use("/api/payments", require("./../src/payments/payment.routes"));
 
