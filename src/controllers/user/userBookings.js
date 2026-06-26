@@ -3911,12 +3911,19 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
       return false;
     });
 
+    // #17: drop leads whose slot the vendor is already booked for (and remove
+    // the vendor from those leads' notified list).
+    const visibleBookings = await filterLeadsByVendorSlotAvailability(
+      callerVendorId,
+      filteredBookings,
+    );
+
     // Surface vendorStatus so the app can show recharge prompts etc., but
     // leads are returned regardless of status (only archived was blocked
     // earlier in this handler).
     const meta = callerVendorId ? { vendorStatus } : {};
 
-    if (!filteredBookings.length) {
+    if (!visibleBookings.length) {
       return res.status(404).json({
         message: "No bookings found near this location",
         ...meta,
@@ -3924,7 +3931,7 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     }
 
     res.status(200).json({
-      bookings: filteredBookings,
+      bookings: visibleBookings,
       ...meta,
     });
   } catch (error) {
@@ -3932,6 +3939,61 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     res.status(500).json({ message: "Server error" });
   }
 };
+
+// #17: Hide leads a vendor can't take because their slot is already full, and
+// drop them from that lead's notified list. A lead "conflicts" when responding
+// would throw the slot-overlap 409 — the SAME guard the respond endpoint uses —
+// so we never show a lead the vendor would be blocked from accepting. Each
+// conflicting pending invite is marked "slot_full" so both the admin "Vendors
+// Notified" list and the vendor's invited-leads query drop the vendor.
+async function filterLeadsByVendorSlotAvailability(callerVendorId, bookings) {
+  if (!callerVendorId || !Array.isArray(bookings) || !bookings.length) {
+    return bookings || [];
+  }
+  const visible = [];
+  const conflictIds = [];
+  for (const booking of bookings) {
+    const slotDate = booking?.selectedSlot?.slotDate;
+    const slotTime = booking?.selectedSlot?.slotTime;
+    const durationMinutes = computeBookingDuration(booking);
+    let conflict = false;
+    if (slotDate && slotTime && durationMinutes) {
+      try {
+        await validateVendorSlotAvailable({
+          vendorId: callerVendorId,
+          date: slotDate,
+          slotTime,
+          durationMinutes,
+          serviceType: booking.serviceType,
+          excludeBookingId: String(booking._id),
+        });
+      } catch (e) {
+        if (e?.status === 409) conflict = true;
+      }
+    }
+    if (conflict) conflictIds.push(String(booking._id));
+    else visible.push(booking);
+  }
+  if (conflictIds.length) {
+    try {
+      await UserBooking.updateMany(
+        { _id: { $in: conflictIds } },
+        { $set: { "invitedVendors.$[iv].responseStatus": "slot_full" } },
+        {
+          arrayFilters: [
+            {
+              "iv.professionalId": String(callerVendorId),
+              "iv.responseStatus": "pending",
+            },
+          ],
+        },
+      );
+    } catch (e) {
+      console.error("[#17] slot_full invite mark failed:", e?.message);
+    }
+  }
+  return visible;
+}
 
 exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
   try {
@@ -4072,12 +4134,19 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
       return false;
     });
 
+    // #17: drop leads whose slot the vendor is already booked for (and remove
+    // the vendor from those leads' notified list).
+    const visibleBookings = await filterLeadsByVendorSlotAvailability(
+      callerVendorId,
+      filteredBookings,
+    );
+
     // Surface vendorStatus so the app can show recharge prompts etc., but
     // leads are returned regardless of status (only archived was blocked
     // earlier in this handler).
     const meta = callerVendorId ? { vendorStatus } : {};
 
-    if (!filteredBookings.length) {
+    if (!visibleBookings.length) {
       return res.status(404).json({
         message: "No bookings found near this location",
         ...meta,
@@ -4087,7 +4156,7 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
     res.status(200).json({
       success: true,
       isPerformanceLow: false,
-      bookings: filteredBookings,
+      bookings: visibleBookings,
       ...meta,
     });
   } catch (error) {
@@ -7806,10 +7875,32 @@ exports.updateUserBooking = async (req, res) => {
     // ---------------- UPDATE SLOT ----------------
     if (selectedSlot) {
       booking.selectedSlot = booking.selectedSlot || {};
-      booking.selectedSlot.slotDate =
-        selectedSlot.slotDate ?? booking.selectedSlot.slotDate;
-      booking.selectedSlot.slotTime =
-        selectedSlot.slotTime ?? booking.selectedSlot.slotTime;
+
+      const prevSlotDate = booking.selectedSlot.slotDate || "";
+      const prevSlotTime = booking.selectedSlot.slotTime || "";
+
+      const newSlotDate = selectedSlot.slotDate ?? booking.selectedSlot.slotDate;
+      const newSlotTime = selectedSlot.slotTime ?? booking.selectedSlot.slotTime;
+
+      // Preserve the FIRST slot the customer booked when the slot is changed
+      // here via Edit — mirrors the reschedule endpoint so admin can always
+      // see the original booking date & time below the current one. Only
+      // stamp originalSlot once (so the very first slot survives repeated
+      // edits) and only when the slot is actually changing.
+      const slotChanging =
+        String(newSlotDate || "") !== String(prevSlotDate) ||
+        String(newSlotTime || "") !== String(prevSlotTime);
+      const hasOriginal =
+        booking.originalSlot?.slotDate || booking.originalSlot?.slotTime;
+      if (slotChanging && !hasOriginal && (prevSlotDate || prevSlotTime)) {
+        booking.originalSlot = {
+          slotDate: prevSlotDate,
+          slotTime: prevSlotTime,
+        };
+      }
+
+      booking.selectedSlot.slotDate = newSlotDate;
+      booking.selectedSlot.slotTime = newSlotTime;
     }
 
     // ---------------- UPDATE SERVICES (Deep Cleaning ONLY) ----------------
@@ -8935,9 +9026,12 @@ exports.getNotifiedVendorsForBooking = async (req, res) => {
         .json({ success: false, message: "Booking not found" });
     }
 
-    const invited = Array.isArray(booking.invitedVendors)
-      ? booking.invitedVendors
-      : [];
+    // #17: a vendor whose slot is already full for this lead is marked
+    // "slot_full" — drop them so they no longer show in the admin's
+    // "Vendors Notified" list (they can never accept this lead).
+    const invited = (
+      Array.isArray(booking.invitedVendors) ? booking.invitedVendors : []
+    ).filter((iv) => String(iv?.responseStatus || "") !== "slot_full");
 
     const ids = invited
       .map((iv) => iv?.professionalId)
