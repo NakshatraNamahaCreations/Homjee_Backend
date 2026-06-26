@@ -729,9 +729,51 @@ exports.getProductsByType = async (req, res) => {
     let data;
 
     if (productType === "Packages") {
+      // A package's detail.paintPrice is a SNAPSHOT taken when the package was
+      // created/edited — it does NOT auto-update when an admin later changes a
+      // paint's price. That made quotes compute on stale prices. Refresh each
+      // detail's paintPrice from the live paint list (matched by name + city)
+      // at read time so quotes always use the latest paint prices, and
+      // recompute packagePrice to match. (#15)
+      const livePaints = (productDoc.paint || []).filter(
+        (p) => p.productType === "Paints" || !p.productType
+      );
+      const priceByNameCity = new Map();
+      const priceByName = new Map();
+      for (const p of livePaints) {
+        const price = Number(p.price);
+        if (!Number.isFinite(price)) continue;
+        const nm = String(p.name || "").trim().toLowerCase();
+        if (!nm) continue;
+        priceByName.set(nm, price);
+        priceByNameCity.set(
+          `${nm}|${String(p.city || "").trim().toLowerCase()}`,
+          price
+        );
+      }
+      const livePrice = (paintName, cityVal) => {
+        const nm = String(paintName || "").trim().toLowerCase();
+        const key = `${nm}|${String(cityVal || "").trim().toLowerCase()}`;
+        if (priceByNameCity.has(key)) return priceByNameCity.get(key);
+        if (priceByName.has(nm)) return priceByName.get(nm);
+        return null;
+      };
+
       data = productDoc.package
         .filter((pkg) => packageMatchesCity(pkg, city))
-        .sort((a, b) => a.order - b.order); // Add this line
+        .sort((a, b) => a.order - b.order)
+        .map((pkg) => {
+          const obj = pkg.toObject ? pkg.toObject() : { ...pkg };
+          let sum = 0;
+          obj.details = (obj.details || []).map((d) => {
+            const fresh = livePrice(d.paintName, d.city);
+            const paintPrice = fresh != null ? fresh : Number(d.paintPrice) || 0;
+            sum += paintPrice;
+            return { ...d, paintPrice };
+          });
+          obj.packagePrice = sum;
+          return obj;
+        });
     } else if (productType === "Paints") {
       data = productDoc.paint
         .filter((p) => p.productType === "Paints" || !p.productType)
