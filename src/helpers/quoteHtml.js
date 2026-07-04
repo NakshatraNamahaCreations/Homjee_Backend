@@ -34,6 +34,16 @@ const modeLabel = (mode) => {
   return m || "";
 };
 
+// A paint whose price does NOT depend on the Fresh-vs-Repaint process must be
+// shown as ONE combined row in the quote, not split per process. Detected by
+// name (already carries "Fresh Paint" and isn't a "Repaint Only" variant) —
+// mirrors isModeAgnosticPaint in the app so the quote/PDF matches the summary.
+const isModeAgnosticPaintName = (paintName) => {
+  const nm = String(paintName || "").trim().toLowerCase();
+  if (!nm) return false;
+  return nm.includes("fresh paint") && !nm.includes("repaint only");
+};
+
 const labelType = (t, roomName) => {
   const x = String(t || "").toLowerCase();
   if (x.includes("measurement")) return roomName;
@@ -56,18 +66,21 @@ const getCountFromMeasurement = (measurement, roomName, type, mode) => {
     if (!room) return 0;
     const m = String(mode || "").toUpperCase();
     const t = String(type || "").toLowerCase();
+    // An empty mode means "count every process" — used for mode-agnostic
+    // paints that are grouped into a single row regardless of Fresh/Repaint.
+    const matchMode = (x) => !m || String(x?.mode || "").toUpperCase() === m;
 
     if (t.includes("ceiling")) {
       const arr = Array.isArray(room?.ceilings) ? room.ceilings : [];
-      return arr.filter((x) => String(x?.mode || "").toUpperCase() === m).length;
+      return arr.filter(matchMode).length;
     }
     if (t.includes("wall")) {
       const arr = Array.isArray(room?.walls) ? room.walls : [];
-      return arr.filter((x) => String(x?.mode || "").toUpperCase() === m).length;
+      return arr.filter(matchMode).length;
     }
     if (t.includes("measurement")) {
       const arr = Array.isArray(room?.measurements) ? room.measurements : [];
-      return arr.filter((x) => String(x?.mode || "").toUpperCase() === m).length;
+      return arr.filter(matchMode).length;
     }
     return 0;
   } catch {
@@ -91,8 +104,13 @@ const buildRoomWise = (quote, measurement) => {
       const price = Number(b?.price ?? 0);
       const paintName = b?.paintName || "Paint";
       const type = b?.type || "";
-      const mode = b?.mode || "";
-      const key = `${paintName}__${type}__${mode}`;
+      // Mode-agnostic paints collapse Fresh + Repaint into one row (empty mode
+      // → no process suffix, count spans all processes).
+      const agnostic = isModeAgnosticPaintName(paintName);
+      const mode = agnostic ? "" : b?.mode || "";
+      const key = agnostic
+        ? `${paintName}__${type}`
+        : `${paintName}__${type}__${mode}`;
       const prev = map.get(key);
       if (!prev) {
         map.set(key, {
