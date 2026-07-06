@@ -4467,10 +4467,12 @@ exports.getBookingExceptPendingAndCancelled = async (req, res) => {
 
     const q = {
       "assignedProfessional.professionalId": professionalId,
+      // NOTE: three separate `$ne` keys collapse to the last one in JS (dup
+      // object keys), so the old query only excluded "Cancelled Rescheduled"
+      // and returned Pending/Cancelled too — bloating the Ongoing payload.
+      // $nin excludes all three as intended.
       "bookingDetails.status": {
-        $ne: "Pending",
-        $ne: "Cancelled",
-        $ne: "Cancelled Rescheduled",
+        $nin: ["Pending", "Cancelled", "Cancelled Rescheduled"],
       },
     };
 
