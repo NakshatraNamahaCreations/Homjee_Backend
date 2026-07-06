@@ -63,6 +63,17 @@ const sanitizePaint = (p) => {
   };
 };
 
+// Total of a line's additional services (finishing paints / waterproofing /
+// POP / tile grouting etc.). Prefers the stored additionalTotal; falls back to
+// summing the list.
+const lineAdditional = (l) => {
+  const fromTotal = Number(l?.additionalTotal || 0);
+  if (fromTotal > 0) return fromTotal;
+  return Array.isArray(l?.additionalServices)
+    ? l.additionalServices.reduce((a, x) => a + Number(x?.total || 0), 0)
+    : 0;
+};
+
 const computeTotals = (
   lines = [],
   discount = { type: "PERCENT", value: 0, amount: 0 },
@@ -72,13 +83,15 @@ const computeTotals = (
     exterior = 0,
     others = 0;
   for (const l of lines) {
-    const sub = Number(l?.subtotal || 0);
+    // Additional services belong to the room's section, so fold them into the
+    // same Interior/Exterior/Others bucket as the paint. (#quote-additional)
+    const sub = Number(l?.subtotal || 0) + lineAdditional(l);
     const t = (l?.sectionType || "").trim();
     if (t === "Interior") interior += sub;
     else if (t === "Exterior") exterior += sub;
     else others += sub;
   }
-  const additionalServices = 0;
+  const additionalServices = 0; // folded into interior/exterior/others above
   const subtotal = interior + exterior + others + additionalServices;
 
   let discountAmount = 0;
@@ -145,16 +158,18 @@ exports.createQuote = async (req, res) => {
       if (!room?.pricing?.total) continue;
       const line = buildRoomLine(name, room);
       lines.push(line);
-      if (room.sectionType === "Interior") interior += line.subtotal;
-      else if (room.sectionType === "Exterior") exterior += line.subtotal;
-      else if (room.sectionType === "Others") others += line.subtotal;
+      // Fold each room's additional services into its own section total.
+      const secAmt = Number(line.subtotal || 0) + lineAdditional(line);
+      if (room.sectionType === "Interior") interior += secAmt;
+      else if (room.sectionType === "Exterior") exterior += secAmt;
+      else others += secAmt;
     }
 
     interior = round2(interior);
     exterior = round2(exterior);
     others = round2(others);
 
-    const additionalServices = 0; // for now
+    const additionalServices = 0; // folded into interior/exterior/others above
     const subtotal = round2(interior + exterior + others + additionalServices);
 
     // Discount
@@ -382,31 +397,26 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
     }).lean();
     const lines = fresh?.lines || [];
 
+    // Paint + that section's additional services, per section — so an
+    // additional service added to an Interior room lands in the Interior
+    // total, Exterior in Exterior, and everything else in Others.
+    const sectionAmt = (l) => Number(l.subtotal || 0) + lineAdditional(l);
     const interior = sum(
       lines.filter((l) => l.sectionType === "Interior"),
-      (l) => l.subtotal
+      sectionAmt
     );
     const exterior = sum(
       lines.filter((l) => l.sectionType === "Exterior"),
-      (l) => l.subtotal
+      sectionAmt
     );
     const others = sum(
-      lines.filter((l) => l.sectionType === "Others"),
-      (l) => l.subtotal
+      lines.filter(
+        (l) => l.sectionType !== "Interior" && l.sectionType !== "Exterior"
+      ),
+      sectionAmt
     );
 
-    const addAll = lines.reduce((S, l) => {
-      const fromTotal = Number(l.additionalTotal || 0);
-      if (fromTotal > 0) return S + fromTotal;
-      const fromList = Array.isArray(l.additionalServices)
-        ? l.additionalServices.reduce((a, x) => a + Number(x.total || 0), 0)
-        : 0;
-      return S + fromList;
-    }, 0);
-
-    const subtotalAll = Number(
-      (interior + exterior + others + addAll).toFixed(2)
-    );
+    const subtotalAll = Number((interior + exterior + others).toFixed(2));
     let discountAmount = 0;
     if (fresh?.discount?.type === "PERCENT") {
       discountAmount = Number(
@@ -433,7 +443,7 @@ exports.upsertQuoteRoomPricing = async (req, res) => {
             interior,
             exterior,
             others,
-            additionalServices: addAll,
+            additionalServices: 0, // folded into interior/exterior/others
             subtotal: subtotalAll,
             discountAmount,
             finalPerDay,
@@ -650,24 +660,21 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
     q.set(`lines.${lineIdx}`, line);
     q.markModified("lines");
 
-    // --- recompute quote totals (base + additional) ---
+    // --- recompute quote totals (paint + that section's additional) ---
+    const secAmt = (l) => Number(l.subtotal || 0) + lineAdditional(l);
     const interior = q.lines
       .filter((l) => l.sectionType === "Interior")
-      .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+      .reduce((s, l) => s + secAmt(l), 0);
     const exterior = q.lines
       .filter((l) => l.sectionType === "Exterior")
-      .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+      .reduce((s, l) => s + secAmt(l), 0);
     const others = q.lines
-      .filter((l) => l.sectionType === "Others")
-      .reduce((s, l) => s + Number(l.subtotal || 0), 0);
-    const addAll = q.lines.reduce(
-      (s, l) => s + Number(l.additionalTotal || 0),
-      0
-    );
+      .filter(
+        (l) => l.sectionType !== "Interior" && l.sectionType !== "Exterior"
+      )
+      .reduce((s, l) => s + secAmt(l), 0);
 
-    const subtotalAll = Number(
-      (interior + exterior + others + addAll).toFixed(2)
-    );
+    const subtotalAll = Number((interior + exterior + others).toFixed(2));
 
     let discountAmount = 0;
     if (q.discount?.type === "PERCENT") {
@@ -689,7 +696,7 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
       interior,
       exterior,
       others,
-      additionalServices: addAll,
+      additionalServices: 0, // folded into interior/exterior/others
       subtotal: subtotalAll,
       discountAmount,
       finalPerDay,
@@ -764,27 +771,21 @@ exports.removeAdditionalService = async (req, res) => {
     line.additionalServices = list;
     line.additionalTotal = Number(additionalTotal.toFixed(2));
 
-    // recompute quote totals (don’t try to “restore” paint sqft here — SelectPaint save will do)
-    const sumRoom = (sect) =>
-      (q.lines || [])
-        .filter((l) => l.sectionType === sect)
-        .reduce((s, l) => s + Number(l.subtotal || 0), 0);
+    // recompute quote totals — paint + that section's additional services.
+    const secAmt = (l) => Number(l.subtotal || 0) + lineAdditional(l);
+    const interior = (q.lines || [])
+      .filter((l) => l.sectionType === "Interior")
+      .reduce((s, l) => s + secAmt(l), 0);
+    const exterior = (q.lines || [])
+      .filter((l) => l.sectionType === "Exterior")
+      .reduce((s, l) => s + secAmt(l), 0);
+    const others = (q.lines || [])
+      .filter(
+        (l) => l.sectionType !== "Interior" && l.sectionType !== "Exterior"
+      )
+      .reduce((s, l) => s + secAmt(l), 0);
 
-    const interior = sumRoom("Interior");
-    const exterior = sumRoom("Exterior");
-    const others = sumRoom("Others");
-    const addAll = (q.lines || []).reduce(
-      (s, l) =>
-        s +
-        (Array.isArray(l.additionalServices)
-          ? l.additionalServices.reduce((a, x) => a + Number(x.total || 0), 0)
-          : Number(l.additionalTotal || 0)),
-      0
-    );
-
-    const subtotalAll = Number(
-      (interior + exterior + others + addAll).toFixed(2)
-    );
+    const subtotalAll = Number((interior + exterior + others).toFixed(2));
     let discountAmount = 0;
     if (q.discount?.type === "PERCENT") {
       discountAmount = Number(
@@ -801,7 +802,7 @@ exports.removeAdditionalService = async (req, res) => {
       interior,
       exterior,
       others,
-      additionalServices: addAll,
+      additionalServices: 0, // folded into interior/exterior/others
       subtotal: subtotalAll,
       discountAmount,
       finalPerDay,
@@ -840,19 +841,23 @@ exports.updateQuoteMeta = async (req, res) => {
     const toNum = (v) => (Number.isFinite(+v) ? +v : 0);
     const round2 = (n) => +Number(n || 0).toFixed(2);
 
+    // Paint + that section's additional services, per section.
+    const secAmt = (l) => toNum(l.subtotal) + lineAdditional(l);
     const interior = (q.lines || [])
       .filter((l) => l.sectionType === "Interior")
-      .reduce((s, l) => s + toNum(l.subtotal), 0);
+      .reduce((s, l) => s + secAmt(l), 0);
 
     const exterior = (q.lines || [])
       .filter((l) => l.sectionType === "Exterior")
-      .reduce((s, l) => s + toNum(l.subtotal), 0);
+      .reduce((s, l) => s + secAmt(l), 0);
 
     const others = (q.lines || [])
-      .filter((l) => l.sectionType === "Others")
-      .reduce((s, l) => s + toNum(l.subtotal), 0);
+      .filter(
+        (l) => l.sectionType !== "Interior" && l.sectionType !== "Exterior"
+      )
+      .reduce((s, l) => s + secAmt(l), 0);
 
-    const additionalServices = q.totals?.additionalServices || 0;
+    const additionalServices = 0; // folded into interior/exterior/others
     const subtotal = round2(interior + exterior + others + additionalServices);
 
     const calcDiscount = () => {
