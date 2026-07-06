@@ -1,4 +1,7 @@
 /.env
+# Firebase service-account private key — NEVER commit (belongs in Render env)
+/serviceAccountKey.json
+/*firebase-adminsdk*.json
 /jest.config.js
 /node_modules
 /package-lock.json

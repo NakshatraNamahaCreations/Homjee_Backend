@@ -111,17 +111,16 @@ async function sendToTokens(tokens, payload) {
       priority: "high",
       notification: {
         channelId, // must match the channel created in the app (with sound)
-        // Custom Ola-style tune. Must match the app's res/raw/lead_alert.mp3
-        // and the channel's sound. On Android O+ the channel's sound wins, so
-        // the file MUST exist in the app build for this to be audible.
-        sound: "lead_alert",
+        // 'default' = the device's default notification tone. Switch this to
+        // "lead_alert" once a res/raw/lead_alert.mp3 is bundled in the app for
+        // a custom Ola-style tune (must match the app channel's sound).
+        sound: "default",
+        defaultSound: true,
         notificationPriority: "PRIORITY_HIGH",
       },
     },
     apns: {
-      // iOS custom sound would be a bundled "lead_alert.caf"; falls back to the
-      // default tone when that file isn't present.
-      payload: { aps: { sound: "lead_alert.caf" } },
+      payload: { aps: { sound: "default" } },
     },
   };
 
