@@ -95,7 +95,7 @@ async function sendToTokens(tokens, payload) {
   if (!unique.length) return { sent: 0, invalidTokens: [] };
   if (!ensureInit()) return { sent: 0, invalidTokens: [] };
 
-  const channelId = payload.channelId || "lead-alerts";
+  const channelId = payload.channelId || "lead-alerts-v2";
 
   const message = {
     tokens: unique,
