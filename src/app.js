@@ -49,6 +49,31 @@ app.get(["/health", "/api/health"], (req, res) => {
   res.status(200).json({ status: "ok", ts: Date.now() });
 });
 
+// TEMP diagnostic — reports whether Firebase push is initialized on this
+// server, and (with ?vendorId=...) sends a test push to that vendor. Remove
+// once push is confirmed working.
+app.get("/api/push-status", async (req, res) => {
+  try {
+    const {
+      isPushEnabled,
+      sendPushToVendors,
+    } = require("./services/pushNotification.service");
+    const pushEnabled = isPushEnabled();
+    let sent = null;
+    if (req.query.vendorId) {
+      sent = await sendPushToVendors([String(req.query.vendorId)], {
+        title: "Test push ✅",
+        body: "Backend → FCM test. If you see this, push works.",
+        channelId: "lead-alerts-v2",
+        data: { type: "TEST" },
+      });
+    }
+    res.json({ pushEnabled, sent });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // razor pay
 app.use("/api/payments", require("./../src/payments/payment.routes"));
 
