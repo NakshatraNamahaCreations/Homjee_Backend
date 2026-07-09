@@ -1144,8 +1144,17 @@ exports.createBooking = async (req, res) => {
 
     const willPayOnline = Boolean(purpose);
 
-    // ✅ key rule: if online payment needed -> store as enquiry until verify success
-    const finalIsEnquiry = willPayOnline ? true : Boolean(isEnquiry);
+    // ✅ key rule: if online payment needed -> store as enquiry until verify success.
+    // House-painting leads with NO online payment (free site visit) are REAL
+    // leads, not enquiries — the website's checkEnquiry() wrongly marks them
+    // isEnquiry:true, which made the fanout skip them so vendors were only
+    // notified when admin opened the lead. Force them to non-enquiry so the
+    // fanout (and push) fires immediately on creation.
+    const finalIsEnquiry = willPayOnline
+      ? true
+      : serviceType === "house_painting"
+        ? false
+        : Boolean(isEnquiry);
 
     // ------------------------------
     // Build bookingDetails config
