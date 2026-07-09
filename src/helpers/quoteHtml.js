@@ -391,7 +391,7 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
     </div>
 
     <div class="hi">Hi ${escapeHtml(customerName)},</div>
-    <div class="subText">Here is a quote for your painting work based on accurate measurements. If you need any clarifications, reply to us.</div>
+    <div class="subText">Here is a quote for your painting work by a Homjee painting expert, based on accurate measurements of your space. In case you need any clarifications please feel free to contact us.</div>
 
     <div class="topRow">
       <div class="quoteCard">
@@ -438,7 +438,7 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
       </div>
       <div class="whyChip">
         <div class="whyIconWrap"><img src="https://img.icons8.com/ios/50/20618d/approval--v1.png" alt="" /></div>
-        <div class="whyChipText">6 months service warranty</div>
+        <div class="whyChipText">1 year service warranty</div>
       </div>
     </div>
 
@@ -458,9 +458,11 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
         )
         .join("")}
       <div class="tableLine"></div>
-      <div class="miniTotalRow"><span class="miniLabel">Original Cost</span><span class="miniValue">${escapeHtml(rupee(t.subtotal))}</span></div>
+      ${hasDiscount
+        ? `<div class="miniTotalRow"><span class="miniLabel">Original Cost</span><span class="miniValue">${escapeHtml(rupee(t.subtotal))}</span></div>
       <div class="miniTotalRow"><span class="miniLabel">Discount</span><span class="miniValue">${escapeHtml(rupee(t.discountAmount))}</span></div>
-      <div class="miniTotalRow"><span class="miniLabel" style="font-weight:700">Final Cost</span><span class="miniValue" style="font-weight:700">${escapeHtml(rupee(t.grandTotal))}</span></div>
+      <div class="miniTotalRow"><span class="miniLabel" style="font-weight:700">Final Cost</span><span class="miniValue" style="font-weight:700">${escapeHtml(rupee(t.grandTotal))}</span></div>`
+        : `<div class="miniTotalRow"><span class="miniLabel" style="font-weight:700">Total Cost</span><span class="miniValue" style="font-weight:700">${escapeHtml(rupee(t.grandTotal))}</span></div>`}
       <div class="note">*All measurements are taken by laser device.</div>
     </div>
 
@@ -506,18 +508,31 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
 
     <div class="sectionTitle">Payment T&amp;C</div>
     <div class="blockBox">
-      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">40% advance to be paid before work starts.</span></div>
-      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">40% to be paid after 50% completion.</span></div>
-      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">20% to be paid at the end after final day of work.</span></div>
-      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">We do not accept cash. Payments should be made online only.</span></div>
+      <div class="para">To ensure a smooth workflow, payments are structured into three milestones and are processed exclusively through Razorpay:</div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText"><b>40% Advance Payment:</b> Required to secure your booking and initiate the project.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText"><b>40% Mid-Project Payment:</b> Due upon completion and approval of 50% of the project scope.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText"><b>20% Final Payment:</b> Due on the final day of work, prior to or at the time of final handover.</span></div>
+      <div class="para"><b>Important Note on Payment Methods:</b></div>
+      <div class="para">For tracking and security purposes, we do not accept cash, cheques, or direct bank transfers. Please make all payments via the secure Razorpay link sent to you on WhatsApp.</div>
     </div>
 
     <div class="sectionTitle">Warranty T&amp;C</div>
     <div class="blockBox">
-      <div class="para">Warranty is applicable as per conditions defined below. The warranty starts from the date of completion of the painting project.</div>
-      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Warranty claim can be raised for paint peeling or major issues.</span></div>
-      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Damage due to seepage, damp walls or external factors is not covered.</span></div>
-      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Any misuse or changes by third party voids warranty.</span></div>
+      <div class="para">For all the painting related services booked on Homjee, a warranty of 1 year will be applicable as per the conditions defined below:</div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText">This warranty shall commence from the date of completion of the painting project.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText">In case of a gap / break in the painting work on the same project, the decision on commencement date shall be at the discretion of Homjee.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText">All warranty claims during the aforementioned period shall be subject to site inspection &amp; assessment by authorized Homjee Representatives.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText">If any claims arise during the warranty period, the period of warranty will not start afresh after the settlement of the claim.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText">Liability shall be limited to repainting the affected areas only.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText">Warranty is applicable only to homes painted as per the recommended procedure and covers issues related to film integrity (flaking, chalking, peel-off in the absence of moisture) and shade fading.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText">This warranty is not applicable on services where painting was done with distempers, or painting is done in Repaint Only Process.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText">Undulations, unevenness, or waviness of walls cannot be rectified in the painting process as it is a plaster issue. These imperfections will be less visible in matt finish paint and more visible in high sheen and glossy paints.</span></div>
+      <div class="bulletRow"><span class="bulletDot">&#8226;</span><span class="bulletText">Project timelines are indicative and can change basis various factors within or outside Homjee and customer's control.</span></div>
+      <div class="para">Warranty will not be applicable under the following situations:</div>
+      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Color shade not liked by customers post initial inspection despite confirmation &amp; procurement of material.</span></div>
+      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Any issue of flaking of paint due to unresolved water seepage issues in the walls.</span></div>
+      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Any cracks &amp; seepage in walls caused by factors outside the work done by Homjee.</span></div>
+      <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Any damage caused by any other third party vendor or the client himself once Homjee has already executed work in any section of the home.</span></div>
     </div>
 
     <div class="footer">
