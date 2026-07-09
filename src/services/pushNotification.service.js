@@ -22,6 +22,26 @@ let initState = "uninitialized"; // "ready" | "disabled" | "uninitialized"
 let warnedDisabled = false;
 
 function loadServiceAccount() {
+  // 0) Base64-encoded JSON env — MOST RELIABLE on hosts like Render, because
+  // base64 has no quotes/newlines to get mangled (the private_key's \n line
+  // breaks often break raw-JSON env vars). Generate with:
+  //   base64 -w0 serviceAccountKey.json
+  if (process.env.FIREBASE_SERVICE_ACCOUNT_B64) {
+    try {
+      const json = Buffer.from(
+        process.env.FIREBASE_SERVICE_ACCOUNT_B64,
+        "base64",
+      ).toString("utf8");
+      return JSON.parse(json);
+    } catch (e) {
+      console.error(
+        "[push] FIREBASE_SERVICE_ACCOUNT_B64 could not be decoded:",
+        e.message,
+      );
+      return null;
+    }
+  }
+
   // 1) Inline JSON env (best for hosts like Render where files aren't persisted)
   if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
     try {
