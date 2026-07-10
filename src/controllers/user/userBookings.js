@@ -1349,9 +1349,16 @@ exports.createBooking = async (req, res) => {
     // pending), fan out to eligible vendors now. For the payment path,
     // the fan-out fires from payment.service after isEnquiry flips.
     if (updatedBooking && updatedBooking.isEnquiry === false) {
-      fanOutLeadToEligibleVendors(updatedBooking).catch((err) =>
-        console.error("[createBooking] fanout failed:", err?.message),
-      );
+      // AWAIT the fan-out (don't fire-and-forget): otherwise, once the HTTP
+      // response is sent, Render can kill the pending async work, so the lead
+      // is created but vendors are never invited/pushed — which is why some
+      // leads notified vendors and some didn't. Wrapped so a fan-out failure
+      // can never fail the booking itself.
+      try {
+        await fanOutLeadToEligibleVendors(updatedBooking);
+      } catch (err) {
+        console.error("[createBooking] fanout failed:", err?.message);
+      }
       // Bust the slot cache so the next customer's slot query reflects
       // this commitment (Issue #2 — without this, the 60s cache lets two
       // customers both see the same slot as available).
@@ -2256,12 +2263,12 @@ exports.adminCreateBooking = async (req, res) => {
       try {
         const fresh = await UserBooking.findById(booking._id).lean();
         if (fresh) {
-          fanOutLeadToEligibleVendors(fresh).catch((err) =>
-            console.error("[adminCreateBooking] fanout failed:", err?.message),
-          );
+          // Await (not fire-and-forget) so the invite/push isn't dropped when
+          // the response returns on Render.
+          await fanOutLeadToEligibleVendors(fresh);
         }
       } catch (e) {
-        console.error("[adminCreateBooking] fanout lookup failed:", e?.message);
+        console.error("[adminCreateBooking] fanout failed:", e?.message);
       }
     }
 
