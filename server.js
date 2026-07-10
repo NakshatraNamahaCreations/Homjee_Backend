@@ -2,12 +2,16 @@ const app = require("./src/app");
 const dotenv = require("dotenv");
 const { connectDB } = require("./src/config/db");
 const { startLeadReminderCron } = require("./src/config/leadReminderCron");
+const { startLeadFanoutCron } = require("./src/config/leadFanoutCron");
 
 dotenv.config({ quiet: true });
 
 connectDB();
 
 startLeadReminderCron();
+// Safety net: auto fan-out any recent real lead that has no invited vendors,
+// so vendors are notified by pincode without opening the admin lead page.
+startLeadFanoutCron();
 
 const PORT = process.env.PORT || 9000;
 
