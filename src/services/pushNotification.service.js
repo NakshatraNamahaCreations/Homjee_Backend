@@ -115,7 +115,7 @@ async function sendToTokens(tokens, payload) {
   if (!unique.length) return { sent: 0, invalidTokens: [] };
   if (!ensureInit()) return { sent: 0, invalidTokens: [] };
 
-  const channelId = payload.channelId || "lead-alerts-v2";
+  const channelId = payload.channelId || "lead-alerts-v3";
 
   const message = {
     tokens: unique,
@@ -131,11 +131,10 @@ async function sendToTokens(tokens, payload) {
       priority: "high",
       notification: {
         channelId, // must match the channel created in the app (with sound)
-        // 'default' = the device's default notification tone. Switch this to
-        // "lead_alert" once a res/raw/lead_alert.mp3 is bundled in the app for
-        // a custom Ola-style tune (must match the app channel's sound).
-        sound: "default",
-        defaultSound: true,
+        // Custom Ola/Uber-style urgent tune bundled at
+        // android/app/src/main/res/raw/lead_alert.wav. On Android O+ the
+        // channel's sound wins, so the app's channel must also use lead_alert.
+        sound: "lead_alert",
         notificationPriority: "PRIORITY_HIGH",
       },
     },
