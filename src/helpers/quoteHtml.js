@@ -538,7 +538,7 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
     <div class="footer">
       <div class="footerText">In case you need any assistance,</div>
       <div class="footerText">Please feel free to contact us on <span class="linkText">+91 ${escapeHtml(vendorPhone)}</span></div>
-      <div class="footerText">or write to us on <span class="linkText">info@homjee.com</span></div>
+      <div class="footerText">or write to us on <span class="linkText">hello@homjee.com</span></div>
       <div class="thank">❤️ Thank you ❤️</div>
     </div>
   </div>
