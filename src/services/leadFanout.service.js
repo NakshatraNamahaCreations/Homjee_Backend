@@ -149,7 +149,7 @@ async function fanOutLeadToEligibleVendors(booking) {
       await sendPushToVendors(pushVendorIds, {
         title: "New Lead Available 🔔",
         body: `A new ${serviceLabel} lead is waiting. Open the app to respond.`,
-        channelId: "lead-alerts-v3",
+        channelId: "lead-alerts-v4",
         data: {
           type: "LEAD",
           bookingId: String(bookingId),
