@@ -145,10 +145,10 @@ async function loadActiveHiringsForVendor(vendorId) {
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
 const redirectionUrl =
   process.env.USER_PAYMENT ||
-  "https://websitehomjee.netlify.app/checkout/payment/";
+  "https://homjee-website.netlify.app/checkout/payment/";
 const vendorRatingURL =
   process.env.VENDOR_RATING ||
-  "https://websitehomjee.netlify.app/vendor-ratings";
+  "https://homjee-website.netlify.app/vendor-ratings";
 
 const citiesObj = {
   Bangalore: "Bengaluru",

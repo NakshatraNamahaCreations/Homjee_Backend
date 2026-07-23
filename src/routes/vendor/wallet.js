@@ -11,7 +11,7 @@ const router = express.Router();
 
 
 // const paymentLink = "http://localhost:5173/wallet-recharge";// dev
-const paymentLink = process.env.VENDOR_RECHARGE || "https://websitehomjee.netlify.app/wallet-recharge";
+const paymentLink = process.env.VENDOR_RECHARGE || "https://homjee-website.netlify.app/wallet-recharge";
 
 
 // server might be UTC, so we should compute IST expiry correctly.
