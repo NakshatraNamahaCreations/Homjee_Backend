@@ -1561,7 +1561,7 @@ exports.checkVendorAvailability = async (req, res) => {
 exports.checkVendorAvailabilityRange = async (req, res) => {
   try {
     const { vendorId } = req.params;
-    const { startDate, endDate, daysRequired } = req.query;
+    const { startDate, endDate, daysRequired, membersRequired } = req.query;
 
     if (!startDate || !endDate || !daysRequired) {
       return res.status(400).json({
@@ -1578,7 +1578,13 @@ exports.checkVendorAvailabilityRange = async (req, res) => {
     }
 
     const results = {};
-    const requiredMembers = 2;
+    // `canStart` = vendor has at least this many free members that day. This
+    // was hardcoded to 2, which wrongly hid the team for any lead needing 1
+    // member (e.g. chimney cleaning) or any vendor with a single member — the
+    // app then rendered "No team members available". The real per-lead minimum
+    // is enforced client-side (canContinue = selected >= teamMembersRequired),
+    // so the floor here is 1; callers may still pass an explicit override.
+    const requiredMembers = Math.max(1, Number(membersRequired) || 1);
     const capacity = vendor.vendor.capacity;
 
     let current = moment(startDate);
