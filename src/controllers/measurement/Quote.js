@@ -927,13 +927,6 @@ exports.cloneQuoteFrom = async (req, res) => {
     if (!src)
       return res.status(404).json({ message: "Source quote not found" });
 
-    // Function to calculate additional services total
-    const calculateAdditionalServicesTotal = (additionalServices = []) => {
-      return additionalServices.reduce((total, service) => {
-        return total + (service.total || 0); // Ensure we add the total of each service
-      }, 0);
-    };
-
     // Deep copy + sanitize including additional services
     const lines = (src.lines || []).map((line) => ({
       roomName: line.roomName,
@@ -962,18 +955,14 @@ exports.cloneQuoteFrom = async (req, res) => {
       additionalTotal: Number(line.additionalTotal || 0),
     }));
 
-    // Calculate additional services total and add it to totals
-    const additionalServicesTotal = lines.reduce((sum, line) => {
-      return sum + calculateAdditionalServicesTotal(line.additionalServices);
-    }, 0);
-
     const days = src.days ?? 1;
     const discount = src.discount ?? { type: "PERCENT", value: 0, amount: 0 };
+    // computeTotals already folds each line's additionalServices into its
+    // Interior/Exterior/Others bucket (and returns additionalServices: 0), so
+    // the grand total already includes them — exactly like the original quote.
+    // The previous code re-added the additional-services total on top here,
+    // double-counting it (e.g. ₹3,050 chemical waterproofing counted twice).
     const totals = computeTotals(lines, discount, days);
-
-    // Include the additional services total in the grand total calculation
-    totals.additionalServices = additionalServicesTotal;
-    totals.grandTotal += additionalServicesTotal;
 
     const updated = await Quote.findByIdAndUpdate(
       destId,
