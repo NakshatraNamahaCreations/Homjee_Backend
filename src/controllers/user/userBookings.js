@@ -2754,7 +2754,13 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     // -------------------------------
     //  METRIC COUNTERS
     // -------------------------------
-    const totalLeads = bookings.length; // nearby leads (notified)
+    // Client requirement: "Total Leads" must reflect the leads this vendor
+    // actually RESPONDED to — not every nearby/notified lead. Because a lead is
+    // broadcast to all eligible vendors in the radius, counting nearby leads
+    // makes the same lead show up in every vendor's Total Leads. So we now
+    // count invitations (for the response-rate denominator) and responses
+    // separately, and expose respondedLeads as totalLeads.
+    let invitedLeads = 0; // leads this vendor was actually invited to
     let respondedLeads = 0;
     let cancelledLeads = 0;
     let totalRespondedGsv = 0; // ✅ only responded leads sum
@@ -2768,6 +2774,8 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
         (v) => String(v.professionalId) === String(vendorId),
       );
       if (!vendorInvitation) continue;
+
+      invitedLeads += 1;
 
       const status = vendorInvitation.responseStatus;
 
@@ -2810,8 +2818,9 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     // -------------------------------
     //  FINAL METRICS
     // -------------------------------
+    // Response rate = responded / invited (the true denominator).
     const responseRate =
-      totalLeads > 0 ? (respondedLeads / totalLeads) * 100 : 0;
+      invitedLeads > 0 ? (respondedLeads / invitedLeads) * 100 : 0;
 
     const cancellationRate =
       respondedLeads > 0 ? (cancelledLeads / respondedLeads) * 100 : 0;
@@ -2824,7 +2833,9 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       responseRate: parseFloat(responseRate.toFixed(2)),
       cancellationRate: parseFloat(cancellationRate.toFixed(2)),
       averageGsv: parseFloat(averageGsv.toFixed(2)),
-      totalLeads,
+      // Total Leads now = leads this vendor responded to (client requirement).
+      totalLeads: respondedLeads,
+      invitedLeads, // kept for reference / response-rate denominator
       respondedLeads,
       cancelledLeads,
       timeframe,
@@ -2931,7 +2942,11 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
     }
 
     // ---------------- Metrics ----------------
-    let totalLeads = 0; // vendor relevant leads (invited OR assigned)
+    // "Total Leads" now counts leads this vendor RESPONDED to (accepted / was
+    // assigned), not merely notified — same client requirement as DC, so a lead
+    // broadcast to many vendors isn't counted against every one of them.
+    let invitedLeads = 0; // relevant to this vendor (invited OR assigned)
+    let respondedLeads = 0; // accepted / assigned to this vendor
     let surveyLeads = 0;
     let hiredLeads = 0; // total hired in fetched window (we cap selection at 50)
     let selectedHiredCount = 0; // ✅ used for Avg GSV denominator (<= 50)
@@ -2949,7 +2964,12 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       // lead relevant to this vendor
       if (!invited && !assignedToVendor) continue;
 
-      totalLeads += 1;
+      invitedLeads += 1;
+
+      // Responded = the vendor accepted the lead (or won/was assigned it).
+      const responded =
+        assignedToVendor || invited?.responseStatus === "accepted";
+      if (responded) respondedLeads += 1;
 
       // ------ SURVEY LOGIC ------
       const isSurvey =
@@ -2988,9 +3008,12 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       }
     }
 
-    // KPIs
-    const surveyRate = totalLeads > 0 ? (surveyLeads / totalLeads) * 100 : 0;
-    const hiringRate = totalLeads > 0 ? (hiredLeads / totalLeads) * 100 : 0;
+    // KPIs — rates are now against responded leads (of the leads I took, how
+    // many reached survey / hiring).
+    const surveyRate =
+      respondedLeads > 0 ? (surveyLeads / respondedLeads) * 100 : 0;
+    const hiringRate =
+      respondedLeads > 0 ? (hiredLeads / respondedLeads) * 100 : 0;
 
     // ✅ Avg GSV = (sum of selected hired lead values) / (count of selected hired leads)
     // selectedHiredCount is <= 50, could be below 50
@@ -3001,7 +3024,10 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       surveyRate: parseFloat(surveyRate.toFixed(2)),
       hiringRate: parseFloat(hiringRate.toFixed(2)),
       averageGsv: parseFloat(averageGsv.toFixed(2)),
-      totalLeads,
+      // Total Leads now = leads this vendor responded to (client requirement).
+      totalLeads: respondedLeads,
+      invitedLeads, // kept for reference
+      respondedLeads,
       surveyLeads,
       hiredLeads,
       timeframe,
