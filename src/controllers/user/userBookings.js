@@ -4601,8 +4601,25 @@ exports.startJob = async (req, res) => {
     }
 
     // === Validate OTP ===
-    const storedOtp = booking.bookingDetails?.otp;
-    if (!storedOtp || parseInt(storedOtp) !== parseInt(otp)) {
+    // requestStartProjectOtp saves the code bcrypt-HASHED as
+    // bookingDetails.startProjectOtp (+ startProjectOtpExpiry). The old check
+    // here read a plain bookingDetails.otp that is never set, so every correct
+    // OTP was rejected with "Invalid OTP" and the job never started. Verify
+    // against the hashed value with expiry, matching requestStartProjectOtp.
+    const hashedOtp = booking.bookingDetails?.startProjectOtp;
+    const otpExpiry = booking.bookingDetails?.startProjectOtpExpiry;
+    if (!hashedOtp) {
+      return res
+        .status(400)
+        .json({ message: "No OTP requested. Please resend the OTP." });
+    }
+    if (otpExpiry && new Date(otpExpiry).getTime() < Date.now()) {
+      return res
+        .status(400)
+        .json({ message: "OTP expired. Please resend the OTP." });
+    }
+    const isOtpValid = await bcrypt.compare(String(otp), String(hashedOtp));
+    if (!isOtpValid) {
       return res.status(401).json({ message: "Invalid OTP" });
     }
 
