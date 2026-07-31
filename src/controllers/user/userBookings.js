@@ -1,5 +1,6 @@
 const UserBooking = require("../../models/user/userBookings");
 const Quote = require("../../models/measurement/Quote");
+const { sendWhatsAppOtp } = require("../../helpers/finbiteWhatsapp");
 const moment = require("moment");
 const momentTz = require("moment-timezone");
 const crypto = require("crypto");
@@ -5779,16 +5780,23 @@ exports.requestStartProjectOtp = async (req, res) => {
 
     await booking.save();
 
-    // ✅ Send OTP via SMS/WhatsApp (mock here)
+    // Send the start-project OTP to the CUSTOMER's WhatsApp (best-effort; a
+    // WhatsApp hiccup never blocks the flow — the hashed OTP is already saved).
+    const customerPhone = booking?.customer?.phone;
+    let wa = { sent: false, reason: "no_customer_phone" };
+    if (customerPhone) {
+      wa = await sendWhatsAppOtp(customerPhone, otp);
+    }
     console.log(
-      `[OTP SENT] Booking ${bookingId} - OTP: ${otp} (expires at ${expiry})`,
+      `[start-project OTP] booking ${bookingId} → ${customerPhone} | whatsapp:${wa.sent}`,
     );
-    // In real: await sendSms(customer.phone, `Your project start OTP: ${otp}. Valid for 10 mins.`);
 
     res.json({
       success: true,
       message: "OTP sent to customer. Await verification to start project.",
-      otp: otp,
+      whatsappSent: wa.sent,
+      // OTP returned only while AUTH_DEBUG_OTP=true (testing).
+      ...(process.env.AUTH_DEBUG_OTP === "true" ? { otp } : {}),
     });
   } catch (err) {
     console.error("Error requesting start-project OTP:", err);
