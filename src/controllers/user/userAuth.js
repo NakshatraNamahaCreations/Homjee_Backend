@@ -1,6 +1,7 @@
 const userSchema = require("../../models/user/userAuth");
 const otpSchema = require("../../models/user/otp");
 const crypto = require("crypto");
+const { sendWhatsAppOtp } = require("../../helpers/finbiteWhatsapp");
 
 exports.saveUser = async (req, res) => {
   try {
@@ -19,18 +20,27 @@ exports.saveUser = async (req, res) => {
       });
     }
 
-    // Generate OTP and expiry
+    // Generate OTP. Expiry bumped from 60s → 5 min: WhatsApp delivery plus the
+    // user reading and typing the code needs more than a minute.
     const otp = crypto.randomInt(1000, 10000);
-    const expiry = new Date(Date.now() + 60 * 1000);
+    const expiry = new Date(Date.now() + 5 * 60 * 1000);
     await otpSchema.create({ mobileNumber, otp, expiry });
+
+    // Deliver the OTP over WhatsApp (best-effort; a WhatsApp hiccup never
+    // blocks login — the code is saved and can still be verified).
+    const wa = await sendWhatsAppOtp(mobileNumber, otp);
 
     // Just check if user exists, do not create
     const user = await userSchema.findOne({ mobileNumber });
 
     res.status(200).json({
       message: "OTP Sent successfully!",
-      otp: otp,
       isNewUser: user ? false : true,
+      whatsappSent: wa.sent,
+      // SECURITY: the OTP is returned in the response ONLY while
+      // AUTH_DEBUG_OTP=true (for testing). Set it to false in Render once
+      // WhatsApp delivery is confirmed, so the code travels only over WhatsApp.
+      ...(process.env.AUTH_DEBUG_OTP === "true" ? { otp } : {}),
     });
   } catch (error) {
     console.error("Error generating OTP:", error);

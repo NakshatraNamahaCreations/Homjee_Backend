@@ -1,5 +1,6 @@
 const vendorAuthSchema = require("../../models/vendor/vendorAuth");
 const otpSchema = require("../../models/user/otp");
+const { sendWhatsAppOtp } = require("../../helpers/finbiteWhatsapp");
 const userBooking = require("../../models/user/userBookings");
 const crypto = require("crypto");
 const moment = require("moment");
@@ -1736,19 +1737,24 @@ exports.loginWithMobile = async (req, res) => {
 
     const otp = generateOTP();
 
-    const expiry = new Date(Date.now() + 60 * 1000);
+    // 5 min: WhatsApp delivery + reading + typing needs more than 60s.
+    const expiry = new Date(Date.now() + 5 * 60 * 1000);
 
     // ✅ use phone everywhere
     await otpSchema.deleteMany({ mobileNumber: phone });
 
     await otpSchema.create({ mobileNumber: phone, otp, expiry });
 
-    console.log(`OTP for ${phone}: ${otp}`);
+    // Deliver the OTP over WhatsApp (best-effort; never blocks login).
+    const wa = await sendWhatsAppOtp(phone, otp);
 
     res.status(200).json({
       message: "OTP sent successfully",
       mobileNumber: phone,
-      otp: otp,
+      whatsappSent: wa.sent,
+      // OTP returned only while AUTH_DEBUG_OTP=true (testing). Set false in
+      // Render once WhatsApp delivery is confirmed.
+      ...(process.env.AUTH_DEBUG_OTP === "true" ? { otp } : {}),
     });
   } catch (error) {
     console.error("Error during vendor login:", error);
@@ -1856,16 +1862,20 @@ exports.resendOTP = async (req, res) => {
 
     const otp = generateOTP();
 
-    const expiry = new Date(Date.now() + 60 * 1000);
+    const expiry = new Date(Date.now() + 5 * 60 * 1000);
 
     await otpSchema.deleteMany({ mobileNumber: mobileNumber });
 
     await otpSchema.create({ mobileNumber: mobileNumber, otp, expiry });
 
+    // Resend the OTP over WhatsApp too (best-effort).
+    const wa = await sendWhatsAppOtp(mobileNumber, otp);
+
     res.status(200).json({
       message: "OTP Re-sent",
       user,
-      otp: otp,
+      whatsappSent: wa.sent,
+      ...(process.env.AUTH_DEBUG_OTP === "true" ? { otp } : {}),
     });
   } catch (error) {
     console.error(error);
