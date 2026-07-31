@@ -5748,6 +5748,7 @@ exports.requestStartProjectOtp = async (req, res) => {
     const bookingStatus = booking.bookingDetails.status;
 
     const allowedStatuses = [
+      "Confirmed", // house-painting survey start happens at Confirmed
       "Hired",
       "Customer Cancelled",
       "Customer Unreachable",
@@ -5818,6 +5819,7 @@ exports.verifyStartProjectOtp = async (req, res) => {
 
     const details = booking.bookingDetails;
     const allowedStatuses = [
+      "Confirmed", // house-painting survey start happens at Confirmed
       "Hired",
       "Customer Cancelled",
       "Customer Unreachable",
