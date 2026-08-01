@@ -370,6 +370,9 @@ const userBookingSchema = new mongoose.Schema({
       "house_painting",
       "packers_&_movers",
       "home_interior",
+      // Home page "Get a call back" enquiry — name + phone only, no service
+      // chosen. Category shows as "Not Specified" until admin follows up.
+      "not_specified",
     ],
     required: true,
   },
