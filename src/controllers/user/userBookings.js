@@ -829,6 +829,10 @@ exports.createEnquiryLead = async (req, res) => {
       house_painting: "House Painting",
       "packers_&_movers": "Packers & Movers",
       home_interior: "Home Interior",
+      // Home page "Get a call back" form: captures name + phone only, no
+      // service chosen. Stored as a normal enquiry with category
+      // "Not Specified" so admin can follow up and set the real category.
+      not_specified: "Not Specified",
     };
     if (!serviceType || !SERVICE_TYPE_LABEL[serviceType]) {
       return res.status(400).json({
