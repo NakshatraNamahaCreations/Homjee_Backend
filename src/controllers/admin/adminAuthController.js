@@ -205,6 +205,7 @@ require('dotenv').config();
 
 const AdminAuth = require("../../models/admin/AdminAuth");
 const jwt = require('jsonwebtoken');
+const { sendWhatsAppOtp } = require("../../helpers/finbiteWhatsapp");
 
 // ====== JWT Configuration ======
 const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-this-in-production';
@@ -256,6 +257,18 @@ async function sendOtpSMS(mobileNumber, otp) {
   try {
     // Always log OTP to console for debugging (but only show in response if debug mode is on)
     console.log(`[OTP GENERATED] For ${mobileNumber}: ${otp}`);
+
+    // Deliver the admin login OTP over WhatsApp (Finbite) — same channel as
+    // customer/vendor OTPs. Best-effort: a WhatsApp hiccup never blocks login,
+    // the code is saved and can still be verified. NOTE: the admin must log in
+    // with a number OTHER than the WhatsApp sender (9595951304) — WhatsApp
+    // cannot message its own business number.
+    const wa = await sendWhatsAppOtp(mobileNumber, otp);
+    if (wa?.sent) {
+      console.log(`[OTP WHATSAPP] Sent to ${mobileNumber}`);
+    } else {
+      console.warn(`[OTP WHATSAPP] Not sent to ${mobileNumber}:`, wa?.reason);
+    }
 
     // Only send actual SMS if SMS provider is configured
     if (process.env.SMS_PROVIDER_ENABLED === 'true') {
