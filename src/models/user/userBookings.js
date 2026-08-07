@@ -386,6 +386,10 @@ const userBookingSchema = new mongoose.Schema({
   isEnquiry: Boolean,
   isRead: { type: Boolean, default: false }, //New Field
   isDismmised: { type: Boolean, default: false }, //New Field
+  // Which automated WhatsApp follow-ups have already been sent for this
+  // booking, so the cron never sends the same one twice. Keys are the
+  // follow-up ids from whatsappFollowupCron (e.g. enquiryFollowup1).
+  waFollowups: { type: Object, default: {} },
   invitedVendors: [invitedVendorSchema],
   vendorRatingUrl: String,
   leadReminder: leadReminderSchema,

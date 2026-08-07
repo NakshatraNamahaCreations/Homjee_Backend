@@ -80,4 +80,62 @@ async function sendWhatsAppOtp(mobile, otp) {
   }
 }
 
-module.exports = { sendWhatsAppOtp };
+/**
+ * Send any approved WhatsApp template through Finbite.
+ * @param {string} mobile   customer phone (10-digit or with country code)
+ * @param {string} templateName  the approved template name (e.g. hp_enquiry_followup_1)
+ * @param {object} [opts]
+ * @param {string[]} [opts.bodyParams]  values for {{1}},{{2}}… in the body, in order
+ * @param {Array}  [opts.buttons]  dynamic button params (only for dynamic-URL buttons)
+ * @param {string} [opts.language]  overrides FINBITE_OTP_LANG (default "en")
+ * @returns {Promise<{sent:boolean, data?:any, reason?:string, error?:any}>}
+ * SAFE BY DEFAULT: never throws — returns { sent:false, reason } on any issue.
+ */
+async function sendWhatsAppTemplate(mobile, templateName, opts = {}) {
+  const {
+    FINBITE_API_KEY,
+    FINBITE_BASE_URL,
+    FINBITE_PHONE_ID,
+    FINBITE_OTP_LANG = "en",
+  } = process.env;
+
+  if (!FINBITE_API_KEY || !FINBITE_BASE_URL || !FINBITE_PHONE_ID) {
+    console.warn("[finbite] template send skipped — not configured.");
+    return { sent: false, reason: "not_configured" };
+  }
+  if (!templateName) return { sent: false, reason: "no_template" };
+
+  const payload = {
+    to: toWhatsAppNumber(mobile),
+    phoneNoId: FINBITE_PHONE_ID,
+    type: "template",
+    name: templateName,
+    language: opts.language || FINBITE_OTP_LANG,
+    bodyParams: (opts.bodyParams || []).map((v) => String(v ?? "")),
+  };
+  if (opts.buttons && opts.buttons.length) payload.buttons = opts.buttons;
+
+  try {
+    const url = `${FINBITE_BASE_URL.replace(/\/$/, "")}/messages`;
+    const resp = await axios.post(url, payload, {
+      headers: {
+        Authorization: `Bearer ${FINBITE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      timeout: 15000,
+    });
+    return { sent: true, data: resp.data };
+  } catch (err) {
+    console.error(
+      `[finbite] template "${templateName}" send failed:`,
+      err?.response?.data || err.message,
+    );
+    return {
+      sent: false,
+      reason: "send_failed",
+      error: err?.response?.data || err.message,
+    };
+  }
+}
+
+module.exports = { sendWhatsAppOtp, sendWhatsAppTemplate };
