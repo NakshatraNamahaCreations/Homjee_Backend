@@ -25,21 +25,20 @@ const RULES = [
     // Template #1 has no body variables and only static buttons.
     bodyParams: () => [],
   },
-  // Approve these templates, then uncomment:
-  // {
-  //   id: "enquiryFollowup2",
-  //   template: "hp_enquiry_followup_2",
-  //   afterMins: 60,
-  //   capMins: 180,
-  //   bodyParams: (b) => [b?.customer?.name || "there"], // {{1}} customer name
-  // },
-  // {
-  //   id: "enquiryFollowup3",
-  //   template: "hp_enquiry_followup_3",
-  //   afterMins: 24 * 60,
-  //   capMins: 48 * 60,
-  //   bodyParams: (b) => [b?.customer?.name || "there"],
-  // },
+  {
+    id: "enquiryFollowup2",
+    template: "hp_enquiry_followup_2",
+    afterMins: 60, // 1 hour after the enquiry
+    capMins: 6 * 60, // eligible up to 6 h old
+    bodyParams: (b) => [b?.customer?.name || "there"], // {{1}} customer name
+  },
+  {
+    id: "enquiryFollowup3",
+    template: "hp_enquiry_followup_3",
+    afterMins: 24 * 60, // 24 hours after the enquiry
+    capMins: 48 * 60, // eligible up to 48 h old
+    bodyParams: (b) => [b?.customer?.name || "there"], // {{1}} customer name
+  },
 ];
 
 async function runRule(rule) {
