@@ -1,6 +1,6 @@
 const UserBooking = require("../../models/user/userBookings");
 const Quote = require("../../models/measurement/Quote");
-const { sendWhatsAppOtp } = require("../../helpers/finbiteWhatsapp");
+const { sendWhatsAppOtp, sendWhatsAppTemplate } = require("../../helpers/finbiteWhatsapp");
 const moment = require("moment");
 const momentTz = require("moment-timezone");
 const crypto = require("crypto");
@@ -1364,6 +1364,23 @@ exports.createBooking = async (req, res) => {
       } catch (err) {
         console.error("[createBooking] fanout failed:", err?.message);
       }
+
+      // WhatsApp #4 — booking confirmation to the customer (best-effort;
+      // never fails the booking). {{1}} name, {{2}} time slot, {{3}} address.
+      try {
+        const c = updatedBooking?.customer || {};
+        if (c.phone) {
+          const slot = `${updatedBooking?.selectedSlot?.slotDate || ""} ${updatedBooking?.selectedSlot?.slotTime || ""}`.trim();
+          const addr = updatedBooking?.address?.streetArea ||
+            updatedBooking?.address?.houseFlatNumber || "your address";
+          await sendWhatsAppTemplate(c.phone, "hp_booking_confirmation_v1", {
+            bodyParams: [c.name || "there", slot || "your slot", addr],
+          });
+        }
+      } catch (err) {
+        console.error("[createBooking] WA confirmation failed:", err?.message);
+      }
+
       // Bust the slot cache so the next customer's slot query reflects
       // this commitment (Issue #2 — without this, the 60s cache lets two
       // customers both see the same slot as available).
@@ -5189,6 +5206,23 @@ exports.updateStatus = async (req, res) => {
       notifyTo: "admin",
     });
 
+    // WhatsApp to the customer on status change (best-effort, non-blocking).
+    // #5 unreachable ({{1}} name, {{2}} phone) · #6 cancelled ({{1}} name).
+    try {
+      const c = booking?.customer || {};
+      if (c.phone && status === "Customer Unreachable") {
+        await sendWhatsAppTemplate(c.phone, "hp_customer_unreachable", {
+          bodyParams: [c.name || "there", String(c.phone)],
+        });
+      } else if (c.phone && status === "Customer Cancelled") {
+        await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled", {
+          bodyParams: [c.name || "there"],
+        });
+      }
+    } catch (err) {
+      console.error("[updateStatus] WA template failed:", err?.message);
+    }
+
     res.status(200).json({ message: "Status Updated", booking: updated });
   } catch (error) {
     console.error("Error updating booking:", error);
@@ -5271,6 +5305,22 @@ exports.rescheduleBooking = async (req, res) => {
     invalidateForDate(slotDate).catch((err) =>
       console.error("[rescheduleBooking] new-date invalidate failed:", err?.message),
     );
+
+    // WhatsApp #7 — reschedule confirmation to the customer (best-effort).
+    // {{1}} name, {{2}} new time slot, {{3}} address.
+    try {
+      const c = booking?.customer || {};
+      if (c.phone) {
+        const slot = `${slotDate} ${slotTime}`.trim();
+        const addr = booking?.address?.streetArea ||
+          booking?.address?.houseFlatNumber || "your address";
+        await sendWhatsAppTemplate(c.phone, "hp_customer_reschedule", {
+          bodyParams: [c.name || "there", slot, addr],
+        });
+      }
+    } catch (err) {
+      console.error("[rescheduleBooking] WA template failed:", err?.message);
+    }
 
     return res.status(200).json({
       message: "Booking rescheduled successfully",
