@@ -1369,7 +1369,7 @@ exports.createBooking = async (req, res) => {
       // never fails the booking). {{1}} name, {{2}} time slot, {{3}} address.
       try {
         const c = updatedBooking?.customer || {};
-        if (c.phone) {
+        if (c.phone && updatedBooking.serviceType === "house_painting") {
           const slot = `${updatedBooking?.selectedSlot?.slotDate || ""} ${updatedBooking?.selectedSlot?.slotTime || ""}`.trim();
           const addr = updatedBooking?.address?.streetArea ||
             updatedBooking?.address?.houseFlatNumber || "your address";
@@ -4938,7 +4938,7 @@ exports.requestPriceChange = async (req, res) => {
   // Reductions are handled at admin approval time (#18), not here.
   try {
     const c = booking?.customer || {};
-    if (scopeType === "Added" && c.phone) {
+    if (scopeType === "Added" && c.phone && booking?.serviceType === "house_painting") {
       await sendWhatsAppTemplate(c.phone, "hp_scope_change_addition", {
         bodyParams: [
           c.name || "there",
@@ -5012,7 +5012,7 @@ exports.approvePriceChange = async (req, res) => {
   // {{1}} name, {{2}} previous total, {{3}} amount reduced, {{4}} new total.
   try {
     const c = booking?.customer || {};
-    if (pendingChange.scopeType === "Reduced" && c.phone) {
+    if (pendingChange.scopeType === "Reduced" && c.phone && booking?.serviceType === "house_painting") {
       await sendWhatsAppTemplate(c.phone, "hp_scope_change_reduction", {
         bodyParams: [
           c.name || "there",
@@ -5257,11 +5257,12 @@ exports.updateStatus = async (req, res) => {
     // #5 unreachable ({{1}} name, {{2}} phone) · #6 cancelled ({{1}} name).
     try {
       const c = booking?.customer || {};
-      if (c.phone && status === "Customer Unreachable") {
+      const isHP = booking?.serviceType === "house_painting";
+      if (isHP && c.phone && status === "Customer Unreachable") {
         await sendWhatsAppTemplate(c.phone, "hp_customer_unreachable", {
           bodyParams: [c.name || "there", String(c.phone)],
         });
-      } else if (c.phone && status === "Customer Cancelled") {
+      } else if (isHP && c.phone && status === "Customer Cancelled") {
         await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled", {
           bodyParams: [c.name || "there"],
         });
@@ -5357,7 +5358,7 @@ exports.rescheduleBooking = async (req, res) => {
     // {{1}} name, {{2}} new time slot, {{3}} address.
     try {
       const c = booking?.customer || {};
-      if (c.phone) {
+      if (c.phone && booking?.serviceType === "house_painting") {
         const slot = `${slotDate} ${slotTime}`.trim();
         const addr = booking?.address?.streetArea ||
           booking?.address?.houseFlatNumber || "your address";
@@ -5854,7 +5855,7 @@ exports.markPendingHiring = async (req, res) => {
     // Pay Now = dynamic URL → homjee.com/<payment path>; Call PM = static phone.
     try {
       const c = booking?.customer || {};
-      if (c.phone) {
+      if (c.phone && booking?.serviceType === "house_painting") {
         // Suffix after homjee.com/ that reconstructs the payment page path.
         const payPath = String(paymentLinkUrl || "").replace(
           /^https?:\/\/[^/]+\//,
@@ -6155,7 +6156,7 @@ exports.requestSecondPayment = async (req, res) => {
     // {{1}} name, {{2}} total, {{3}} paid, {{4}} due now. Pay Now dynamic URL.
     try {
       const c = booking?.customer || {};
-      if (c.phone) {
+      if (c.phone && booking?.serviceType === "house_painting") {
         const payPath = String(paymentLinkUrl || "").replace(
           /^https?:\/\/[^/]+\//,
           "",
