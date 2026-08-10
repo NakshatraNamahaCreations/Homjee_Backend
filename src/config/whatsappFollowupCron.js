@@ -109,9 +109,64 @@ const RULES = [
       },
     ],
   },
+  {
+    // #14 — 24 h after hiring, final reminder, still Pending Hiring & unpaid.
+    id: "bookingPaymentReminder2",
+    anchor: "hiring",
+    template: "hp_booking_payment_reminder_2",
+    afterMins: 24 * 60,
+    capMins: 36 * 60,
+    bodyParams: (b) => [
+      b?.customer?.name || "there",
+      b?.selectedSlot?.slotDate
+        ? moment(b.selectedSlot.slotDate).format("DD MMM YYYY")
+        : "your date",
+    ],
+    buttons: (b) => [
+      {
+        type: "button",
+        sub_type: "url",
+        text: String(b?.bookingDetails?.paymentLink?.url || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        ),
+      },
+    ],
+  },
+  {
+    // #20 — 24 h after the 2nd-partial request, if still unpaid.
+    id: "secondPartialReminder",
+    anchor: "secondpartial",
+    template: "hp_second_partial_reminder",
+    afterMins: 24 * 60,
+    capMins: 48 * 60,
+    bodyParams: (b) => [
+      b?.customer?.name || "there",
+      String(b?.bookingDetails?.secondPayment?.requestedAmount || 0),
+    ],
+    buttons: (b) => [
+      {
+        type: "button",
+        sub_type: "url",
+        text: String(b?.bookingDetails?.paymentLink?.url || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        ),
+      },
+    ],
+  },
 ];
 
 function buildQuery(rule, notBefore, notAfter) {
+  if (rule.anchor === "secondpartial") {
+    // 2nd-partial reminder: anchored on when the vendor requested it. Only
+    // while the second payment is still pending (not paid). Age checked in JS.
+    return {
+      "bookingDetails.secondPayment.requestedAt": { $exists: true, $ne: null },
+      "bookingDetails.secondPayment.status": { $ne: "paid" },
+      [`waFollowups.${rule.id}`]: { $ne: true },
+    };
+  }
   if (rule.anchor === "hiring") {
     // Payment reminders: anchored on when the vendor marked hiring. Only while
     // the lead is still Pending Hiring and the advance is unpaid. Age checked
@@ -148,6 +203,10 @@ function buildQuery(rule, notBefore, notAfter) {
 }
 
 function anchorTime(rule, b) {
+  if (rule.anchor === "secondpartial") {
+    const d = b?.bookingDetails?.secondPayment?.requestedAt;
+    return d ? moment(d).valueOf() : null;
+  }
   if (rule.anchor === "hiring") {
     const d = b?.assignedProfessional?.hiring?.markedDate;
     return d ? moment(d).valueOf() : null;

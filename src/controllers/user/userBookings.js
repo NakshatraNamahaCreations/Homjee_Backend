@@ -4933,6 +4933,28 @@ exports.requestPriceChange = async (req, res) => {
   booking.bookingDetails.priceChanges.push(newChange);
   await booking.save();
 
+  // WhatsApp #17 — scope ADDITION asks the customer to approve (best-effort).
+  // {{1}} name, {{2}} previous total, {{3}} additional, {{4}} new total.
+  // Reductions are handled at admin approval time (#18), not here.
+  try {
+    const c = booking?.customer || {};
+    if (scopeType === "Added" && c.phone) {
+      await sendWhatsAppTemplate(c.phone, "hp_scope_change_addition", {
+        bodyParams: [
+          c.name || "there",
+          String(booking.bookingDetails.finalTotal || 0),
+          String(Math.abs(Number(adjustmentAmount)) || 0),
+          String(proposedTotal),
+        ],
+        buttons: [
+          { type: "button", sub_type: "url", text: String(booking._id) },
+        ],
+      });
+    }
+  } catch (err) {
+    console.error("[requestPriceChange] WA addition failed:", err?.message);
+  }
+
   const newNotification = {
     bookingId: booking._id,
     notificationType: "PRICE_CHANGES_REQUEST",
@@ -4975,6 +4997,9 @@ exports.approvePriceChange = async (req, res) => {
   pendingChange.approvedBy = approvedBy;
   pendingChange.approvedAt = new Date();
 
+  // Capture the total BEFORE the change for the WhatsApp summary (#18).
+  const previousTotal = Number(d.finalTotal || 0);
+
   // Update finalTotal
   d.finalTotal = pendingChange.proposedTotal;
 
@@ -4982,6 +5007,28 @@ exports.approvePriceChange = async (req, res) => {
   recalculateInstallments(d);
 
   await booking.save();
+
+  // WhatsApp #18 — scope REDUCTION, sent once admin approves (best-effort).
+  // {{1}} name, {{2}} previous total, {{3}} amount reduced, {{4}} new total.
+  try {
+    const c = booking?.customer || {};
+    if (pendingChange.scopeType === "Reduced" && c.phone) {
+      await sendWhatsAppTemplate(c.phone, "hp_scope_change_reduction", {
+        bodyParams: [
+          c.name || "there",
+          String(previousTotal),
+          String(Math.abs(Number(pendingChange.adjustmentAmount)) || 0),
+          String(pendingChange.proposedTotal),
+        ],
+        buttons: [
+          { type: "button", sub_type: "url", text: String(booking._id) },
+        ],
+      });
+    }
+  } catch (err) {
+    console.error("[approvePriceChange] WA reduction failed:", err?.message);
+  }
+
   res.json({ success: true, finalTotal: d.finalTotal });
 };
 
@@ -6086,8 +6133,33 @@ exports.requestSecondPayment = async (req, res) => {
 
     // 🏷 Update legacy paymentStatus for compatibility (optional)
     d.paymentStatus = "Partial Payment";
+    // Anchor for the 24h 2nd-partial reminder (#20 cron).
+    d.secondPayment.requestedAt = new Date();
 
     await booking.save();
+
+    // WhatsApp #19 — second partial payment link (best-effort).
+    // {{1}} name, {{2}} total, {{3}} paid, {{4}} due now. Pay Now dynamic URL.
+    try {
+      const c = booking?.customer || {};
+      if (c.phone) {
+        const payPath = String(paymentLinkUrl || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        );
+        await sendWhatsAppTemplate(c.phone, "hp_second_partial_link", {
+          bodyParams: [
+            c.name || "there",
+            String(finalTotal),
+            String(paidSoFar),
+            String(secondInstallment),
+          ],
+          buttons: [{ type: "button", sub_type: "url", text: payPath }],
+        });
+      }
+    } catch (err) {
+      console.error("[requestSecondPayment] WA link failed:", err?.message);
+    }
 
     return res.json({
       success: true,

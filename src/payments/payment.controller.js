@@ -2,6 +2,8 @@ const {
     createRazorpayOrderForBooking,
     verifyAndRecordBookingPayment,
 } = require("./payment.service");
+const { sendWhatsAppTemplate } = require("../helpers/finbiteWhatsapp");
+const moment = require("moment");
 
 exports.createOrder = async (req, res) => {
     try {
@@ -24,6 +26,30 @@ exports.verify = async (req, res) => {
             razorpay_payment_id,
             razorpay_signature,
         });
+
+        // WhatsApp #15 — booking (advance) payment confirmation. Best-effort.
+        // Only for a fresh FIRST-installment payment: first paid, but second &
+        // final not yet paid. {{1}} name, {{2}} booking amount, {{3}} start date.
+        try {
+            const b = out?.booking;
+            const d = b?.bookingDetails || {};
+            const firstPaid = d?.firstPayment?.status === "paid";
+            const secondPaid = d?.secondPayment?.status === "paid";
+            const finalPaid = d?.finalPayment?.status === "paid";
+            const c = b?.customer || {};
+            if (!out?.alreadyRecorded && firstPaid && !secondPaid && !finalPaid && c.phone) {
+                const amt = d?.firstPayment?.amount || d?.firstPayment?.requestedAmount || 0;
+                const slot = b?.selectedSlot?.slotDate
+                    ? moment(b.selectedSlot.slotDate).format("DD MMM YYYY")
+                    : "your start date";
+                // #15's "Call Project Manager" button is static — no button param.
+                await sendWhatsAppTemplate(c.phone, "hp_booking_payment_confirmation", {
+                    bodyParams: [c.name || "there", String(amt), slot],
+                });
+            }
+        } catch (e) {
+            console.error("[verify] WA payment confirmation failed:", e?.message);
+        }
 
         return res.json({
             success: true,
