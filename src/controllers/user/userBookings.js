@@ -5789,6 +5789,31 @@ exports.markPendingHiring = async (req, res) => {
 
     await booking.save();
 
+    // WhatsApp #12 — booking payment link to the customer (best-effort).
+    // {{1}} name, {{2}} start date, {{3}} total, {{4}} booking amount.
+    // Pay Now = dynamic URL → homjee.com/<payment path>; Call PM = static phone.
+    try {
+      const c = booking?.customer || {};
+      if (c.phone) {
+        // Suffix after homjee.com/ that reconstructs the payment page path.
+        const payPath = String(paymentLinkUrl || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        );
+        await sendWhatsAppTemplate(c.phone, "hp_booking_payment_link", {
+          bodyParams: [
+            c.name || "there",
+            moment(firstDay).format("DD MMM YYYY"),
+            String(d.finalTotal),
+            String(firstInstallment),
+          ],
+          buttons: [{ type: "button", sub_type: "url", text: payPath }],
+        });
+      }
+    } catch (err) {
+      console.error("[markPendingHiring] WA payment link failed:", err?.message);
+    }
+
     return res.json({
       success: true,
       message:
