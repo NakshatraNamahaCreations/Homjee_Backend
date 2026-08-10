@@ -5666,6 +5666,19 @@ exports.approveCancelRequestAndRefund = async (req, res) => {
 
     await booking.save();
 
+    // WhatsApp #28 — refund confirmation (House Painting, best-effort).
+    // {{1}} name, {{2}} refund amount. No buttons.
+    try {
+      const c = booking?.customer || {};
+      if (booking?.serviceType === "house_painting" && refundAmount > 0 && c.phone) {
+        await sendWhatsAppTemplate(c.phone, "hp_refund_confirmation", {
+          bodyParams: [c.name || "there", String(refundAmount)],
+        });
+      }
+    } catch (err) {
+      console.error("[approveCancelRefund] WA refund failed:", err?.message);
+    }
+
     // ===============================
     // NOTIFICATION
     // ===============================
@@ -6317,6 +6330,29 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
     details.status = "Waiting for final payment";
 
     await booking.save();
+
+    // WhatsApp #23 — final payment link on End Job (House Painting, best-effort).
+    // {{1}} name, {{2}} total, {{3}} paid, {{4}} final due. Pay Now dynamic URL.
+    try {
+      const c = booking?.customer || {};
+      if (booking?.serviceType === "house_painting" && c.phone) {
+        const payPath = String(paymentLinkUrl || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        );
+        await sendWhatsAppTemplate(c.phone, "hp_final_payment_link", {
+          bodyParams: [
+            c.name || "there",
+            String(totalExpected),
+            String(details.paidAmount || 0),
+            String(amountDue),
+          ],
+          buttons: [{ type: "button", sub_type: "url", text: payPath }],
+        });
+      }
+    } catch (err) {
+      console.error("[endJob] WA final payment link failed:", err?.message);
+    }
 
     return res.json({
       success: true,

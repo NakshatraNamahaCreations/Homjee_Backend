@@ -1,6 +1,7 @@
 const cron = require("node-cron");
 const moment = require("moment");
 const UserBooking = require("../models/user/userBookings");
+const VendorRating = require("../models/vendor/vendorRating");
 const { sendWhatsAppTemplate } = require("../helpers/finbiteWhatsapp");
 
 // Automated WhatsApp follow-ups for the House Painting flow.
@@ -155,13 +156,106 @@ const RULES = [
       },
     ],
   },
+  {
+    // #22 — deep-cleaning cross-sell, ~5 min after the 2nd partial was paid.
+    id: "deepCleaningCrossSell",
+    anchor: "secondpaid",
+    template: "hp_deep_cleaning_crosssell",
+    afterMins: 5,
+    capMins: 180,
+    bodyParams: (b) => [b?.customer?.name || "there"],
+    // Book Deep Cleaning is a static URL + Call Us is a phone → no button param.
+  },
+  {
+    // #24 — 1 h after End Job, if the final payment is still pending.
+    id: "finalPaymentReminder1",
+    anchor: "endjob",
+    template: "hp_final_payment_reminder_1",
+    afterMins: 60,
+    capMins: 12 * 60,
+    guard: (b) => b?.bookingDetails?.finalPayment?.status !== "paid",
+    bodyParams: (b) => [
+      b?.customer?.name || "there",
+      String(b?.bookingDetails?.finalPayment?.remaining || 0),
+    ],
+    buttons: (b) => [
+      {
+        type: "button",
+        sub_type: "url",
+        text: String(b?.bookingDetails?.paymentLink?.url || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        ),
+      },
+    ],
+  },
+  {
+    // #25 — 24 h after End Job, if the final payment is still pending.
+    id: "finalPaymentReminder2",
+    anchor: "endjob",
+    template: "hp_final_payment_reminder_2",
+    afterMins: 24 * 60,
+    capMins: 48 * 60,
+    guard: (b) => b?.bookingDetails?.finalPayment?.status !== "paid",
+    bodyParams: (b) => [
+      b?.customer?.name || "there",
+      String(b?.bookingDetails?.finalPayment?.remaining || 0),
+    ],
+    buttons: (b) => [
+      {
+        type: "button",
+        sub_type: "url",
+        text: String(b?.bookingDetails?.paymentLink?.url || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        ),
+      },
+    ],
+  },
+  {
+    // #27 — 24 h after End Job, if the customer hasn't rated the vendor yet.
+    id: "feedbackReminder1",
+    anchor: "endjob",
+    template: "hp_feedback_reminder_1",
+    afterMins: 24 * 60,
+    capMins: 72 * 60,
+    // Async guard: skip if a rating already exists for this booking.
+    guardAsync: async (b) => !(await VendorRating.exists({ bookingId: b._id })),
+    bodyParams: (b) => [b?.customer?.name || "there"],
+    // Rate Our Service dynamic URL → homjee.com/<bookingId>.
+    buttons: (b) => [
+      { type: "button", sub_type: "url", text: String(b._id) },
+    ],
+  },
 ];
 
 function buildQuery(rule, notBefore, notAfter) {
+  // Every hp_ template is House Painting only — never send to a Deep Cleaning
+  // (or other) booking that shares the same flow.
+  const HP = { serviceType: "house_painting" };
+
+  if (rule.anchor === "secondpaid") {
+    // #22 cross-sell: shortly after the 2nd partial was PAID.
+    return {
+      ...HP,
+      "bookingDetails.secondPayment.paidAt": { $exists: true, $ne: null },
+      [`waFollowups.${rule.id}`]: { $ne: true },
+    };
+  }
+  if (rule.anchor === "endjob") {
+    // #24/#25/#27: after End Job (jobEndRequestedAt). Extra per-rule guards
+    // (final unpaid / not rated) are applied in runRule.
+    return {
+      ...HP,
+      "bookingDetails.jobEndRequestedAt": { $exists: true, $ne: null },
+      [`waFollowups.${rule.id}`]: { $ne: true },
+    };
+  }
   if (rule.anchor === "secondpartial") {
     // 2nd-partial reminder: anchored on when the vendor requested it. Only
     // while the second payment is still pending (not paid). Age checked in JS.
     return {
+      ...HP,
       "bookingDetails.secondPayment.requestedAt": { $exists: true, $ne: null },
       "bookingDetails.secondPayment.status": { $ne: "paid" },
       [`waFollowups.${rule.id}`]: { $ne: true },
@@ -172,6 +266,7 @@ function buildQuery(rule, notBefore, notAfter) {
     // the lead is still Pending Hiring and the advance is unpaid. Age checked
     // in JS (markedDate is a real Date, but we keep the pattern consistent).
     return {
+      ...HP,
       "assignedProfessional.hiring.markedDate": { $exists: true, $ne: null },
       "bookingDetails.status": "Pending Hiring",
       $or: [
@@ -186,6 +281,7 @@ function buildQuery(rule, notBefore, notAfter) {
     // value is a "YYYY-MM-DD" string, so we fetch candidates and check the
     // age in JS (see runRule). Here we just narrow to relevant leads.
     return {
+      ...HP,
       isEnquiry: false,
       "assignedProfessional.startedDate": { $exists: true, $ne: null },
       "bookingDetails.status": { $nin: EXCLUDE_STARTJOB_STATUS },
@@ -194,6 +290,7 @@ function buildQuery(rule, notBefore, notAfter) {
   }
   // enquiry
   return {
+    ...HP,
     isEnquiry: true,
     isDismmised: { $ne: true },
     "bookingDetails.status": "Pending",
@@ -203,6 +300,14 @@ function buildQuery(rule, notBefore, notAfter) {
 }
 
 function anchorTime(rule, b) {
+  if (rule.anchor === "secondpaid") {
+    const d = b?.bookingDetails?.secondPayment?.paidAt;
+    return d ? moment(d).valueOf() : null;
+  }
+  if (rule.anchor === "endjob") {
+    const d = b?.bookingDetails?.jobEndRequestedAt;
+    return d ? moment(d).valueOf() : null;
+  }
   if (rule.anchor === "secondpartial") {
     const d = b?.bookingDetails?.secondPayment?.requestedAt;
     return d ? moment(d).valueOf() : null;
@@ -237,6 +342,10 @@ async function runRule(rule) {
       const ageMin = (now - t) / 60000;
       if (ageMin < rule.afterMins || ageMin > rule.capMins) continue;
     }
+
+    // Per-rule extra guards (e.g. final still unpaid, not yet rated).
+    if (rule.guard && !rule.guard(b)) continue;
+    if (rule.guardAsync && !(await rule.guardAsync(b))) continue;
 
     const phone = b?.customer?.phone;
     if (!phone) continue;

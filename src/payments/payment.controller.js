@@ -4,6 +4,7 @@ const {
 } = require("./payment.service");
 const { sendWhatsAppTemplate } = require("../helpers/finbiteWhatsapp");
 const moment = require("moment");
+const UserBooking = require("../models/user/userBookings");
 
 exports.createOrder = async (req, res) => {
     try {
@@ -27,25 +28,51 @@ exports.verify = async (req, res) => {
             razorpay_signature,
         });
 
-        // WhatsApp #15 — booking (advance) payment confirmation. Best-effort.
-        // Only for a fresh FIRST-installment payment: first paid, but second &
-        // final not yet paid. {{1}} name, {{2}} booking amount, {{3}} start date.
+        // WhatsApp payment confirmations (House Painting only, best-effort).
+        // Which milestone just got paid decides the template:
+        //   final  -> #26 hp_final_payment_confirmation
+        //   second -> #21 hp_second_partial_confirmation
+        //   first  -> #15 hp_booking_payment_confirmation
         try {
             const b = out?.booking;
             const d = b?.bookingDetails || {};
+            const c = b?.customer || {};
+            const isHP = b?.serviceType === "house_painting";
             const firstPaid = d?.firstPayment?.status === "paid";
             const secondPaid = d?.secondPayment?.status === "paid";
             const finalPaid = d?.finalPayment?.status === "paid";
-            const c = b?.customer || {};
-            if (!out?.alreadyRecorded && firstPaid && !secondPaid && !finalPaid && c.phone) {
-                const amt = d?.firstPayment?.amount || d?.firstPayment?.requestedAmount || 0;
-                const slot = b?.selectedSlot?.slotDate
-                    ? moment(b.selectedSlot.slotDate).format("DD MMM YYYY")
-                    : "your start date";
-                // #15's "Call Project Manager" button is static — no button param.
-                await sendWhatsAppTemplate(c.phone, "hp_booking_payment_confirmation", {
-                    bodyParams: [c.name || "there", String(amt), slot],
-                });
+            const rateBtn = [{ type: "button", sub_type: "url", text: String(b?._id) }];
+
+            if (!out?.alreadyRecorded && isHP && c.phone) {
+                if (finalPaid) {
+                    // #26 — Rate Our Service dynamic-URL button.
+                    await sendWhatsAppTemplate(c.phone, "hp_final_payment_confirmation", {
+                        bodyParams: [c.name || "there"],
+                        buttons: rateBtn,
+                    });
+                } else if (secondPaid) {
+                    // #21 — Call PM dynamic-URL button.
+                    await sendWhatsAppTemplate(c.phone, "hp_second_partial_confirmation", {
+                        bodyParams: [c.name || "there", String(d?.secondPayment?.amount || 0)],
+                        buttons: [{ type: "button", sub_type: "url", text: String(b._id) }],
+                    });
+                    // Stamp paidAt so the #22 deep-cleaning cross-sell cron can
+                    // fire ~5 min later (service doesn't set this).
+                    if (!d?.secondPayment?.paidAt) {
+                        await UserBooking.updateOne(
+                            { _id: b._id },
+                            { $set: { "bookingDetails.secondPayment.paidAt": new Date() } },
+                        );
+                    }
+                } else if (firstPaid) {
+                    // #15 — Call PM button is static → no button param.
+                    const slot = b?.selectedSlot?.slotDate
+                        ? moment(b.selectedSlot.slotDate).format("DD MMM YYYY")
+                        : "your start date";
+                    await sendWhatsAppTemplate(c.phone, "hp_booking_payment_confirmation", {
+                        bodyParams: [c.name || "there", String(d?.firstPayment?.amount || 0), slot],
+                    });
+                }
             }
         } catch (e) {
             console.error("[verify] WA payment confirmation failed:", e?.message);
