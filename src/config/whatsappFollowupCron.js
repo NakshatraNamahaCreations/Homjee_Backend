@@ -83,9 +83,49 @@ const RULES = [
       { type: "button", sub_type: "url", text: String(b._id) },
     ],
   },
+  {
+    // #13 — 1 h after hiring, only if still Pending Hiring & unpaid.
+    id: "bookingPaymentReminder1",
+    anchor: "hiring",
+    template: "hp_booking_payment_reminder_1",
+    afterMins: 60,
+    capMins: 6 * 60,
+    bodyParams: (b) => [
+      b?.customer?.name || "there",
+      b?.selectedSlot?.slotDate
+        ? moment(b.selectedSlot.slotDate).format("DD MMM YYYY")
+        : "your date",
+      String(b?.bookingDetails?.firstPayment?.requestedAmount || 0),
+    ],
+    // Pay Now dynamic URL = the payment page path; Call PM is a static phone.
+    buttons: (b) => [
+      {
+        type: "button",
+        sub_type: "url",
+        text: String(b?.bookingDetails?.paymentLink?.url || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        ),
+      },
+    ],
+  },
 ];
 
 function buildQuery(rule, notBefore, notAfter) {
+  if (rule.anchor === "hiring") {
+    // Payment reminders: anchored on when the vendor marked hiring. Only while
+    // the lead is still Pending Hiring and the advance is unpaid. Age checked
+    // in JS (markedDate is a real Date, but we keep the pattern consistent).
+    return {
+      "assignedProfessional.hiring.markedDate": { $exists: true, $ne: null },
+      "bookingDetails.status": "Pending Hiring",
+      $or: [
+        { "bookingDetails.paidAmount": { $lte: 0 } },
+        { "bookingDetails.paidAmount": { $exists: false } },
+      ],
+      [`waFollowups.${rule.id}`]: { $ne: true },
+    };
+  }
   if (rule.anchor === "startjob") {
     // Time-window on a date field can't be done reliably in Mongo when the
     // value is a "YYYY-MM-DD" string, so we fetch candidates and check the
@@ -108,6 +148,10 @@ function buildQuery(rule, notBefore, notAfter) {
 }
 
 function anchorTime(rule, b) {
+  if (rule.anchor === "hiring") {
+    const d = b?.assignedProfessional?.hiring?.markedDate;
+    return d ? moment(d).valueOf() : null;
+  }
   if (rule.anchor === "startjob") {
     const d = b?.assignedProfessional?.startedDate;
     return d ? moment(d).valueOf() : null;
@@ -126,8 +170,9 @@ async function runRule(rule) {
     .lean();
 
   for (const b of bookings) {
-    // For the startjob anchor the time window is enforced here in JS.
-    if (rule.anchor === "startjob") {
+    // The enquiry anchor is time-windowed in Mongo (createdDate); every other
+    // anchor (startjob, hiring) enforces the window here in JS.
+    if (rule.anchor !== "enquiry") {
       const t = anchorTime(rule, b);
       if (t == null) continue;
       const ageMin = (now - t) / 60000;
