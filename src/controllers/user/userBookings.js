@@ -1365,16 +1365,25 @@ exports.createBooking = async (req, res) => {
         console.error("[createBooking] fanout failed:", err?.message);
       }
 
-      // WhatsApp #4 — booking confirmation to the customer (best-effort;
-      // never fails the booking). {{1}} name, {{2}} time slot, {{3}} address.
+      // WhatsApp booking confirmation to the customer (best-effort; never
+      // fails the booking). House Painting and Deep Cleaning use different
+      // templates and variable shapes.
       try {
         const c = updatedBooking?.customer || {};
-        if (c.phone && updatedBooking.serviceType === "house_painting") {
-          const slot = `${updatedBooking?.selectedSlot?.slotDate || ""} ${updatedBooking?.selectedSlot?.slotTime || ""}`.trim();
-          const addr = updatedBooking?.address?.streetArea ||
-            updatedBooking?.address?.houseFlatNumber || "your address";
+        const st = updatedBooking?.serviceType;
+        const date = updatedBooking?.selectedSlot?.slotDate || "";
+        const time = updatedBooking?.selectedSlot?.slotTime || "";
+        const addr = updatedBooking?.address?.streetArea ||
+          updatedBooking?.address?.houseFlatNumber || "your address";
+        if (c.phone && st === "house_painting") {
+          // HP #4 — {{1}} name, {{2}} time slot, {{3}} address.
           await sendWhatsAppTemplate(c.phone, "hp_booking_confirmation_v1", {
-            bodyParams: [c.name || "there", slot || "your slot", addr],
+            bodyParams: [c.name || "there", `${date} ${time}`.trim() || "your slot", addr],
+          });
+        } else if (c.phone && st === "deep_cleaning") {
+          // DC #4 — {{1}} name, {{2}} date, {{3}} time, {{4}} location.
+          await sendWhatsAppTemplate(c.phone, "dc_booking_confirmation", {
+            bodyParams: [c.name || "there", date || "your date", time || "your time", addr],
           });
         }
       } catch (err) {
@@ -4938,8 +4947,15 @@ exports.requestPriceChange = async (req, res) => {
   // Reductions are handled at admin approval time (#18), not here.
   try {
     const c = booking?.customer || {};
-    if (scopeType === "Added" && c.phone && booking?.serviceType === "house_painting") {
-      await sendWhatsAppTemplate(c.phone, "hp_scope_change_addition", {
+    const st = booking?.serviceType;
+    const addTpl =
+      st === "house_painting"
+        ? "hp_scope_change_addition"
+        : st === "deep_cleaning"
+          ? "dc_scope_change_addition"
+          : null;
+    if (scopeType === "Added" && c.phone && addTpl) {
+      await sendWhatsAppTemplate(c.phone, addTpl, {
         bodyParams: [
           c.name || "there",
           String(booking.bookingDetails.finalTotal || 0),
@@ -5012,18 +5028,30 @@ exports.approvePriceChange = async (req, res) => {
   // {{1}} name, {{2}} previous total, {{3}} amount reduced, {{4}} new total.
   try {
     const c = booking?.customer || {};
-    if (pendingChange.scopeType === "Reduced" && c.phone && booking?.serviceType === "house_painting") {
-      await sendWhatsAppTemplate(c.phone, "hp_scope_change_reduction", {
+    const st = booking?.serviceType;
+    const redTpl =
+      st === "house_painting"
+        ? "hp_scope_change_reduction"
+        : st === "deep_cleaning"
+          ? "dc_scope_change_reduction"
+          : null;
+    if (pendingChange.scopeType === "Reduced" && c.phone && redTpl) {
+      const opts = {
         bodyParams: [
           c.name || "there",
           String(previousTotal),
           String(Math.abs(Number(pendingChange.adjustmentAmount)) || 0),
           String(pendingChange.proposedTotal),
         ],
-        buttons: [
+      };
+      // HP's single "Call PM" button is a dynamic URL (needs a param); DC's
+      // "Call Supervisor" button is static (no param).
+      if (st === "house_painting") {
+        opts.buttons = [
           { type: "button", sub_type: "url", text: String(booking._id) },
-        ],
-      });
+        ];
+      }
+      await sendWhatsAppTemplate(c.phone, redTpl, opts);
     }
   } catch (err) {
     console.error("[approvePriceChange] WA reduction failed:", err?.message);
@@ -5254,18 +5282,31 @@ exports.updateStatus = async (req, res) => {
     });
 
     // WhatsApp to the customer on status change (best-effort, non-blocking).
-    // #5 unreachable ({{1}} name, {{2}} phone) · #6 cancelled ({{1}} name).
+    // HP unreachable takes {{1}} name + {{2}} phone; DC unreachable takes only
+    // {{1}} name. Both cancelled templates take just {{1}} name.
     try {
       const c = booking?.customer || {};
-      const isHP = booking?.serviceType === "house_painting";
-      if (isHP && c.phone && status === "Customer Unreachable") {
-        await sendWhatsAppTemplate(c.phone, "hp_customer_unreachable", {
-          bodyParams: [c.name || "there", String(c.phone)],
-        });
-      } else if (isHP && c.phone && status === "Customer Cancelled") {
-        await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled", {
-          bodyParams: [c.name || "there"],
-        });
+      const st = booking?.serviceType;
+      if (c.phone && status === "Customer Unreachable") {
+        if (st === "house_painting") {
+          await sendWhatsAppTemplate(c.phone, "hp_customer_unreachable", {
+            bodyParams: [c.name || "there", String(c.phone)],
+          });
+        } else if (st === "deep_cleaning") {
+          await sendWhatsAppTemplate(c.phone, "dc_customer_unreachable", {
+            bodyParams: [c.name || "there"],
+          });
+        }
+      } else if (c.phone && status === "Customer Cancelled") {
+        if (st === "house_painting") {
+          await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled", {
+            bodyParams: [c.name || "there"],
+          });
+        } else if (st === "deep_cleaning") {
+          await sendWhatsAppTemplate(c.phone, "dc_customer_cancelled", {
+            bodyParams: [c.name || "there"],
+          });
+        }
       }
     } catch (err) {
       console.error("[updateStatus] WA template failed:", err?.message);

@@ -59,6 +59,34 @@ const RULES = [
     capMins: 48 * 60,
     bodyParams: (b) => [b?.customer?.name || "there"],
   },
+  // ── Deep Cleaning enquiry follow-ups (all 3 carry {{1}} = name) ──
+  {
+    id: "dcEnquiryFollowup1",
+    anchor: "enquiry",
+    serviceType: "deep_cleaning",
+    template: "dc_enquiry_followup_1",
+    afterMins: 5,
+    capMins: 180,
+    bodyParams: (b) => [b?.customer?.name || "there"],
+  },
+  {
+    id: "dcEnquiryFollowup2",
+    anchor: "enquiry",
+    serviceType: "deep_cleaning",
+    template: "dc_enquiry_followup_2",
+    afterMins: 60,
+    capMins: 6 * 60,
+    bodyParams: (b) => [b?.customer?.name || "there"],
+  },
+  {
+    id: "dcEnquiryFollowup3",
+    anchor: "enquiry",
+    serviceType: "deep_cleaning",
+    template: "dc_enquiry_followup_3",
+    afterMins: 24 * 60,
+    capMins: 48 * 60,
+    bodyParams: (b) => [b?.customer?.name || "there"],
+  },
   {
     // #10 — 24 h after Start Job (survey). Don't nag if they've moved forward.
     id: "followupStartJob1",
@@ -230,9 +258,10 @@ const RULES = [
 ];
 
 function buildQuery(rule, notBefore, notAfter) {
-  // Every hp_ template is House Painting only — never send to a Deep Cleaning
-  // (or other) booking that shares the same flow.
-  const HP = { serviceType: "house_painting" };
+  // Templates are service-specific — a rule only matches bookings of its own
+  // serviceType, so hp_ never goes to a Deep Cleaning booking and vice-versa.
+  const svc = { serviceType: rule.serviceType || "house_painting" };
+  const HP = svc;
 
   if (rule.anchor === "secondpaid") {
     // #22 cross-sell: shortly after the 2nd partial was PAID.
