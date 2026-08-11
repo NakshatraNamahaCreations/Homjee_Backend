@@ -74,6 +74,16 @@ exports.verify = async (req, res) => {
                     });
                 }
             }
+
+            // Deep Cleaning: only the FINAL payment gets a WhatsApp confirmation
+            // (#14). DC has no advance/second-partial confirmation messages.
+            const isDC = b?.serviceType === "deep_cleaning";
+            if (!out?.alreadyRecorded && isDC && c.phone && finalPaid) {
+                await sendWhatsAppTemplate(c.phone, "dc_final_payment_confirmation", {
+                    bodyParams: [c.name || "there"],
+                    buttons: rateBtn,
+                });
+            }
         } catch (e) {
             console.error("[verify] WA payment confirmation failed:", e?.message);
         }

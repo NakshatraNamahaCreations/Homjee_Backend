@@ -6373,16 +6373,23 @@ exports.requestingFinalPaymentEndProject = async (req, res) => {
 
     await booking.save();
 
-    // WhatsApp #23 — final payment link on End Job (House Painting, best-effort).
-    // {{1}} name, {{2}} total, {{3}} paid, {{4}} final due. Pay Now dynamic URL.
+    // WhatsApp final payment link on End Job (best-effort). HP #23 and DC #11
+    // share the same 4 vars + Pay Now dynamic URL button.
     try {
       const c = booking?.customer || {};
-      if (booking?.serviceType === "house_painting" && c.phone) {
+      const st = booking?.serviceType;
+      const finalTpl =
+        st === "house_painting"
+          ? "hp_final_payment_link"
+          : st === "deep_cleaning"
+            ? "dc_final_payment_link"
+            : null;
+      if (finalTpl && c.phone) {
         const payPath = String(paymentLinkUrl || "").replace(
           /^https?:\/\/[^/]+\//,
           "",
         );
-        await sendWhatsAppTemplate(c.phone, "hp_final_payment_link", {
+        await sendWhatsAppTemplate(c.phone, finalTpl, {
           bodyParams: [
             c.name || "there",
             String(totalExpected),

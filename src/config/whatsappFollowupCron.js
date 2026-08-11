@@ -255,6 +255,90 @@ const RULES = [
       { type: "button", sub_type: "url", text: String(b._id) },
     ],
   },
+  // ── Deep Cleaning: final-payment reminders + feedback + re-engagement ──
+  {
+    // DC #12 — 1 h after End Job, final payment still pending.
+    id: "dcFinalPaymentReminder1",
+    anchor: "endjob",
+    serviceType: "deep_cleaning",
+    template: "dc_final_payment_reminder_1",
+    afterMins: 60,
+    capMins: 12 * 60,
+    guard: (b) => b?.bookingDetails?.finalPayment?.status !== "paid",
+    bodyParams: (b) => [
+      b?.customer?.name || "there",
+      String(b?.bookingDetails?.finalPayment?.remaining || 0),
+    ],
+    buttons: (b) => [
+      {
+        type: "button",
+        sub_type: "url",
+        text: String(b?.bookingDetails?.paymentLink?.url || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        ),
+      },
+    ],
+  },
+  {
+    // DC #13 — 24 h after End Job, final payment still pending.
+    id: "dcFinalPaymentReminder2",
+    anchor: "endjob",
+    serviceType: "deep_cleaning",
+    template: "dc_final_payment_reminder_2",
+    afterMins: 24 * 60,
+    capMins: 48 * 60,
+    guard: (b) => b?.bookingDetails?.finalPayment?.status !== "paid",
+    bodyParams: (b) => [
+      b?.customer?.name || "there",
+      String(b?.bookingDetails?.finalPayment?.remaining || 0),
+    ],
+    buttons: (b) => [
+      {
+        type: "button",
+        sub_type: "url",
+        text: String(b?.bookingDetails?.paymentLink?.url || "").replace(
+          /^https?:\/\/[^/]+\//,
+          "",
+        ),
+      },
+    ],
+  },
+  {
+    // DC #15 — 24 h after End Job, if not yet rated.
+    id: "dcFeedbackReminder1",
+    anchor: "endjob",
+    serviceType: "deep_cleaning",
+    template: "dc_feedback_reminder_1",
+    afterMins: 24 * 60,
+    capMins: 72 * 60,
+    guardAsync: async (b) => !(await VendorRating.exists({ bookingId: b._id })),
+    bodyParams: (b) => [b?.customer?.name || "there"],
+    buttons: (b) => [
+      { type: "button", sub_type: "url", text: String(b._id) },
+    ],
+  },
+  {
+    // DC #16 — 1 month after the cleaning was completed (re-engagement).
+    id: "dcFollowup1Month",
+    anchor: "aftercompletion",
+    serviceType: "deep_cleaning",
+    template: "dc_followup_1month",
+    afterMins: 30 * 24 * 60,
+    capMins: 35 * 24 * 60,
+    bodyParams: (b) => [b?.customer?.name || "there"],
+    // Book Now static + Call Us phone → no button param.
+  },
+  {
+    // DC #17 — 2 months after the cleaning was completed.
+    id: "dcFollowup2Month",
+    anchor: "aftercompletion",
+    serviceType: "deep_cleaning",
+    template: "dc_followup_2month",
+    afterMins: 60 * 24 * 60,
+    capMins: 65 * 24 * 60,
+    bodyParams: (b) => [b?.customer?.name || "there"],
+  },
 ];
 
 function buildQuery(rule, notBefore, notAfter) {
@@ -276,6 +360,15 @@ function buildQuery(rule, notBefore, notAfter) {
     // (final unpaid / not rated) are applied in runRule.
     return {
       ...HP,
+      "bookingDetails.jobEndRequestedAt": { $exists: true, $ne: null },
+      [`waFollowups.${rule.id}`]: { $ne: true },
+    };
+  }
+  if (rule.anchor === "aftercompletion") {
+    // DC #16/#17 re-engagement: 1 / 2 months after the cleaning completed.
+    // Anchored on jobEndRequestedAt; age checked in JS.
+    return {
+      ...svc,
       "bookingDetails.jobEndRequestedAt": { $exists: true, $ne: null },
       [`waFollowups.${rule.id}`]: { $ne: true },
     };
@@ -333,7 +426,7 @@ function anchorTime(rule, b) {
     const d = b?.bookingDetails?.secondPayment?.paidAt;
     return d ? moment(d).valueOf() : null;
   }
-  if (rule.anchor === "endjob") {
+  if (rule.anchor === "endjob" || rule.anchor === "aftercompletion") {
     const d = b?.bookingDetails?.jobEndRequestedAt;
     return d ? moment(d).valueOf() : null;
   }
