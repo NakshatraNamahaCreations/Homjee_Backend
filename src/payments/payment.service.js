@@ -6,7 +6,6 @@ const {
   validateBookingSlotStillAvailable,
 } = require("../helpers/validateBookingSlotStillAvailable");
 const { fanOutLeadToEligibleVendors } = require("../services/leadFanout.service");
-const { sendBookingConfirmation } = require("../helpers/bookingWhatsapp");
 const { invalidateForDate } = require("../services/slotCache.service");
 const { releaseCustomerHoldsForSlot } = require("../services/slotHold.service");
 
@@ -263,11 +262,9 @@ exports.verifyAndRecordBookingPayment = async ({
             const freshBooking = await userBookings.findById(bookingId).lean();
             if (freshBooking && freshBooking.isEnquiry === false) {
                 await fanOutLeadToEligibleVendors(freshBooking);
-
-                // #4 booking confirmation — this enquiry just became a real
-                // lead via online payment, so send it now (createBooking only
-                // sends #4 for leads that start with isEnquiry=false).
-                await sendBookingConfirmation(freshBooking);
+                // NOTE: #4 booking confirmation is NOT sent here — it already
+                // went out at booking-creation time (createBooking), so sending
+                // it again on payment would double-message the customer.
 
                 const slotDate = freshBooking?.selectedSlot?.slotDate;
                 const slotTime = freshBooking?.selectedSlot?.slotTime;

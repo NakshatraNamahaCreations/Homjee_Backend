@@ -1351,9 +1351,16 @@ exports.createBooking = async (req, res) => {
     // ------------------------------
     const updatedBooking = await UserBooking.findById(booking._id).lean();
 
-    // If this booking is already a confirmed lead (no online payment
-    // pending), fan out to eligible vendors now. For the payment path,
-    // the fan-out fires from payment.service after isEnquiry flips.
+    // #4 booking confirmation — send the moment the booking is created, for
+    // EVERY booking, paid or not. House Painting site-visit leads take no
+    // online payment, so gating this on isEnquiry/payment meant those
+    // customers never got a confirmation. (Payment-milestone messages
+    // #15/#21/#26/#14 are separate and still fire after payment.)
+    await sendBookingConfirmation(updatedBooking);
+
+    // Fan out to eligible vendors only once the booking is a real lead
+    // (isEnquiry === false). For the online-payment path, the fan-out fires
+    // from payment.service after isEnquiry flips.
     if (updatedBooking && updatedBooking.isEnquiry === false) {
       // AWAIT the fan-out (don't fire-and-forget): otherwise, once the HTTP
       // response is sent, Render can kill the pending async work, so the lead
@@ -1365,11 +1372,6 @@ exports.createBooking = async (req, res) => {
       } catch (err) {
         console.error("[createBooking] fanout failed:", err?.message);
       }
-
-      // #4 booking confirmation to the customer (best-effort; never fails the
-      // booking). Shared helper so admin-create and the payment-conversion
-      // path send the exact same HP/DC message.
-      await sendBookingConfirmation(updatedBooking);
 
       // Bust the slot cache so the next customer's slot query reflects
       // this commitment (Issue #2 — without this, the 60s cache lets two
@@ -2271,20 +2273,22 @@ exports.adminCreateBooking = async (req, res) => {
     // lead (isEnquiry === false). Skipped for enquiries — those convert
     // later (via payment.service or admin promote) and fan out then.
     // Fire-and-forget: a fan-out failure must not roll back the booking.
-    if (!isEnquiry) {
-      try {
-        const fresh = await UserBooking.findById(booking._id).lean();
-        if (fresh) {
-          // Await (not fire-and-forget) so the invite/push isn't dropped when
-          // the response returns on Render.
+    try {
+      const fresh = await UserBooking.findById(booking._id).lean();
+      if (fresh) {
+        // #4 booking confirmation at creation for EVERY admin-created booking
+        // (paid or enquiry) — mirrors the website path so no customer is
+        // skipped.
+        await sendBookingConfirmation(fresh);
+        // Fan out to vendors only for real leads (isEnquiry false). Await
+        // (not fire-and-forget) so the invite/push isn't dropped when the
+        // response returns on Render.
+        if (!isEnquiry) {
           await fanOutLeadToEligibleVendors(fresh);
-          // #4 booking confirmation to the customer (best-effort). Admin-
-          // created leads previously skipped this entirely.
-          await sendBookingConfirmation(fresh);
         }
-      } catch (e) {
-        console.error("[adminCreateBooking] fanout failed:", e?.message);
       }
+    } catch (e) {
+      console.error("[adminCreateBooking] post-create tasks failed:", e?.message);
     }
 
     // Bust the slot cache for this booking's date so the next slot query
