@@ -6,6 +6,7 @@ const {
   validateBookingSlotStillAvailable,
 } = require("../helpers/validateBookingSlotStillAvailable");
 const { fanOutLeadToEligibleVendors } = require("../services/leadFanout.service");
+const { sendBookingConfirmation } = require("../helpers/bookingWhatsapp");
 const { invalidateForDate } = require("../services/slotCache.service");
 const { releaseCustomerHoldsForSlot } = require("../services/slotHold.service");
 
@@ -262,9 +263,20 @@ exports.verifyAndRecordBookingPayment = async ({
             const freshBooking = await userBookings.findById(bookingId).lean();
             if (freshBooking && freshBooking.isEnquiry === false) {
                 await fanOutLeadToEligibleVendors(freshBooking);
-                // NOTE: #4 booking confirmation is NOT sent here — it already
-                // went out at booking-creation time (createBooking), so sending
-                // it again on payment would double-message the customer.
+
+                // #4 booking confirmation — the paid path (Deep Cleaning /
+                // paid House Painting site visit) stays isEnquiry:true through
+                // updateEnquiry and only becomes a real lead here, after the
+                // payment. updateEnquiry deliberately skips #4 for these, so
+                // send it now. Best-effort; never blocks the payment result.
+                try {
+                    await sendBookingConfirmation(freshBooking);
+                } catch (waErr) {
+                    console.error(
+                        "[payment.verify] WA confirmation failed:",
+                        waErr?.message,
+                    );
+                }
 
                 const slotDate = freshBooking?.selectedSlot?.slotDate;
                 const slotTime = freshBooking?.selectedSlot?.slotTime;

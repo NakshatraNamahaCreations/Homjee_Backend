@@ -8653,6 +8653,20 @@ exports.updateEnquiry = async (req, res) => {
 
     const updatedBooking = await UserBooking.findById(booking._id).lean();
 
+    // #4 booking confirmation. This is the MAIN website path: the enquiry
+    // (created at OTP-verify) is finalized here. When there's no online
+    // payment pending — e.g. a free House Painting site visit — the booking
+    // becomes a real lead right now, so send the confirmation. Paid paths
+    // (Deep Cleaning / paid site visit) stay isEnquiry:true and send it from
+    // payment.service.verify after the payment succeeds. Best-effort.
+    if (finalize && !willPayOnline && updatedBooking?.isEnquiry === false) {
+      try {
+        await sendBookingConfirmation(updatedBooking);
+      } catch (e) {
+        console.error("[updateEnquiry] WA confirmation failed:", e?.message);
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: finalize
