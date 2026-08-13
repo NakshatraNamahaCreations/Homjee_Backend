@@ -1,6 +1,7 @@
 const UserBooking = require("../../models/user/userBookings");
 const Quote = require("../../models/measurement/Quote");
 const { sendWhatsAppOtp, sendWhatsAppTemplate } = require("../../helpers/finbiteWhatsapp");
+const { sendBookingConfirmation } = require("../../helpers/bookingWhatsapp");
 const moment = require("moment");
 const momentTz = require("moment-timezone");
 const crypto = require("crypto");
@@ -1365,30 +1366,10 @@ exports.createBooking = async (req, res) => {
         console.error("[createBooking] fanout failed:", err?.message);
       }
 
-      // WhatsApp booking confirmation to the customer (best-effort; never
-      // fails the booking). House Painting and Deep Cleaning use different
-      // templates and variable shapes.
-      try {
-        const c = updatedBooking?.customer || {};
-        const st = updatedBooking?.serviceType;
-        const date = updatedBooking?.selectedSlot?.slotDate || "";
-        const time = updatedBooking?.selectedSlot?.slotTime || "";
-        const addr = updatedBooking?.address?.streetArea ||
-          updatedBooking?.address?.houseFlatNumber || "your address";
-        if (c.phone && st === "house_painting") {
-          // HP #4 — {{1}} name, {{2}} time slot, {{3}} address.
-          await sendWhatsAppTemplate(c.phone, "hp_booking_confirmation_v1", {
-            bodyParams: [c.name || "there", `${date} ${time}`.trim() || "your slot", addr],
-          });
-        } else if (c.phone && st === "deep_cleaning") {
-          // DC #4 — {{1}} name, {{2}} date, {{3}} time, {{4}} location.
-          await sendWhatsAppTemplate(c.phone, "dc_booking_confirmation", {
-            bodyParams: [c.name || "there", date || "your date", time || "your time", addr],
-          });
-        }
-      } catch (err) {
-        console.error("[createBooking] WA confirmation failed:", err?.message);
-      }
+      // #4 booking confirmation to the customer (best-effort; never fails the
+      // booking). Shared helper so admin-create and the payment-conversion
+      // path send the exact same HP/DC message.
+      await sendBookingConfirmation(updatedBooking);
 
       // Bust the slot cache so the next customer's slot query reflects
       // this commitment (Issue #2 — without this, the 60s cache lets two
@@ -2297,6 +2278,9 @@ exports.adminCreateBooking = async (req, res) => {
           // Await (not fire-and-forget) so the invite/push isn't dropped when
           // the response returns on Render.
           await fanOutLeadToEligibleVendors(fresh);
+          // #4 booking confirmation to the customer (best-effort). Admin-
+          // created leads previously skipped this entirely.
+          await sendBookingConfirmation(fresh);
         }
       } catch (e) {
         console.error("[adminCreateBooking] fanout failed:", e?.message);
@@ -4630,27 +4614,27 @@ exports.startJob = async (req, res) => {
       return res.status(404).json({ message: "Booking not found" });
     }
 
-    // === Validate OTP ===
-    // requestStartProjectOtp saves the code bcrypt-HASHED as
-    // bookingDetails.startProjectOtp (+ startProjectOtpExpiry). The old check
-    // here read a plain bookingDetails.otp that is never set, so every correct
-    // OTP was rejected with "Invalid OTP" and the job never started. Verify
-    // against the hashed value with expiry, matching requestStartProjectOtp.
-    const hashedOtp = booking.bookingDetails?.startProjectOtp;
-    const otpExpiry = booking.bookingDetails?.startProjectOtpExpiry;
-    if (!hashedOtp) {
+    // === Validate the Booking ID ===
+    // The start code is now the booking's own Booking ID (bookingDetails.
+    // booking_id), sent to the customer via an approved Utility template in
+    // requestStartProjectOtp — WhatsApp rejects custom codes and the login-OTP
+    // template says "do not share". The customer reads the Booking ID out to
+    // the on-site team, who enter it here (still sent as `otp`). Normalise and
+    // accept the full ID or its trailing digits.
+    const expectedCode = String(booking.bookingDetails?.booking_id || "")
+      .toUpperCase()
+      .replace(/[\s-]/g, "");
+    const enteredCode = String(otp || "").toUpperCase().replace(/[\s-]/g, "");
+    if (!expectedCode) {
       return res
         .status(400)
-        .json({ message: "No OTP requested. Please resend the OTP." });
+        .json({ message: "No Booking ID found for this booking." });
     }
-    if (otpExpiry && new Date(otpExpiry).getTime() < Date.now()) {
-      return res
-        .status(400)
-        .json({ message: "OTP expired. Please resend the OTP." });
-    }
-    const isOtpValid = await bcrypt.compare(String(otp), String(hashedOtp));
-    if (!isOtpValid) {
-      return res.status(401).json({ message: "Invalid OTP" });
+    const codeMatches =
+      enteredCode === expectedCode ||
+      (enteredCode.length >= 4 && enteredCode === expectedCode.slice(-4));
+    if (!codeMatches) {
+      return res.status(401).json({ message: "Invalid Booking ID" });
     }
 
     // === Determine service type ===
@@ -5406,6 +5390,12 @@ exports.rescheduleBooking = async (req, res) => {
         await sendWhatsAppTemplate(c.phone, "hp_customer_reschedule", {
           bodyParams: [c.name || "there", slot, addr],
         });
+      } else if (c.phone && booking?.serviceType === "deep_cleaning") {
+        // #7 DC — {{1}} name, {{2}} new date, {{3}} new time. Fires the moment
+        // dc_customer_reschedule_v2 is approved (best-effort; no-op if not yet).
+        await sendWhatsAppTemplate(c.phone, "dc_customer_reschedule_v2", {
+          bodyParams: [c.name || "there", slotDate, slotTime],
+        });
       }
     } catch (err) {
       console.error("[rescheduleBooking] WA template failed:", err?.message);
@@ -5966,36 +5956,53 @@ exports.requestStartProjectOtp = async (req, res) => {
     //   });
     // }
 
-    // Generate 4-digit OTP
-    const otp = Math.floor(1000 + Math.random() * 9000).toString();
-    const expiry = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
-
-    // ✅ Hash OTP before saving (SECURITY BEST PRACTICE)
-    const hashedOtp = await bcrypt.hash(otp, 10);
-
-    booking.bookingDetails.startProjectOtp = hashedOtp;
-    booking.bookingDetails.startProjectOtpExpiry = expiry;
+    // Booking-ID start flow (replaces the random OTP). WhatsApp rejects any
+    // custom template that carries a shareable code, and the login-OTP auth
+    // template literally says "do not share" — wrong for a code the customer
+    // MUST read out to the on-site team. So the shared code is the booking's
+    // own Booking ID (bookingDetails.booking_id), sent in an approved Utility
+    // template. Verification compares the entered value against booking_id.
+    const name = booking?.customer?.name || "there";
+    let bookingCode = booking?.bookingDetails?.booking_id;
+    // Safety net: leads created before booking_id existed — mint one now so
+    // the start flow always has a code to verify against.
+    if (!bookingCode) {
+      bookingCode = generateBookingId();
+      booking.bookingDetails.booking_id = bookingCode;
+    }
     booking.bookingDetails.startProjectRequestedAt = new Date();
-
     await booking.save();
 
-    // Send the start-project OTP to the CUSTOMER's WhatsApp (best-effort; a
-    // WhatsApp hiccup never blocks the flow — the hashed OTP is already saved).
+    // Pick the approved template: DC job vs HP survey (Confirmed) vs HP
+    // project (Hired). All three take {{1}} name, {{2}} Booking ID.
+    let templateName;
+    if (booking.serviceType === "deep_cleaning") {
+      templateName = "dc_start_job_bookingid_v4";
+    } else if (bookingStatus === "Hired") {
+      templateName = "hp_start_project_bookingid_v3";
+    } else {
+      templateName = "hp_start_survey_bookingid";
+    }
+
+    // Send the Booking ID to the CUSTOMER's WhatsApp (best-effort; a WhatsApp
+    // hiccup never blocks the flow — the Booking ID is already on the booking).
     const customerPhone = booking?.customer?.phone;
     let wa = { sent: false, reason: "no_customer_phone" };
     if (customerPhone) {
-      wa = await sendWhatsAppOtp(customerPhone, otp);
+      wa = await sendWhatsAppTemplate(customerPhone, templateName, {
+        bodyParams: [name, bookingCode],
+      });
     }
     console.log(
-      `[start-project OTP] booking ${bookingId} → ${customerPhone} | whatsapp:${wa.sent}`,
+      `[start-project] booking ${bookingId} → ${customerPhone} | template:${templateName} | whatsapp:${wa.sent}`,
     );
 
     res.json({
       success: true,
-      message: "OTP sent to customer. Await verification to start project.",
+      message: "Booking ID sent to customer. Await verification to start.",
       whatsappSent: wa.sent,
-      // OTP returned only while AUTH_DEBUG_OTP=true (testing).
-      ...(process.env.AUTH_DEBUG_OTP === "true" ? { otp } : {}),
+      // Booking ID returned only while AUTH_DEBUG_OTP=true (testing).
+      ...(process.env.AUTH_DEBUG_OTP === "true" ? { bookingCode } : {}),
     });
   } catch (err) {
     console.error("Error requesting start-project OTP:", err);
@@ -6038,19 +6045,26 @@ exports.verifyStartProjectOtp = async (req, res) => {
     //   });
     // }
 
-    if (!details.startProjectOtp || !details.startProjectOtpExpiry) {
+    // Verify the value the customer read out to the team against the booking's
+    // own Booking ID (bookingDetails.booking_id) — see requestStartProjectOtp.
+    // Normalise (strip spaces/hyphens, uppercase) and accept either the full
+    // ID or its trailing digits so "HJ-20251120-1234" or "1234" both work.
+    const expected = String(details.booking_id || "")
+      .toUpperCase()
+      .replace(/[\s-]/g, "");
+    const entered = String(otp || "").toUpperCase().replace(/[\s-]/g, "");
+    if (!expected) {
       return res
         .status(400)
-        .json({ success: false, message: "No OTP requested" });
+        .json({ success: false, message: "No Booking ID found for this booking." });
     }
-
-    if (new Date() > details.startProjectOtpExpiry) {
-      return res.status(400).json({ success: false, message: "OTP expired" });
-    }
-
-    const isValid = await bcrypt.compare(otp, details.startProjectOtp);
+    const isValid =
+      entered === expected ||
+      (entered.length >= 4 && entered === expected.slice(-4));
     if (!isValid) {
-      return res.status(400).json({ success: false, message: "Invalid OTP" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid Booking ID" });
     }
 
     // ✅ ONLY: Start the job

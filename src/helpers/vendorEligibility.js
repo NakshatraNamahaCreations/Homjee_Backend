@@ -101,23 +101,16 @@ async function filterEligibleVendors({
       continue;
     }
 
-    // Pincode gate. Runs BEFORE the radius check because it's cheap and
-    // strictly tighter: a vendor whose pincode doesn't match the
-    // booking's pincode is not surfaced even if their base address
-    // happens to fall inside the radius. Falls through silently when
-    // either side lacks a parseable pincode, so legacy address strings
-    // without an explicit pincode aren't accidentally filtered out.
-    if (bookingPincode) {
-      const vendorPincode = extractPincode(v.address?.location);
-      if (vendorPincode && vendorPincode !== bookingPincode) {
-        reasons.pincodeMismatch = true;
-        recordDebug(
-          v,
-          `pincode_mismatch (vendor=${vendorPincode}, booking=${bookingPincode})`,
-        );
-        continue;
-      }
-    }
+    // NOTE: exact-pincode matching was removed. It ran BEFORE the radius
+    // check and rejected any vendor whose pincode differed from the
+    // booking's — so two Pune pincodes a few km apart (e.g. vendor 411057
+    // vs booking 411027) never matched, even though both sit well inside
+    // the vendor's service radius. That silently starved real leads of
+    // vendors (admin showed "no vendor notified" while the vendor still
+    // saw the lead in their city feed). The per-vendor serviceRadiusKm
+    // gate below is the correct geographic filter, so pincode is no longer
+    // a hard gate. `bookingPincode`/`extractPincode` are kept for callers
+    // and any future soft ranking.
 
     const dist = haversineKm(lat, lng, v.address.latitude, v.address.longitude);
     const vendorRadius =
