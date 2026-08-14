@@ -5,11 +5,11 @@ const CATALOG = [
   {
     category: "Furnished Apartment",
     subcategories: [
-      { subcategory: "1 BHK Cleaning", services: ["Classic", "Premium", "Platinum"] },
-      { subcategory: "2 BHK Cleaning", services: ["Classic", "Premium", "Platinum"] },
-      { subcategory: "3 BHK Cleaning", services: ["Classic", "Premium", "Platinum"] },
-      { subcategory: "4 BHK Cleaning", services: ["Classic", "Premium", "Platinum"] },
-      { subcategory: "5+ BHK Cleaning", services: ["Classic", "Premium", "Platinum"] }
+      { subcategory: "1 BHK Cleaning", services: ["Classic", "Premium", "Ultimate"] },
+      { subcategory: "2 BHK Cleaning", services: ["Classic", "Premium", "Ultimate"] },
+      { subcategory: "3 BHK Cleaning", services: ["Classic", "Premium", "Ultimate"] },
+      { subcategory: "4 BHK Cleaning", services: ["Classic", "Premium", "Ultimate"] },
+      { subcategory: "5+ BHK Cleaning", services: ["Classic", "Premium", "Ultimate"] }
     ]
   },
   {
