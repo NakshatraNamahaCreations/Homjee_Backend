@@ -39,9 +39,7 @@ const CATALOG = [
       { subcategory: "1200-2000 sqft Bungalow Cleaning", services: ["Classic", "Premium", "Ultimate"] },
       { subcategory: "2000-3000 sqft Bungalow Cleaning", services: ["Classic", "Premium", "Ultimate"] },
       { subcategory: "3000-4000 sqft Bungalow Cleaning", services: ["Classic", "Premium", "Ultimate"] },
-      { subcategory: "4000-5000 sqft Bungalow Cleaning", services: ["Classic", "Premium", "Ultimate"] },
-      { subcategory: "5000-6000 sqft Bungalow Cleaning", services: ["Classic", "Premium", "Ultimate"] },
-      { subcategory: "6000-7000 sqft Bungalow Cleaning", services: ["Classic", "Premium", "Ultimate"] }
+      { subcategory: "4000-5000 sqft Bungalow Cleaning", services: ["Classic", "Premium", "Ultimate"] }
     ]
   },
   {
@@ -51,9 +49,7 @@ const CATALOG = [
       { subcategory: "1200-2000 sqft Bungalow Cleaning", services: ["Classic", "Premium"] },
       { subcategory: "2000-3000 sqft Bungalow Cleaning", services: ["Classic", "Premium"] },
       { subcategory: "3000-4000 sqft Bungalow Cleaning", services: ["Classic", "Premium"] },
-      { subcategory: "4000-5000 sqft Bungalow Cleaning", services: ["Classic", "Premium"] },
-      { subcategory: "5000-6000 sqft Bungalow Cleaning", services: ["Classic", "Premium"] },
-      { subcategory: "6000-7000 sqft Bungalow Cleaning", services: ["Classic", "Premium"] }
+      { subcategory: "4000-5000 sqft Bungalow Cleaning", services: ["Classic", "Premium"] }
     ]
   },
   {
