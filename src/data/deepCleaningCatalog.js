@@ -27,7 +27,7 @@ const CATALOG = [
     subcategories: [
       { subcategory: "Bedroom Cleaning", services: ["Unfurnished", "Furnished"] },
       { subcategory: "Living Room Cleaning", services: ["Unfurnished", "Furnished"] },
-      { subcategory: "Kitchen Cleaning", services: ["Occupied Kitchen", "Occupied Kitchen With Appliances", "Empty Kitchen", "Empty Kitchen With Appliances"] },
+      { subcategory: "Kitchen Cleaning", services: ["Occupied Kitchen", "Empty Kitchen"] },
       { subcategory: "Bathroom Cleaning", services: [] },
       { subcategory: "Balcony Cleaning", services: ["Small (Upto 3 ft width)", "Big (larger than 3 ft)"] }
     ]
