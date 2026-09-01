@@ -28,20 +28,34 @@ const getDayLabel = (days) => {
 
 const modeLabel = (mode) => {
   const m = String(mode || "").toUpperCase();
-  if (m === "REPAINT") return "Repaint With Primer";
+  // Client-approved process names (see quote corrections):
+  //   WHITEWASH  -> "Repaint Only"
+  //   REPAINT    -> "Repaint with Primer"
+  //   FRESH      -> "Fresh Paint"
+  if (m === "REPAINT") return "Repaint with Primer";
   if (m === "FRESH") return "Fresh Paint";
-  if (m === "WHITEWASH") return "Whitewash";
+  if (m === "WHITEWASH") return "Repaint Only";
   return m || "";
+};
+
+// A special "Repaint Only" paint (e.g. "Tractor Uno Repaint Only", "Tractor
+// Emulsion Repaint Only") carries its process in the name and has a single
+// process only. It must never be split/labelled with "Repaint with Primer" or
+// "Fresh Paint" — it collapses into one row with no extra process suffix.
+const isRepaintOnlyPaintName = (paintName) => {
+  const nm = String(paintName || "").trim().toLowerCase();
+  return nm.includes("repaint only");
 };
 
 // A paint whose price does NOT depend on the Fresh-vs-Repaint process must be
 // shown as ONE combined row in the quote, not split per process. Detected by
-// name (already carries "Fresh Paint" and isn't a "Repaint Only" variant) —
-// mirrors isModeAgnosticPaint in the app so the quote/PDF matches the summary.
+// name (already carries "Fresh Paint") or by being a "Repaint Only" special
+// paint — mirrors isModeAgnosticPaint in the app so the quote/PDF matches.
 const isModeAgnosticPaintName = (paintName) => {
   const nm = String(paintName || "").trim().toLowerCase();
   if (!nm) return false;
-  return nm.includes("fresh paint") && !nm.includes("repaint only");
+  if (isRepaintOnlyPaintName(nm)) return true;
+  return nm.includes("fresh paint");
 };
 
 const labelType = (t, roomName) => {
@@ -280,7 +294,9 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
   const roomWise = buildRoomWise(quote, measurement);
   const serviceWise = buildServiceWise(quote);
   const customerName = safeText(customer?.name, "Customer");
-  const vendorPhone = safeText(vendor?.phone, "—");
+  // Customer-facing quotes always show the Homjee support line, not the
+  // individual vendor's personal number (client-approved: +91 9595951304).
+  const vendorPhone = "9595951304";
   const hasDiscount = Number(t?.discountAmount || 0) > 0;
 
   return `<!doctype html>
@@ -470,13 +486,13 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
       <div class="tableHeader"><div class="tableHeaderText">Paint Process</div></div>
       <div class="processBox">
         <div class="processCol">
-          <div class="processTitlePill"><div class="processTitle">Whitewash Process</div></div>
+          <div class="processTitlePill"><div class="processTitle">Repaint Only Process</div></div>
           ${["Packaging & masking", "Sanding", "2 coats of putty", "Basic cleanup"]
             .map((x) => `<div class="bulletRow"><span class="bulletDot">+</span><span class="processItem">${escapeHtml(x)}</span></div>`)
             .join("")}
         </div>
         <div class="processCol">
-          <div class="processTitlePill"><div class="processTitle">Repaint Process</div></div>
+          <div class="processTitlePill"><div class="processTitle">Repaint with Primer Process</div></div>
           ${["Packaging & masking", "Sanding", "Minor damage repair", "1 coat primer", "2 coats of paint", "Basic cleanup"]
             .map((x) => `<div class="bulletRow"><span class="bulletDot">+</span><span class="processItem">${escapeHtml(x)}</span></div>`)
             .join("")}
