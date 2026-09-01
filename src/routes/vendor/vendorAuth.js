@@ -201,6 +201,7 @@ router.post("/get-available-vendor", vendorAuthController.getAvailableVendors)
 // 🔒 Archive / Unarchive (admin-only actions)
 router.put("/archive-vendor/:vendorId", vendorAuthController.archiveVendor);
 router.put("/unarchive-vendor/:vendorId", vendorAuthController.unarchiveVendor);
+router.put("/shadow-ban-vendor/:vendorId", vendorAuthController.toggleShadowBan);
 
 // Lightweight poll endpoint for the Vendor App
 router.get(

@@ -70,6 +70,8 @@ async function fanOutLeadToEligibleVendors(booking) {
     const vendorQuery = {
       "vendor.serviceType":
         serviceType === "deep_cleaning" ? /clean/i : /paint/i,
+      // Shadow-banned vendors keep app access but get no new leads.
+      shadowBanned: { $ne: true },
     };
     if (city) {
       const cityRegex = buildCityMatchRegex(city);

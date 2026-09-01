@@ -78,6 +78,10 @@ const vendorAuthSchema = new mongoose.Schema({
   archivedAt: { type: Date },
   archivedBy: { type: mongoose.Schema.Types.ObjectId, ref: "admin" },
   archiveReason: { type: String },
+  // Shadow ban: the vendor keeps using the app normally, but no new leads
+  // are ever sent to them (treated as capacity 0 in the fan-out).
+  shadowBanned: { type: Boolean, default: false },
+  shadowBannedAt: { type: Date },
   wallet: {
     coins: {
       type: Number,

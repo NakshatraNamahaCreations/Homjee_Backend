@@ -932,7 +932,9 @@ exports.createEnquiryLead = async (req, res) => {
       bookingDetails: {
         booking_id: generateBookingId(),
         bookingDate: new Date(),
-        bookingTime: moment().format("LT"),
+        // Save the time in IST (server runs in UTC on Render, so a plain
+        // moment().format gave a time ~5.5h off).
+        bookingTime: moment().utcOffset(330).format("LT"),
         status: "Pending",
         paymentStatus: "Unpaid",
         originalTotalAmount: 0,
@@ -2139,6 +2141,7 @@ exports.adminCreateBooking = async (req, res) => {
         hour: "2-digit",
         minute: "2-digit",
         hour12: true,
+        timeZone: "Asia/Kolkata",
       }),
       status: "Pending",
       bookingAmount,
@@ -4650,6 +4653,27 @@ exports.startJob = async (req, res) => {
     );
 
     console.log("isHousePainter", isHousePainter);
+
+    // === One-at-a-time rule ===
+    // House Painting: a vendor may have only ONE survey ongoing at a time
+    // (projects can still run in parallel per team availability). Deep
+    // Cleaning: only ONE job ongoing at a time.
+    const oneAtATimeVendorId = String(assignedProfessional?.professionalId || "");
+    if (oneAtATimeVendorId) {
+      const activeStatus = isHousePainter ? "Survey Ongoing" : "Job Ongoing";
+      const existingActive = await UserBooking.findOne({
+        _id: { $ne: bookingId },
+        "assignedProfessional.professionalId": oneAtATimeVendorId,
+        "bookingDetails.status": activeStatus,
+      }).lean();
+      if (existingActive) {
+        return res.status(409).json({
+          message: isHousePainter
+            ? "You already have a survey in progress. Please finish it before starting another."
+            : "You already have a job in progress. Please finish it before starting another.",
+        });
+      }
+    }
 
     // === Prepare hiring data (for Deep Cleaning only) ===
     const hiringUpdate = {};

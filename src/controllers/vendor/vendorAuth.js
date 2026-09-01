@@ -2690,6 +2690,41 @@ exports.getOverallCoinPurchasedTotal = async (req, res) => {
 // 🔒 Archive / Unarchive vendor (admin-only actions)
 // =============================================================
 
+// Shadow ban toggle: vendor keeps normal app access but receives no new
+// leads (fan-out treats them as capacity 0).
+exports.toggleShadowBan = async (req, res) => {
+  try {
+    const { vendorId } = req.params;
+    const { shadowBanned } = req.body || {};
+    if (!mongoose.Types.ObjectId.isValid(vendorId)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid vendor id" });
+    }
+    const vendor = await vendorAuthSchema.findById(vendorId);
+    if (!vendor) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Vendor not found" });
+    }
+    const next =
+      typeof shadowBanned === "boolean" ? shadowBanned : !vendor.shadowBanned;
+    vendor.shadowBanned = next;
+    vendor.shadowBannedAt = next ? new Date() : null;
+    await vendor.save();
+    return res.status(200).json({
+      success: true,
+      message: next
+        ? "Vendor shadow-banned — no new leads will be sent."
+        : "Shadow ban removed.",
+      vendor,
+    });
+  } catch (error) {
+    console.error("toggleShadowBan error:", error);
+    return res.status(500).json({ success: false, message: "Server error" });
+  }
+};
+
 exports.archiveVendor = async (req, res) => {
   try {
     const { vendorId } = req.params;
