@@ -5413,8 +5413,12 @@ exports.rescheduleBooking = async (req, res) => {
       const c = booking?.customer || {};
       if (c.phone && booking?.serviceType === "house_painting") {
         const slot = `${slotDate} ${slotTime}`.trim();
-        const addr = booking?.address?.streetArea ||
-          booking?.address?.houseFlatNumber || "your address";
+        // Include the house/flat number in front of the street area (#10).
+        const addr =
+          [booking?.address?.houseFlatNumber, booking?.address?.streetArea]
+            .map((x) => String(x || "").trim())
+            .filter(Boolean)
+            .join(", ") || "your address";
         await sendWhatsAppTemplate(c.phone, "hp_customer_reschedule", {
           bodyParams: [c.name || "there", slot, addr],
         });
@@ -5966,6 +5970,7 @@ exports.requestStartProjectOtp = async (req, res) => {
     const allowedStatuses = [
       "Confirmed", // house-painting survey start happens at Confirmed
       "Hired",
+      "Rescheduled", // a rescheduled lead can still start its survey/job (#8)
       "Customer Cancelled",
       "Customer Unreachable",
     ];
@@ -6054,6 +6059,7 @@ exports.verifyStartProjectOtp = async (req, res) => {
     const allowedStatuses = [
       "Confirmed", // house-painting survey start happens at Confirmed
       "Hired",
+      "Rescheduled", // a rescheduled lead can still start its survey/job (#8)
       "Customer Cancelled",
       "Customer Unreachable",
     ];

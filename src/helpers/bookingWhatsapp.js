@@ -21,10 +21,13 @@ async function sendBookingConfirmation(booking) {
     const st = booking?.serviceType;
     const date = booking?.selectedSlot?.slotDate || "";
     const time = booking?.selectedSlot?.slotTime || "";
+    // Include the house/flat number in front of the street area so the
+    // customer's confirmation carries the full address (#10).
     const addr =
-      booking?.address?.streetArea ||
-      booking?.address?.houseFlatNumber ||
-      "your address";
+      [booking?.address?.houseFlatNumber, booking?.address?.streetArea]
+        .map((x) => String(x || "").trim())
+        .filter(Boolean)
+        .join(", ") || "your address";
 
     if (st === "house_painting") {
       // HP #4 — {{1}} name, {{2}} time slot, {{3}} address.
