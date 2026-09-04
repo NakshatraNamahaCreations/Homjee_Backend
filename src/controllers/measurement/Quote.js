@@ -597,7 +597,11 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
               ? String(b?.mode || "") === String(surfaceRef.mode)
               : true;
             if (ordinal === surfaceRef.index && modeMatches) {
-              bd[i].sqft = 0;
+              // Keep the wall's sqft — it still has an area; only the paint
+              // charge is removed for a "without paint" service. Zeroing sqft
+              // made the surface look unticked when the room was reopened,
+              // which then dropped the surface (and its service) (#7).
+              bd[i].unitPrice = 0;
               bd[i].price = 0;
               targeted = true;
               break;
@@ -611,7 +615,7 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
               if (b?.type !== t) continue;
               counters[t] += 1;
               if (counters[t] === surfaceRef.index) {
-                bd[i].sqft = 0;
+                bd[i].unitPrice = 0; // keep sqft; only remove the paint charge (#7)
                 bd[i].price = 0;
                 break;
               }
@@ -634,7 +638,7 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
             if (b?.type !== t) continue;
             counters[t] = (counters[t] || 0) + 1;
             if (counters[t] === ordinalWanted) {
-              bd[i].sqft = 0;
+              bd[i].unitPrice = 0; // keep sqft; only remove the paint charge (#7)
               bd[i].price = 0;
               break;
             }
