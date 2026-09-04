@@ -4668,9 +4668,10 @@ exports.startJob = async (req, res) => {
       }).lean();
       if (existingActive) {
         return res.status(409).json({
+          code: "ACTIVE_JOB_IN_PROGRESS",
           message: isHousePainter
-            ? "You already have a survey in progress. Please finish it before starting another."
-            : "You already have a job in progress. Please finish it before starting another.",
+            ? "An active survey is currently in progress. Please complete or close the ongoing survey before initiating a new one."
+            : "An active job is currently in progress. Please complete or close the ongoing job before initiating a new one.",
         });
       }
     }
@@ -5980,6 +5981,39 @@ exports.requestStartProjectOtp = async (req, res) => {
         message:
           "Only 'Hired', 'Customer Cancelled', or 'Customer Unreachable' bookings can request to start project [requestStartProjectOtp]",
       });
+    }
+
+    // One-at-a-time guard (#11): block the start BEFORE sending the Booking ID
+    // to the customer if this vendor already has an active survey/job. The app
+    // shows a popup from this 409 instead of opening the Booking ID step, so
+    // no Booking ID WhatsApp is sent for a blocked attempt.
+    const isHP =
+      (booking.service || []).some(
+        (s) =>
+          s.category?.toLowerCase().includes("paint") ||
+          s.serviceName?.toLowerCase().includes("paint"),
+      ) || booking.serviceType === "house_painting";
+    const startVendorId = String(
+      req.body?.vendorId ||
+        booking?.assignedProfessional?.professionalId ||
+        "",
+    );
+    if (startVendorId) {
+      const activeStatus = isHP ? "Survey Ongoing" : "Job Ongoing";
+      const existingActive = await UserBooking.findOne({
+        _id: { $ne: bookingId },
+        "assignedProfessional.professionalId": startVendorId,
+        "bookingDetails.status": activeStatus,
+      }).lean();
+      if (existingActive) {
+        return res.status(409).json({
+          success: false,
+          code: "ACTIVE_JOB_IN_PROGRESS",
+          message: isHP
+            ? "An active survey is currently in progress. Please complete or close the ongoing survey before initiating a new one."
+            : "An active job is currently in progress. Please complete or close the ongoing job before initiating a new one.",
+        });
+      }
     }
 
     // if (bookingStatus !== "Hired" ) {
