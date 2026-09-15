@@ -2253,6 +2253,29 @@ exports.adminCreateBooking = async (req, res) => {
     // Save booking
     await booking.save();
 
+    // #4 — A real lead created for the same phone + service converts any
+    // existing OPEN enquiry for that phone/service. Dismiss those enquiries so
+    // they drop out of the New Enquiries list (they're now this lead).
+    if (!isEnquiry) {
+      try {
+        await UserBooking.updateMany(
+          {
+            _id: { $ne: booking._id },
+            "customer.phone": booking?.customer?.phone,
+            serviceType,
+            isEnquiry: true,
+            isDismmised: { $ne: true },
+          },
+          { $set: { isDismmised: true } },
+        );
+      } catch (e) {
+        console.error(
+          "[adminCreateBooking] enquiry->lead cleanup failed:",
+          e?.message,
+        );
+      }
+    }
+
     // --------------------------------------------
     // 🔥 CREATE REAL PAYMENT LINK AFTER SAVE
     // --------------------------------------------
@@ -5668,6 +5691,24 @@ exports.bookingCancelledbyAdmin = async (req, res) => {
       created_at: new Date(),
       notifyTo: "customer",
     });
+
+    // #5 — also surface the cancellation in the admin feed so admin can review
+    // it and decide/adjust the refund from the lead description page.
+    try {
+      await notificationSchema.create({
+        bookingId: booking._id,
+        notificationType: "LEAD_CANCELLED",
+        thumbnailTitle: "Lead Cancelled",
+        message: `Lead cancelled${
+          booking?.customer?.name ? ` for ${booking.customer.name}` : ""
+        }.${refundAmount > 0 ? ` Refund of Rs.${refundAmount} initiated.` : " Decide the refund amount if applicable."}`,
+        status: "unread",
+        created_at: new Date(),
+        notifyTo: "admin",
+      });
+    } catch (e) {
+      console.error("[bookingCancelledbyAdmin] admin notify failed:", e?.message);
+    }
 
     return res.status(200).json({
       success: true,
