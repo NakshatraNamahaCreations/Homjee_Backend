@@ -93,6 +93,17 @@ export const startLeadReminderCron = () => {
                             ? String(rem.bookingId)
                             : "";
 
+                        // Look up whether the target is still an enquiry so the
+                        // admin notification click routes to the right detail
+                        // page (enquiry-details vs lead-details) (#9/#11).
+                        let isEnquiry = true;
+                        if (bookingId) {
+                            const bk = await UserBooking.findById(bookingId)
+                                .select("isEnquiry")
+                                .lean();
+                            if (bk) isEnquiry = bk.isEnquiry !== false;
+                        }
+
                         const adminNotification = {
                             bookingId,
                             notificationType: "REMINDER",
@@ -104,6 +115,7 @@ export const startLeadReminderCron = () => {
                             notifyTo: "admin",
                             metaData: {
                                 bookingId,
+                                isEnquiry,
                                 reminderId: String(rem._id),
                                 adminId: rem.adminId
                                     ? String(rem.adminId)

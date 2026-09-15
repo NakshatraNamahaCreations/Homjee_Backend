@@ -2317,6 +2317,28 @@ exports.adminCreateBooking = async (req, res) => {
       console.error("[adminCreateBooking] post-create tasks failed:", e?.message);
     }
 
+    // #11 — admin-created bookings emitted no admin notification. Emit the
+    // correct type so it shows in the bell and routes to the right page:
+    // NEW_LEAD_CREATED (-> /lead-details) for a lead, NEW_ENQUIRY_CREATED
+    // (-> /enquiry-details) for an enquiry.
+    try {
+      await notificationSchema.create({
+        bookingId: booking._id,
+        notificationType: isEnquiry ? "NEW_ENQUIRY_CREATED" : "NEW_LEAD_CREATED",
+        thumbnailTitle: isEnquiry ? "New Enquiry" : "New Lead",
+        message: `New ${String(serviceType || "").replace(/_/g, " ")} ${
+          isEnquiry ? "enquiry" : "lead"
+        } created by admin${
+          booking?.customer?.name ? ` for ${booking.customer.name}` : ""
+        }`,
+        status: "unread",
+        created_at: new Date(),
+        notifyTo: "admin",
+      });
+    } catch (e) {
+      console.error("[adminCreateBooking] admin notify failed:", e?.message);
+    }
+
     // Bust the slot cache for this booking's date so the next slot query
     // for any nearby customer reflects this new commitment (Issue #2).
     const newSlotDate = booking?.selectedSlot?.slotDate;
@@ -8757,6 +8779,30 @@ exports.updateEnquiry = async (req, res) => {
     }
 
     const updatedBooking = await UserBooking.findById(booking._id).lean();
+
+    // #11 — once an enquiry becomes a real lead, convert its earlier
+    // "New Enquiry" admin notification into a "New Lead" one. Otherwise the
+    // admin's only notification for the now-lead was NEW_ENQUIRY_CREATED, which
+    // opened /enquiry-details (the wrong page). Paid paths flip isEnquiry later
+    // in payment.service, which does the same conversion.
+    if (updatedBooking?.isEnquiry === false) {
+      try {
+        await notificationSchema.updateMany(
+          { bookingId: booking._id, notificationType: "NEW_ENQUIRY_CREATED" },
+          {
+            $set: {
+              notificationType: "NEW_LEAD_CREATED",
+              thumbnailTitle: "New Lead",
+            },
+          },
+        );
+      } catch (e) {
+        console.error(
+          "[updateEnquiry] enquiry->lead notif convert failed:",
+          e?.message,
+        );
+      }
+    }
 
     // #4 booking confirmation. This is the MAIN website path: the enquiry
     // (created at OTP-verify) is finalized here. When there's no online

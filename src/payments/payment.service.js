@@ -7,6 +7,7 @@ const {
 } = require("../helpers/validateBookingSlotStillAvailable");
 const { fanOutLeadToEligibleVendors } = require("../services/leadFanout.service");
 const { sendBookingConfirmation } = require("../helpers/bookingWhatsapp");
+const notificationSchema = require("../models/notification/Notification");
 const { invalidateForDate } = require("../services/slotCache.service");
 const { releaseCustomerHoldsForSlot } = require("../services/slotHold.service");
 
@@ -263,6 +264,29 @@ exports.verifyAndRecordBookingPayment = async ({
             const freshBooking = await userBookings.findById(bookingId).lean();
             if (freshBooking && freshBooking.isEnquiry === false) {
                 await fanOutLeadToEligibleVendors(freshBooking);
+
+                // #11 — the enquiry just became a paid lead: convert its
+                // "New Enquiry" admin notification into a "New Lead" one so a
+                // click opens /lead-details, not /enquiry-details.
+                try {
+                    await notificationSchema.updateMany(
+                        {
+                            bookingId: freshBooking._id,
+                            notificationType: "NEW_ENQUIRY_CREATED",
+                        },
+                        {
+                            $set: {
+                                notificationType: "NEW_LEAD_CREATED",
+                                thumbnailTitle: "New Lead",
+                            },
+                        },
+                    );
+                } catch (nErr) {
+                    console.error(
+                        "[payment.verify] enquiry->lead notif convert failed:",
+                        nErr?.message,
+                    );
+                }
 
                 // #4 booking confirmation — the paid path (Deep Cleaning /
                 // paid House Painting site visit) stays isEnquiry:true through

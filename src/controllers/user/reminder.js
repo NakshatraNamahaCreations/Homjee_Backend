@@ -115,7 +115,8 @@ exports.getPendingReminders = async (req, res) => {
       .sort({ reminderDate: 1 })
       .populate({
         path: "bookingId",
-        select: "customer selectedSlot serviceType address.streetArea",
+        select:
+          "customer selectedSlot serviceType address.streetArea isEnquiry",
       });
 
     res.json({
@@ -136,8 +137,12 @@ exports.getPendingReminders = async (req, res) => {
 // when the admin dismisses it (status: "cancelled").
 exports.getPendingReminderMap = async (req, res) => {
   try {
+    // Only reminders still pending should flag the enquiry/lead. Once the cron
+    // fires a reminder it flips to "sent"; including "sent" here kept the
+    // reminder badge on the row forever, so a fired reminder never reverted to
+    // a normal enquiry/lead. Drop "sent" so it disappears after firing (#9).
     const reminders = await Reminder.find({
-      status: { $in: ["pending", "sent"] },
+      status: "pending",
       reminderAt: { $ne: null },
     })
       .select("bookingId reminderAt reminderDate reminderTime note status")
