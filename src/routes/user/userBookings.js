@@ -115,6 +115,10 @@ router.post("/cancel-booking/customer/website", bookingController.cancelLeadFrom
 router.post("/approve-cancel-booking/refund/admin", bookingController.approveCancelRequestAndRefund);
 router.post("/cancel-booking-by-admin", bookingController.bookingCancelledbyAdmin);
 router.post("/mark-pending-hiring", bookingController.markPendingHiring);
+router.post(
+  "/cancel-pending-hiring/admin",
+  bookingController.adminCancelPendingHiring,
+);
 router.post("/make-payment", bookingController.makePayment);
 router.post("/update-manual-payment/cash/admin", bookingController.updateManualPayment);
 

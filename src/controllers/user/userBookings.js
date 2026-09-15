@@ -270,6 +270,16 @@ function buildAutoCancelAtUTC_1030IST(yyyyMmDd) {
   return new Date(Date.UTC(Y, M - 1, D, 5, 0, 0)); // 10:30 IST == 05:00 UTC
 }
 
+// #16 — pending hiring should expire at 12:00 PM IST the DAY BEFORE the
+// booking date (previously it waited until 10:30 AM IST on the booking day).
+// 12:00 IST == 06:30 UTC, then step back one day.
+function buildHiringExpiryAtUTC(yyyyMmDd) {
+  const [Y, M, D] = yyyyMmDd.split("-").map(Number);
+  const dt = new Date(Date.UTC(Y, M - 1, D, 6, 30, 0));
+  dt.setUTCDate(dt.getUTCDate() - 1);
+  return dt;
+}
+
 function computeFinalTotal(details) {
   // If already locked, use it
   if (Number.isFinite(details.finalTotal)) return Number(details.finalTotal);
@@ -5429,15 +5439,22 @@ exports.rescheduleBooking = async (req, res) => {
     }
 
     // ✅ Update booking safely
+    const setPatch = {
+      "bookingDetails.status": "Rescheduled",
+      "selectedSlot.slotDate": slotDate,
+      "selectedSlot.slotTime": slotTime,
+    };
+    // #15 — preserve the ORIGINAL slot the first time a vendor reschedules, so
+    // the admin panel shows the original booking time (the admin-reschedule
+    // path already stamps originalSlot; the vendor path did not).
+    if (!booking?.originalSlot?.slotDate && !booking?.originalSlot?.slotTime) {
+      setPatch["originalSlot.slotDate"] = booking?.selectedSlot?.slotDate || "";
+      setPatch["originalSlot.slotTime"] = booking?.selectedSlot?.slotTime || "";
+    }
+
     const updatedBooking = await UserBooking.findByIdAndUpdate(
       bookingId,
-      {
-        $set: {
-          "bookingDetails.status": "Rescheduled",
-          "selectedSlot.slotDate": slotDate,
-          "selectedSlot.slotTime": slotTime,
-        },
-      },
+      { $set: setPatch },
       { new: true },
     );
 
@@ -5662,6 +5679,64 @@ exports.cancelLeadFromWebsite = async (req, res) => {
     session.endSession();
   }
 };
+// #16 — Admin manually cancels a "Pending Hiring": revert the booking to its
+// pre-hiring (Survey Completed) state from the stored backup and deactivate the
+// payment link, so a customer who opens the pay page sees the old site-visit
+// details with no pay-now option. Same revert the auto-cancel worker does, but
+// without the time gate (admin can cancel any time while pending hiring).
+exports.adminCancelPendingHiring = async (req, res) => {
+  try {
+    const { bookingId } = req.body;
+    if (!bookingId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "bookingId is required" });
+    }
+
+    const now = new Date();
+    const updateRes = await UserBooking.updateOne(
+      {
+        _id: bookingId,
+        "bookingDetails.status": "Pending Hiring",
+        "bookingDetails.isJobStarted": false,
+        "assignedProfessional.hiring.backup.bookingDetails": { $exists: true },
+        "assignedProfessional.hiring.backup.selectedSlot": { $exists: true },
+      },
+      [
+        {
+          $set: {
+            bookingDetails: "$assignedProfessional.hiring.backup.bookingDetails",
+            selectedSlot: "$assignedProfessional.hiring.backup.selectedSlot",
+            "assignedProfessional.hiring.status": "cancelled",
+            "assignedProfessional.hiring.cancelReason": "admin-cancelled",
+            "assignedProfessional.hiring.cancelledAt": now,
+          },
+        },
+        { $set: { "bookingDetails.paymentLink.isActive": false } },
+        { $unset: "assignedProfessional.hiring.backup" },
+      ],
+    );
+
+    if (updateRes.modifiedCount !== 1) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Could not cancel hiring — booking is not in 'Pending Hiring' or has no restore point.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Pending hiring cancelled; lead reverted to Survey Completed.",
+    });
+  } catch (e) {
+    console.error("adminCancelPendingHiring error", e);
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: e.message });
+  }
+};
+
 exports.bookingCancelledbyAdmin = async (req, res) => {
   try {
     const { bookingId, refundAmount = 0 } = req.body;
@@ -5766,7 +5841,9 @@ exports.approveCancelRequestAndRefund = async (req, res) => {
       });
     }
 
-    const cancelledStatuses = ["Cancelled", "Customer Cancelled"];
+    // Include "Admin Cancelled" so admin can initiate a refund later via the
+    // "Refund" button on an admin-cancelled lead (#14).
+    const cancelledStatuses = ["Cancelled", "Customer Cancelled", "Admin Cancelled"];
 
     // Booking must already be cancelled
     if (!cancelledStatuses.includes(booking.bookingDetails?.status)) {
@@ -5936,9 +6013,11 @@ exports.markPendingHiring = async (req, res) => {
     booking.selectedSlot.slotDate = firstDay;
     booking.selectedSlot.slotTime = "10:30 AM";
 
-    // Store projectStartDate as a Date (UTC instant representing 10:30 IST)
-    const autoCancelAt = buildAutoCancelAtUTC_1030IST(firstDay);
-    d.projectStartDate = autoCancelAt; // same instant
+    // Store projectStartDate as a Date (UTC instant representing 10:30 IST on
+    // the booking day) — this is the actual project start.
+    d.projectStartDate = buildAutoCancelAtUTC_1030IST(firstDay);
+    // Pending-hiring auto-cancel fires at 12:00 PM IST the day BEFORE (#16).
+    const autoCancelAt = buildHiringExpiryAtUTC(firstDay);
 
     // Booking status
     d.status = "Pending Hiring";
