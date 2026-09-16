@@ -215,19 +215,30 @@ const buildServiceWise = (quote) => {
     for (const a of additional) {
       const title = a?.serviceType || "Additional Service";
       const name = a?.customName?.trim() ? a.customName : a?.materialName;
-      const key = `${title}__${name}__${a?.surfaceType || ""}`;
+      const surfaceType = a?.surfaceType || "";
+      const key = `${title}__${name}__${surfaceType}`;
       const prev = addMap.get(key);
       const area = Number(a?.areaSqft ?? 0);
       const total = Number(a?.total ?? 0);
+      // When the same service spans multiple rooms it merges into one row —
+      // sum BOTH the cost and the area, and rebuild the label from the running
+      // area total (it used to show only the first room's area) (#quote-area).
+      const mkSub = (areaSum) =>
+        `${name || ""}${surfaceType ? ` • ${surfaceType}` : ""} (${Math.round(
+          areaSum,
+        )} sqft)`;
       if (!prev) {
         addMap.set(key, {
           kind: "additional",
           title,
-          sub: `${name || ""}${a?.surfaceType ? ` • ${a.surfaceType}` : ""} (${Math.round(area)} sqft)`,
+          area,
+          sub: mkSub(area),
           amount: total,
         });
       } else {
+        prev.area += area;
         prev.amount += total;
+        prev.sub = mkSub(prev.area);
         addMap.set(key, prev);
       }
     }
