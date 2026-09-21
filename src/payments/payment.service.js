@@ -265,25 +265,18 @@ exports.verifyAndRecordBookingPayment = async ({
             if (freshBooking && freshBooking.isEnquiry === false) {
                 await fanOutLeadToEligibleVendors(freshBooking);
 
-                // #11 — the enquiry just became a paid lead: convert its
-                // "New Enquiry" admin notification into a "New Lead" one so a
-                // click opens /lead-details, not /enquiry-details.
+                // #11 — the enquiry just became a paid lead: REMOVE its "New
+                // Enquiry" admin notification (leads don't notify admin, and a
+                // stale enquiry notification would wrongly route to
+                // /enquiry-details).
                 try {
-                    await notificationSchema.updateMany(
-                        {
-                            bookingId: freshBooking._id,
-                            notificationType: "NEW_ENQUIRY_CREATED",
-                        },
-                        {
-                            $set: {
-                                notificationType: "NEW_LEAD_CREATED",
-                                thumbnailTitle: "New Lead",
-                            },
-                        },
-                    );
+                    await notificationSchema.deleteMany({
+                        bookingId: freshBooking._id,
+                        notificationType: "NEW_ENQUIRY_CREATED",
+                    });
                 } catch (nErr) {
                     console.error(
-                        "[payment.verify] enquiry->lead notif convert failed:",
+                        "[payment.verify] enquiry->lead notif cleanup failed:",
                         nErr?.message,
                     );
                 }

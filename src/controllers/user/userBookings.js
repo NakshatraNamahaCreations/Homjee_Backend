@@ -1338,25 +1338,9 @@ exports.createBooking = async (req, res) => {
       );
     }
 
-    // ------------------------------
-    // Notification
-    // ------------------------------
-    try {
-      const newBookingNotification = {
-        bookingId: booking._id,
-        notificationType: "NEW_LEAD_CREATED",
-        thumbnailTitle: "New Booking Scheduled",
-        notifyTo: "admin",
-        message: `New ${service[0]?.category} booking scheduled for ${moment(
-          selectedSlot?.slotDate,
-        ).format("DD-MM-YYYY")} at ${selectedSlot?.slotTime}`,
-        status: "unread",
-        created_at: new Date(),
-      };
-      await notificationSchema.create(newBookingNotification);
-    } catch (e) {
-      // don't fail booking if notification fails
-    }
+    // #11 — admin is NOT notified when a lead is created; only enquiries
+    // generate an admin notification (see createEnquiryLead). No
+    // NEW_LEAD_CREATED notification is emitted here.
 
     // ------------------------------
     // Respond
@@ -1670,19 +1654,7 @@ exports.createBooking1 = async (req, res) => {
       { new: true },
     );
 
-    const newBookingNotification = {
-      bookingId: booking._id,
-      notificationType: "NEW_LEAD_CREATED",
-      thumbnailTitle: "New Booking Scheduled",
-      notifyTo: "admin",
-      message: `New ${service[0]?.category} booking scheduled for ${moment(
-        selectedSlot?.slotDate,
-      ).format("DD-MM-YYYY")} at ${selectedSlot?.slotTime}`,
-      // metadata: { user_id, order_status },
-      status: "unread",
-      created_at: new Date(),
-    };
-    await notificationSchema.create(newBookingNotification);
+    // #11 — no admin notification on lead creation (only enquiries notify).
 
     res.status(201).json({
       message: "Booking created successfully",
@@ -2268,7 +2240,7 @@ exports.adminCreateBooking = async (req, res) => {
     // they drop out of the New Enquiries list (they're now this lead).
     if (!isEnquiry) {
       try {
-        await UserBooking.updateMany(
+        const staleEnquiries = await UserBooking.find(
           {
             _id: { $ne: booking._id },
             "customer.phone": booking?.customer?.phone,
@@ -2276,8 +2248,21 @@ exports.adminCreateBooking = async (req, res) => {
             isEnquiry: true,
             isDismmised: { $ne: true },
           },
-          { $set: { isDismmised: true } },
-        );
+          { _id: 1 },
+        ).lean();
+        if (staleEnquiries.length) {
+          const ids = staleEnquiries.map((e) => e._id);
+          await UserBooking.updateMany(
+            { _id: { $in: ids } },
+            { $set: { isDismmised: true } },
+          );
+          // #11 — also remove those enquiries' "New Enquiry" admin
+          // notifications so nothing lingers pointing to /enquiry-details.
+          await notificationSchema.deleteMany({
+            bookingId: { $in: ids.map((id) => String(id)) },
+            notificationType: "NEW_ENQUIRY_CREATED",
+          });
+        }
       } catch (e) {
         console.error(
           "[adminCreateBooking] enquiry->lead cleanup failed:",
@@ -2327,26 +2312,24 @@ exports.adminCreateBooking = async (req, res) => {
       console.error("[adminCreateBooking] post-create tasks failed:", e?.message);
     }
 
-    // #11 — admin-created bookings emitted no admin notification. Emit the
-    // correct type so it shows in the bell and routes to the right page:
-    // NEW_LEAD_CREATED (-> /lead-details) for a lead, NEW_ENQUIRY_CREATED
-    // (-> /enquiry-details) for an enquiry.
-    try {
-      await notificationSchema.create({
-        bookingId: booking._id,
-        notificationType: isEnquiry ? "NEW_ENQUIRY_CREATED" : "NEW_LEAD_CREATED",
-        thumbnailTitle: isEnquiry ? "New Enquiry" : "New Lead",
-        message: `New ${String(serviceType || "").replace(/_/g, " ")} ${
-          isEnquiry ? "enquiry" : "lead"
-        } created by admin${
-          booking?.customer?.name ? ` for ${booking.customer.name}` : ""
-        }`,
-        status: "unread",
-        created_at: new Date(),
-        notifyTo: "admin",
-      });
-    } catch (e) {
-      console.error("[adminCreateBooking] admin notify failed:", e?.message);
+    // #11 — notify admin ONLY for an enquiry, never for a lead. A lead created
+    // from the admin panel produces no admin notification.
+    if (isEnquiry) {
+      try {
+        await notificationSchema.create({
+          bookingId: booking._id,
+          notificationType: "NEW_ENQUIRY_CREATED",
+          thumbnailTitle: "New Enquiry",
+          message: `New ${String(serviceType || "").replace(/_/g, " ")} enquiry created by admin${
+            booking?.customer?.name ? ` for ${booking.customer.name}` : ""
+          }`,
+          status: "unread",
+          created_at: new Date(),
+          notifyTo: "admin",
+        });
+      } catch (e) {
+        console.error("[adminCreateBooking] admin notify failed:", e?.message);
+      }
     }
 
     // Bust the slot cache for this booking's date so the next slot query
@@ -5725,6 +5708,19 @@ exports.adminCancelPendingHiring = async (req, res) => {
       });
     }
 
+    // #16 — markPendingHiring had locked the finalized quote; unlock it now so
+    // the vendor's "Mark Hiring" button (disabled while any quote is locked)
+    // is re-enabled and they can mark hiring again.
+    try {
+      const reverted = await UserBooking.findById(bookingId).lean();
+      await unlockRelatedQuotesByHiring(reverted, "admin-cancel");
+    } catch (e) {
+      console.error(
+        "[adminCancelPendingHiring] quote unlock failed:",
+        e?.message,
+      );
+    }
+
     return res.status(200).json({
       success: true,
       message: "Pending hiring cancelled; lead reverted to Survey Completed.",
@@ -5734,6 +5730,82 @@ exports.adminCancelPendingHiring = async (req, res) => {
     return res
       .status(500)
       .json({ success: false, message: "Server error", error: e.message });
+  }
+};
+
+// #5 — Standalone refund: records a refund on a booking WITHOUT changing its
+// status (the lead is NOT cancelled). Refund accumulates and can never exceed
+// the amount the customer has paid minus what was already refunded.
+exports.recordAdminRefund = async (req, res) => {
+  try {
+    const { bookingId, refundAmount } = req.body;
+    if (!bookingId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "bookingId is required" });
+    }
+    const amt = Number(refundAmount);
+    if (!Number.isFinite(amt) || amt <= 0) {
+      return res
+        .status(400)
+        .json({ success: false, message: "A valid refundAmount is required" });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
+    }
+
+    const d = booking.bookingDetails || {};
+    const paid = Number(d.paidAmount || 0);
+    const already = Number(d.refundAmount || 0);
+    const refundable = Math.max(0, paid - already);
+
+    if (amt > refundable) {
+      return res.status(400).json({
+        success: false,
+        message: `Refund (₹${amt}) cannot exceed the refundable amount (₹${refundable}).`,
+      });
+    }
+
+    const newRefundTotal = already + amt;
+    d.refundAmount = newRefundTotal;
+    // Reflect the refund in payment status without touching booking status.
+    d.paymentStatus =
+      newRefundTotal >= paid ? "Refunded" : "Partial Payment";
+    booking.bookingDetails = d;
+    await booking.save();
+
+    // Surface it in the admin feed.
+    try {
+      await notificationSchema.create({
+        bookingId: booking._id,
+        notificationType: "LEAD_CANCELLED",
+        thumbnailTitle: "Refund Processed",
+        message: `Refund of Rs.${amt} processed${
+          booking?.customer?.name ? ` for ${booking.customer.name}` : ""
+        }. Total refunded: Rs.${newRefundTotal}.`,
+        status: "unread",
+        created_at: new Date(),
+        notifyTo: "admin",
+      });
+    } catch (e) {
+      console.error("[recordAdminRefund] admin notify failed:", e?.message);
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Refund recorded successfully",
+      refundAmount: newRefundTotal,
+      lastRefund: amt,
+    });
+  } catch (error) {
+    console.error("recordAdminRefund error", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
   }
 };
 
@@ -8866,18 +8938,16 @@ exports.updateEnquiry = async (req, res) => {
     // in payment.service, which does the same conversion.
     if (updatedBooking?.isEnquiry === false) {
       try {
-        await notificationSchema.updateMany(
-          { bookingId: booking._id, notificationType: "NEW_ENQUIRY_CREATED" },
-          {
-            $set: {
-              notificationType: "NEW_LEAD_CREATED",
-              thumbnailTitle: "New Lead",
-            },
-          },
-        );
+        // #11 — the enquiry became a lead: REMOVE its "New Enquiry" admin
+        // notification (leads don't notify admin, and a stale enquiry
+        // notification would wrongly route to /enquiry-details).
+        await notificationSchema.deleteMany({
+          bookingId: booking._id,
+          notificationType: "NEW_ENQUIRY_CREATED",
+        });
       } catch (e) {
         console.error(
-          "[updateEnquiry] enquiry->lead notif convert failed:",
+          "[updateEnquiry] enquiry->lead notif cleanup failed:",
           e?.message,
         );
       }
