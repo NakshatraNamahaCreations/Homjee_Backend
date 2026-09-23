@@ -5776,7 +5776,22 @@ exports.recordAdminRefund = async (req, res) => {
     d.paymentStatus =
       newRefundTotal >= paid ? "Refunded" : "Partial Payment";
     booking.bookingDetails = d;
-    await booking.save();
+    // #5d — skip full-document validation so a refund can be recorded even on
+    // an older/time-crossed booking with a since-invalidated field.
+    await booking.save({ validateBeforeSave: false });
+
+    // #5c — WhatsApp the customer that a refund was processed (HP template;
+    // best-effort — never block the refund on a WhatsApp hiccup).
+    try {
+      const c = booking?.customer || {};
+      if (c.phone && booking?.serviceType === "house_painting") {
+        await sendWhatsAppTemplate(c.phone, "hp_refund_confirmation", {
+          bodyParams: [c.name || "there", String(amt)],
+        });
+      }
+    } catch (e) {
+      console.error("[recordAdminRefund] WA refund failed:", e?.message);
+    }
 
     // Surface it in the admin feed.
     try {
@@ -5841,7 +5856,32 @@ exports.bookingCancelledbyAdmin = async (req, res) => {
 
     d.cancelApprovedAt = new Date();
 
-    await booking.save();
+    // #5d — skip full-document validation so an admin can cancel/refund even on
+    // an older/time-crossed booking (previously threw a 500).
+    await booking.save({ validateBeforeSave: false });
+
+    // #5c — WhatsApp the customer that their lead was cancelled (best-effort).
+    try {
+      const c = booking?.customer || {};
+      const st = booking?.serviceType;
+      if (c.phone && st === "house_painting") {
+        await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled", {
+          bodyParams: [c.name || "there"],
+        });
+      } else if (c.phone && st === "deep_cleaning") {
+        await sendWhatsAppTemplate(c.phone, "dc_customer_cancelled", {
+          bodyParams: [c.name || "there"],
+        });
+      }
+      // Refund confirmation too, when a refund was given alongside the cancel.
+      if (c.phone && st === "house_painting" && Number(refundAmount) > 0) {
+        await sendWhatsAppTemplate(c.phone, "hp_refund_confirmation", {
+          bodyParams: [c.name || "there", String(refundAmount)],
+        });
+      }
+    } catch (e) {
+      console.error("[bookingCancelledbyAdmin] WA cancel failed:", e?.message);
+    }
 
     // ===============================
     // NOTIFICATION
