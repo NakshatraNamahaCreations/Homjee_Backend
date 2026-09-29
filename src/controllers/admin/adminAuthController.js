@@ -254,6 +254,7 @@ const generateOTP = (digits = 6) => {
 
 // FIXED: Send OTP SMS function (always logs, but only sends SMS when configured)
 async function sendOtpSMS(mobileNumber, otp) {
+  let waResult = { sent: false, reason: "not_attempted" };
   try {
     // Always log OTP to console for debugging (but only show in response if debug mode is on)
     console.log(`[OTP GENERATED] For ${mobileNumber}: ${otp}`);
@@ -264,6 +265,7 @@ async function sendOtpSMS(mobileNumber, otp) {
     // with a number OTHER than the WhatsApp sender (9595951304) — WhatsApp
     // cannot message its own business number.
     const wa = await sendWhatsAppOtp(mobileNumber, otp);
+    waResult = wa || waResult;
     if (wa?.sent) {
       console.log(`[OTP WHATSAPP] Sent to ${mobileNumber}`);
     } else {
@@ -290,8 +292,10 @@ async function sendOtpSMS(mobileNumber, otp) {
     }
   } catch (error) {
     console.error("[SMS ERROR] Failed to send OTP:", error);
+    waResult = { sent: false, reason: "exception", error: error?.message };
     // Don't throw error - we still want to return OTP in debug mode
   }
+  return waResult;
 }
 
 // ====== Admin Management ======
@@ -498,7 +502,7 @@ exports.loginWithMobile = async (req, res) => {
     console.log(`[LOGIN DEBUG] After save - OTP: ${updatedAdmin.otp}, Expires: ${updatedAdmin.otpExpiresAt}`);
 
     // Send OTP (function handles both SMS and console logging)
-    await sendOtpSMS(mobileNumber, otp);
+    const waResult = await sendOtpSMS(mobileNumber, otp);
 
     // Prepare response
     const response = {
@@ -508,11 +512,14 @@ exports.loginWithMobile = async (req, res) => {
       expiresInSeconds: Math.floor(OTP_TTL_MS / 1000),
     };
 
-    // Add OTP to response only in debug mode
+    // Add OTP + WhatsApp send diagnostics to response only in debug mode
     if (SHOW_DEBUG_OTP) {
       response.otp = otp;
       response.debug = true;
       response.note = "OTP shown in debug mode only";
+      // Surface the actual WhatsApp/Finbite send result so delivery failures
+      // are visible instead of hidden in server logs.
+      response.whatsapp = waResult;
     }
 
     console.log(`[LOGIN DEBUG] Response sent:`, response);
