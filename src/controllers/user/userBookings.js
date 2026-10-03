@@ -5533,6 +5533,14 @@ exports.cancelLeadFromWebsite = async (req, res) => {
       ];
       const shouldRefund = refundTriggerStatuses.includes(norm(status));
 
+      // #5 — when the customer cancels from the booking page, move the record
+      // to the dismissed section and kill the payment link so "Pay Now" can no
+      // longer be used.
+      if (shouldRefund) {
+        updateFields["isDismmised"] = true;
+        updateFields["bookingDetails.paymentLink.isActive"] = false;
+      }
+
       // Find accepted vendor from invitedVendors
       const acceptedInvite = (booking.invitedVendors || []).find(
         (v) => norm(v.responseStatus) === "accepted",
