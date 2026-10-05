@@ -12,6 +12,42 @@ router.get("/fetch-admin-notifications", async (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 8, 50);
     const skip = (page - 1) * limit;
 
+    // #11 — self-heal: a "New Enquiry" notification whose booking is no longer
+    // an OPEN enquiry (it became a lead, was dismissed, or no longer exists)
+    // must disappear — clicking it would otherwise open a stale/incorrect
+    // enquiry page. This covers every conversion path at once.
+    try {
+      const mongoose = require("mongoose");
+      const UserBooking = require("../../models/user/userBookings");
+      const enquiryBookingIds = await InAppNotification.distinct("bookingId", {
+        notifyTo: "admin",
+        notificationType: "NEW_ENQUIRY_CREATED",
+      });
+      if (enquiryBookingIds.length) {
+        const validIds = enquiryBookingIds.filter((id) =>
+          mongoose.Types.ObjectId.isValid(id),
+        );
+        const stillOpen = await UserBooking.find(
+          { _id: { $in: validIds }, isEnquiry: true, isDismmised: { $ne: true } },
+          { _id: 1 },
+        ).lean();
+        const keep = new Set(stillOpen.map((b) => String(b._id)));
+        const toDelete = enquiryBookingIds.filter((id) => !keep.has(String(id)));
+        if (toDelete.length) {
+          await InAppNotification.deleteMany({
+            notifyTo: "admin",
+            notificationType: "NEW_ENQUIRY_CREATED",
+            bookingId: { $in: toDelete },
+          });
+        }
+      }
+    } catch (e) {
+      console.error(
+        "[fetch-admin-notifications] stale enquiry cleanup failed:",
+        e?.message,
+      );
+    }
+
     const baseFilter = { notifyTo: "admin" };
     const unreadFilter = { notifyTo: "admin", status: "unread" };
 
