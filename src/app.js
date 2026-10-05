@@ -7,6 +7,9 @@ const cors = require("cors");
 const {
   startAutoCancelWorker,
 } = require("./controllers/user/autoCancelWorker");
+const {
+  startWhatsappFollowupCron,
+} = require("./config/whatsappFollowupCron");
 
 const app = express();
 
@@ -79,6 +82,11 @@ app.use("/api/payments", require("./../src/payments/payment.routes"));
 
 // auto cancellation
 startAutoCancelWorker();
+
+// WhatsApp follow-ups & payment/feedback reminders (enquiry follow-ups,
+// payment reminders, final-payment reminders, feedback reminders, cross-sell).
+// This was defined but never started, so none of those messages were firing.
+startWhatsappFollowupCron();
 
 app.use("/api", routes);
 
