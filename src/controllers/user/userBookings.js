@@ -5494,6 +5494,59 @@ exports.rescheduleBooking = async (req, res) => {
 
 // cancellling by customer from the website
 // won't count this in Vendor's performance, this lead will vanish from the android app
+// #3 — update a booking's address + coordinates from the customer Booking Page.
+exports.updateBookingAddress = async (req, res) => {
+  try {
+    const { bookingId } = req.params;
+    const { houseFlatNumber, streetArea, landMark, city, lat, lng } =
+      req.body || {};
+
+    if (!bookingId) {
+      return res
+        .status(400)
+        .json({ success: false, message: "bookingId is required" });
+    }
+
+    const booking = await UserBooking.findById(bookingId);
+    if (!booking) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Booking not found" });
+    }
+
+    const latN = Number(lat);
+    const lngN = Number(lng);
+
+    booking.address = {
+      ...(booking.address || {}),
+      houseFlatNumber: houseFlatNumber ?? booking.address?.houseFlatNumber ?? "",
+      streetArea: streetArea ?? booking.address?.streetArea ?? "",
+      landMark: landMark ?? booking.address?.landMark ?? "",
+      city: city ?? booking.address?.city ?? "",
+      location: {
+        type: "Point",
+        coordinates:
+          Number.isFinite(lngN) && Number.isFinite(latN)
+            ? [lngN, latN]
+            : booking.address?.location?.coordinates || [0, 0],
+      },
+    };
+
+    await booking.save({ validateBeforeSave: false });
+
+    return res.status(200).json({
+      success: true,
+      message: "Address updated successfully",
+      booking,
+    });
+  } catch (error) {
+    console.error("updateBookingAddress error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
 exports.cancelLeadFromWebsite = async (req, res) => {
   const session = await mongoose.startSession();
 

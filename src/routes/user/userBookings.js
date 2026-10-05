@@ -112,6 +112,8 @@ router.post(
 router.post("/update-status", bookingController.updateStatus);
 router.post("/reschedule-booking/vendor", bookingController.rescheduleBooking);
 router.post("/cancel-booking/customer/website", bookingController.cancelLeadFromWebsite);
+// #3 — update a booking's address from the customer Booking Page
+router.put("/update-address/:bookingId", bookingController.updateBookingAddress);
 router.post("/approve-cancel-booking/refund/admin", bookingController.approveCancelRequestAndRefund);
 // #5 — standalone refund (does not cancel the lead)
 router.post("/refund/admin", bookingController.recordAdminRefund);
