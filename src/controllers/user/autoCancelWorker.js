@@ -102,6 +102,7 @@
 // module.exports = { startAutoCancelWorker };
 const UserBooking = require("../../models/user/userBookings");
 const { unlockRelatedQuotesByHiring } = require("../../helpers/quotes");
+const vendorNotification = require("../../models/notification/vendorNotification");
 
 async function cancelHiringBookingAtomic(bookingId, reason = "auto-unpaid-first") {
   try {
@@ -161,7 +162,28 @@ async function cancelHiringBookingAtomic(bookingId, reason = "auto-unpaid-first"
     if (updateRes.modifiedCount !== 1) return false;
 
     const booking = await UserBooking.findById(bookingId);
-    if (booking) await unlockRelatedQuotesByHiring(booking, reason);
+    if (booking) {
+      await unlockRelatedQuotesByHiring(booking, reason);
+
+      // #5 — tell the vendor their pending hiring was auto-cancelled (customer
+      // didn't pay in time). Clicking it opens the lead in the app via bookingId.
+      try {
+        const vId = booking?.assignedProfessional?.professionalId;
+        if (vId) {
+          await vendorNotification.create({
+            vendorId: String(vId),
+            notificationType: "HIRING_CANCELLED",
+            thumbnailTitle: "Hiring Cancelled",
+            message:
+              "The customer did not pay in time, so this hiring was cancelled. The lead is back to Survey Completed.",
+            status: "unread",
+            metaData: { bookingId: String(bookingId) },
+          });
+        }
+      } catch (e) {
+        console.error("[autoCancel] vendor notify failed:", e?.message);
+      }
+    }
 
     return true;
   } catch (e) {

@@ -2297,14 +2297,13 @@ exports.adminCreateBooking = async (req, res) => {
     try {
       const fresh = await UserBooking.findById(booking._id).lean();
       if (fresh) {
-        // #4 booking confirmation at creation for EVERY admin-created booking
-        // (paid or enquiry) — mirrors the website path so no customer is
-        // skipped.
-        await sendBookingConfirmation(fresh);
-        // Fan out to vendors only for real leads (isEnquiry false). Await
-        // (not fire-and-forget) so the invite/push isn't dropped when the
-        // response returns on Render.
+        // Send the Booking Confirmation ONLY for a real lead. An enquiry is not
+        // yet confirmed (payment/site-visit pending), so sending a "Booking
+        // Confirmation" to an enquiry customer is wrong (WhatsApp bug #10).
         if (!isEnquiry) {
+          await sendBookingConfirmation(fresh);
+          // Fan out to vendors only for real leads. Await (not fire-and-forget)
+          // so the invite/push isn't dropped when the response returns on Render.
           await fanOutLeadToEligibleVendors(fresh);
         }
       }
@@ -5338,7 +5337,24 @@ exports.updateStatus = async (req, res) => {
     try {
       const c = booking?.customer || {};
       const st = booking?.serviceType;
-      if (c.phone && status === "Customer Unreachable") {
+      // #9 — "Customer Unreachable" before the survey = genuine unreachable
+      // (send the WhatsApp). The SAME status marked AFTER the survey is
+      // completed means "No Answer/Pick Up" for the hiring call — do NOT send
+      // the unreachable WhatsApp then. Detect via the pre-update status.
+      const preStatus = String(
+        booking?.bookingDetails?.status || "",
+      ).toLowerCase();
+      const afterSurvey = [
+        "survey completed",
+        "pending hiring",
+        "hired",
+        "project ongoing",
+        "waiting for final payment",
+        "project completed",
+        "job ongoing",
+        "job completed",
+      ].includes(preStatus);
+      if (c.phone && status === "Customer Unreachable" && !afterSurvey) {
         if (st === "house_painting") {
           await sendWhatsAppTemplate(c.phone, "hp_customer_unreachable", {
             bodyParams: [c.name || "there", String(c.phone)],
@@ -5775,9 +5791,24 @@ exports.adminCancelPendingHiring = async (req, res) => {
     try {
       const reverted = await UserBooking.findById(bookingId).lean();
       await unlockRelatedQuotesByHiring(reverted, "admin-cancel");
+
+      // #5 — notify the vendor their hiring was cancelled; clicking it opens
+      // the lead in the app via bookingId.
+      const vId = reverted?.assignedProfessional?.professionalId;
+      if (vId) {
+        await vendorNotification.create({
+          vendorId: String(vId),
+          notificationType: "HIRING_CANCELLED",
+          thumbnailTitle: "Hiring Cancelled",
+          message:
+            "This hiring was cancelled. The lead is back to Survey Completed.",
+          status: "unread",
+          metaData: { bookingId: String(bookingId) },
+        });
+      }
     } catch (e) {
       console.error(
-        "[adminCancelPendingHiring] quote unlock failed:",
+        "[adminCancelPendingHiring] quote unlock / notify failed:",
         e?.message,
       );
     }
