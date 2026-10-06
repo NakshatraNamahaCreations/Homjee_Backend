@@ -271,7 +271,12 @@ const renderRoomCostTable = (title, rooms) => {
             (p) => `
           <div class="roomRow">
             <div class="roomRowLeft">
-              <div class="roomPaint">${escapeHtml(safeText(p.paintName))} ${escapeHtml(modeLabel(p.mode))}</div>
+              <div class="roomPaint">${escapeHtml(safeText(p.paintName))}${
+                p.mode &&
+                !String(p.type || "").toLowerCase().includes("measurement")
+                  ? " " + escapeHtml(modeLabel(p.mode))
+                  : ""
+              }</div>
               <div class="roomMeta">${Number(p.count || 0)} ${escapeHtml(labelType(p.type, r.roomName))} (${Math.round(Number(p.sqft ?? 0))}sqft)</div>
             </div>
             <div class="roomRowAmt">${escapeHtml(rupee(p.price))}</div>
@@ -498,7 +503,7 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
       <div class="processBox">
         <div class="processCol">
           <div class="processTitlePill"><div class="processTitle">Repaint Only Process</div></div>
-          ${["Packaging & masking", "Sanding", "2 coats of putty", "Basic cleanup"]
+          ${["Packaging & masking", "Sanding", "2 coats of paint", "Basic cleanup"]
             .map((x) => `<div class="bulletRow"><span class="bulletDot">+</span><span class="processItem">${escapeHtml(x)}</span></div>`)
             .join("")}
         </div>
@@ -510,7 +515,7 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
         </div>
         <div class="processCol">
           <div class="processTitlePill"><div class="processTitle">Fresh Paint Process</div></div>
-          ${["Packaging & masking", "Damage repair", "2 coats of putty", "Hand sanding", "1 coat primer", "2 coats of paint", "Basic cleanup"]
+          ${["Packaging & masking", "Sanding", "Damage repair", "2 coats of putty", "Hand sanding", "1 coat primer", "2 coats of paint", "Basic cleanup"]
             .map((x) => `<div class="bulletRow"><span class="bulletDot">+</span><span class="processItem">${escapeHtml(x)}</span></div>`)
             .join("")}
         </div>
