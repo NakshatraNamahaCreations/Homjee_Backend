@@ -5938,11 +5938,18 @@ exports.bookingCancelledbyAdmin = async (req, res) => {
     const d = booking.bookingDetails;
     d.status = "Admin Cancelled";
     // ===============================
-    // REFUND LOGIC
+    // REFUND LOGIC (#5 — ACCUMULATE, never overwrite)
     // ===============================
-    if (refundAmount > 0) {
-      d.refundAmount = refundAmount;
-      d.paymentStatus = "Refunded";
+    const amt = Number(refundAmount) || 0;
+    if (amt > 0) {
+      const alreadyRefunded = Number(d.refundAmount || 0);
+      const paid = Number(d.paidAmount || 0);
+      const refundableNow = Math.max(0, paid - alreadyRefunded);
+      // Cap the NEW refund so the cumulative total never exceeds what was paid.
+      const applied = Math.min(amt, refundableNow);
+      const newTotal = alreadyRefunded + applied;
+      d.refundAmount = newTotal;
+      d.paymentStatus = newTotal >= paid ? "Refunded" : "Partial Payment";
       d.refundedAt = new Date();
     }
 
@@ -8079,7 +8086,19 @@ exports.adminToCustomerPayment = async (req, res) => {
     // ======================================================
     // 🟢 4. IF ENQUIRY → CONVERT TO LEAD
     // ======================================================
-    if (booking.isEnquiry) booking.isEnquiry = false;
+    if (booking.isEnquiry) {
+      booking.isEnquiry = false;
+      // #11 — once converted, drop its "New Enquiry" admin notification so it
+      // can't reopen the stale enquiry page.
+      try {
+        await notificationSchema.deleteMany({
+          bookingId: String(booking._id),
+          notificationType: "NEW_ENQUIRY_CREATED",
+        });
+      } catch (e) {
+        console.error("[adminToCustomerPayment] enquiry notif cleanup:", e?.message);
+      }
+    }
 
     // ======================================================
     // 🟢 5. PUSH PAYMENT ENTRY INTO payments[] HISTORY
