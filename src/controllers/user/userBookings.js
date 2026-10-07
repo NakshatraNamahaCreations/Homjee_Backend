@@ -9366,6 +9366,27 @@ exports.updateBookingField = async (req, res) => {
       });
     }
 
+    // #11 — once an enquiry is converted to a lead (isEnquiry -> false) or
+    // dismissed, REMOVE its "New Enquiry" admin notification. Otherwise the
+    // notification lingers and clicking it reopens /enquiry-details with
+    // now-stale/incorrect data. This is the "Convert as Lead" button path.
+    if (
+      (field === "isEnquiry" && value === false) ||
+      (field === "isDismmised" && value === true)
+    ) {
+      try {
+        await notificationSchema.deleteMany({
+          bookingId: String(bookingId),
+          notificationType: "NEW_ENQUIRY_CREATED",
+        });
+      } catch (e) {
+        console.error(
+          "[updateBookingField] enquiry notif cleanup failed:",
+          e?.message,
+        );
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: `Updated ${field}`,
