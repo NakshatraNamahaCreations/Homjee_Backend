@@ -5959,27 +5959,46 @@ exports.bookingCancelledbyAdmin = async (req, res) => {
     // an older/time-crossed booking (previously threw a 500).
     await booking.save({ validateBeforeSave: false });
 
-    // #5c — WhatsApp the customer that their lead was cancelled (best-effort).
-    try {
-      const c = booking?.customer || {};
-      const st = booking?.serviceType;
-      if (c.phone && st === "house_painting") {
-        await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled", {
+    // #5c — WhatsApp the customer. The cancellation message and the refund
+    // message are sent INDEPENDENTLY: a failure in one (e.g. a template
+    // rejected by Finbite) must never block or mask the other. Previously
+    // both lived in one try, with the cancellation awaited first — so if its
+    // template errored, the refund message was silently skipped (and only a
+    // refund message was seen when the earlier standalone refund fired).
+    const c = booking?.customer || {};
+    const st = booking?.serviceType;
+
+    // 1) Lead-cancelled message (always, regardless of refund).
+    if (c.phone && st === "house_painting") {
+      try {
+        const r = await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled", {
           bodyParams: [c.name || "there"],
         });
-      } else if (c.phone && st === "deep_cleaning") {
-        await sendWhatsAppTemplate(c.phone, "dc_customer_cancelled", {
-          bodyParams: [c.name || "there"],
-        });
+        console.log("[bookingCancelledbyAdmin] WA cancel sent:", JSON.stringify(r));
+      } catch (e) {
+        console.error("[bookingCancelledbyAdmin] WA cancel failed:", e?.message);
       }
-      // Refund confirmation too, when a refund was given alongside the cancel.
-      if (c.phone && st === "house_painting" && Number(refundAmount) > 0) {
-        await sendWhatsAppTemplate(c.phone, "hp_refund_confirmation", {
+    } else if (c.phone && st === "deep_cleaning") {
+      try {
+        const r = await sendWhatsAppTemplate(c.phone, "dc_customer_cancelled", {
+          bodyParams: [c.name || "there"],
+        });
+        console.log("[bookingCancelledbyAdmin] WA cancel sent:", JSON.stringify(r));
+      } catch (e) {
+        console.error("[bookingCancelledbyAdmin] WA cancel failed:", e?.message);
+      }
+    }
+
+    // 2) Refund confirmation, only when a refund was given alongside the cancel.
+    if (c.phone && st === "house_painting" && Number(refundAmount) > 0) {
+      try {
+        const r = await sendWhatsAppTemplate(c.phone, "hp_refund_confirmation", {
           bodyParams: [c.name || "there", String(refundAmount)],
         });
+        console.log("[bookingCancelledbyAdmin] WA refund sent:", JSON.stringify(r));
+      } catch (e) {
+        console.error("[bookingCancelledbyAdmin] WA refund failed:", e?.message);
       }
-    } catch (e) {
-      console.error("[bookingCancelledbyAdmin] WA cancel failed:", e?.message);
     }
 
     // ===============================
