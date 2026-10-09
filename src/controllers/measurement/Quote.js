@@ -530,6 +530,9 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
 
     const line = q.lines[lineIdx] || {};
 
+    // must know which surface we are updating
+    const surfaceRef = req.body?.surfaceRef || null; // { type, index, mode? } optional but preferred
+
     // --- parse payload items ---
     let items = Array.isArray(req.body?.items) ? req.body.items : [];
     items = items.map((it) => {
@@ -543,6 +546,11 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
         materialId: it.materialId != null ? String(it.materialId) : undefined,
         materialName: String(it.materialName || it.customName || ""),
         surfaceType: String(it.surfaceType || ""),
+        // Persist the structured surface reference so the vendor app can match a
+        // service to its exact surface card (Wall/Ceiling + ordinal) instead of
+        // relying on the volatile human label ("Wall 1"), which breaks when the
+        // surface list is re-ordered/relabeled on reload.
+        surfaceRef: it.surfaceRef || surfaceRef || null,
         withPaint: !!it.withPaint,
         areaSqft: area,
         unitPrice: unit,
@@ -552,18 +560,23 @@ exports.upsertQuoteAdditionalServices = async (req, res) => {
       };
     });
 
-    // must know which surface we are updating
-    const surfaceRef = req.body?.surfaceRef || null; // { type, index, mode? } optional but preferred
     const surfaceLabelNorm = items.length ? norm(items[0].surfaceType) : ""; // e.g., "wall 1"
 
     // --- MERGE-BY-SURFACE: keep others, replace only this surface's items ---
     const prev = Array.isArray(line.additionalServices)
       ? line.additionalServices
       : [];
-    const keep = prev.filter(
-      (s) =>
-        surfaceLabelNorm ? norm(s.surfaceType) !== surfaceLabelNorm : true // if no label given, we won't remove by label
-    );
+    // Replace the old items for this surface, matched by the structured
+    // surfaceRef (durable) first, then by the label (legacy rows).
+    const sameRef = (s) =>
+      surfaceRef &&
+      s?.surfaceRef &&
+      String(s.surfaceRef.type) === String(surfaceRef.type) &&
+      Number(s.surfaceRef.index) === Number(surfaceRef.index);
+    const keep = prev.filter((s) => {
+      if (sameRef(s)) return false; // this surface's old rows -> replaced
+      return surfaceLabelNorm ? norm(s.surfaceType) !== surfaceLabelNorm : true;
+    });
     const merged = [...keep, ...items];
 
     line.additionalServices = merged;

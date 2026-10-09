@@ -31,7 +31,20 @@ const AdditionalServiceItem = new mongoose.Schema(
     // If selected from your finishing paints table
     materialId: { type: String }, // keep as string, matches your FE
     materialName: { type: String },
-    surfaceType: { type: String },
+    surfaceType: { type: String }, // human label e.g. "Wall 1" (display/legacy match)
+    // Durable structured surface reference so the vendor app can match a
+    // service to its exact surface card even if the label is re-derived.
+    surfaceRef: {
+      type: new mongoose.Schema(
+        {
+          type: { type: String }, // "Wall" | "Ceiling" | "Measurement"
+          index: { type: Number },
+          mode: { type: String, default: null },
+        },
+        { _id: false }
+      ),
+      default: null,
+    },
     // UX options
     withPaint: { type: Boolean, default: false },
 
