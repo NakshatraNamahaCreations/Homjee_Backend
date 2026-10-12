@@ -3,14 +3,40 @@ const cloudinary = require("../config/cloudinary");
 const Quote = require("../models/measurement/Quote");
 const Measurement = require("../models/measurement/Measurement");
 const userBookings = require("../models/user/userBookings");
+const Product = require("../models/products/Product");
 const { sendWhatsAppDocument } = require("./whatsapp");
 const { renderQuoteHtml } = require("./quoteHtml");
 
 const INR = (n) =>
   `Rs. ${Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
 
-const buildQuotePdfBuffer = async (quote, customer, vendor, measurement) => {
-  const html = renderQuoteHtml({ quote, customer, vendor, measurement });
+// Collect every paint's { name, description } from the product catalog so the
+// quote's "Paint Details" can show the real descriptions of the selected paints.
+const loadPaintDescriptions = async () => {
+  try {
+    const docs = await Product.find({}, { paint: 1 }).lean();
+    const out = [];
+    const seen = new Set();
+    (docs || []).forEach((d) => {
+      (Array.isArray(d?.paint) ? d.paint : []).forEach((p) => {
+        const name = String(p?.name || "").trim();
+        const description = String(p?.description || "").trim();
+        if (!name || !description) return;
+        const key = name.toLowerCase();
+        if (seen.has(key)) return;
+        seen.add(key);
+        out.push({ name, description });
+      });
+    });
+    return out;
+  } catch (e) {
+    console.error("[quote-pdf] loadPaintDescriptions failed:", e?.message);
+    return [];
+  }
+};
+
+const buildQuotePdfBuffer = async (quote, customer, vendor, measurement, paints) => {
+  const html = renderQuoteHtml({ quote, customer, vendor, measurement, paints });
 
   const browser = await puppeteer.launch({
     headless: "new",
@@ -87,6 +113,7 @@ const generateAndSendQuotePdf = async (quoteId) => {
   const customer = booking?.customer || null;
   const vendor = booking?.assignedProfessional || null;
   const measurement = await lookupMeasurement(quote.measurementId);
+  const paints = await loadPaintDescriptions();
 
   if (!dryRun && !customer?.phone) {
     const err = new Error("Customer phone not found for this lead");
@@ -94,7 +121,7 @@ const generateAndSendQuotePdf = async (quoteId) => {
     throw err;
   }
 
-  const pdfBuffer = await buildQuotePdfBuffer(quote, customer, vendor, measurement);
+  const pdfBuffer = await buildQuotePdfBuffer(quote, customer, vendor, measurement, paints);
 
   const publicId = `quote_${quote._id}_${Date.now()}`;
   const uploaded = await uploadPdfBufferToCloudinary(pdfBuffer, publicId);

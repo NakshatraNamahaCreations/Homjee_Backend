@@ -312,10 +312,47 @@ const renderRoomCostTable = (title, rooms) => {
   `;
 };
 
-const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
+const renderQuoteHtml = ({ quote, customer, vendor, measurement, paints }) => {
   const t = quote?.totals || {};
   const roomWise = buildRoomWise(quote, measurement);
   const serviceWise = buildServiceWise(quote);
+
+  // ---- Paint Details (dynamic) ----
+  // Show the description of each paint actually SELECTED in this quote, taken
+  // from the product catalog (admin Product section). Previously this was 3
+  // hardcoded lines shown on every quote.
+  const descByName = new Map();
+  (Array.isArray(paints) ? paints : []).forEach((p) => {
+    const nm = String(p?.name || p?.paintName || "").trim().toLowerCase();
+    const desc = String(p?.description || "").trim();
+    if (nm && desc && !descByName.has(nm)) descByName.set(nm, desc);
+  });
+  const selectedPaintNames = [];
+  const seenPaint = new Set();
+  (Array.isArray(quote?.lines) ? quote.lines : []).forEach((ln) => {
+    (Array.isArray(ln?.breakdown) ? ln.breakdown : []).forEach((b) => {
+      const nm = String(b?.paintName || "").trim();
+      const price = Number(b?.price ?? 0);
+      const sqft = Number(b?.sqft ?? 0);
+      // only paints actually used (skip deselected 0-area/0-cost rows)
+      if (!nm || (sqft <= 0 && price <= 0)) return;
+      const key = nm.toLowerCase();
+      if (!seenPaint.has(key)) {
+        seenPaint.add(key);
+        selectedPaintNames.push(nm);
+      }
+    });
+  });
+  const paintDetailRows = selectedPaintNames
+    .map((nm) => {
+      const desc = descByName.get(nm.toLowerCase());
+      if (!desc) return "";
+      return `<div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">${escapeHtml(
+        desc,
+      )}</span></div>`;
+    })
+    .filter(Boolean)
+    .join("");
   const customerName = safeText(customer?.name, "Customer");
   // Customer-facing quotes always show the Homjee support line, not the
   // individual vendor's personal number (client-approved: +91 9595951304).
@@ -529,14 +566,16 @@ const renderQuoteHtml = ({ quote, customer, vendor, measurement }) => {
       </div>
     </div>
 
-    <div class="tableBox" style="margin-top:10px">
+    ${
+      paintDetailRows
+        ? `<div class="tableBox" style="margin-top:10px">
       <div class="tableHeader"><div class="tableHeaderText">Paint Details</div></div>
       <div class="blockBox">
-        <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Tractor Emulsion is a basic emulsion with smooth finish.</span></div>
-        <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Royale Luxury is a premium washable finish for interior walls.</span></div>
-        <div class="bulletRow"><span class="bulletDot">-</span><span class="bulletText">Oil enamel is durable and glossy for wood and metal surfaces.</span></div>
+        ${paintDetailRows}
       </div>
-    </div>
+    </div>`
+        : ""
+    }
 
     <div class="sectionTitle">Scope of Work T&amp;C</div>
     <div class="blockBox">
