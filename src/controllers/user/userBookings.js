@@ -9406,6 +9406,42 @@ exports.updateBookingField = async (req, res) => {
       }
     }
 
+    // When an enquiry becomes a lead, give it the admin-configured vendor-coin
+    // value so a vendor who responds is charged correctly. A raw enquiry carries
+    // a placeholder service with coinDeduction=0, so the respond-time recompute
+    // (computeBookingCoinPolicy) would otherwise fall back to 0. Resolve the
+    // amount (HP -> PricingConfig.vendorCoins for the booking's city) and stamp
+    // it onto the service, so the lead durably carries it like a normal lead.
+    if (field === "isEnquiry" && value === false) {
+      try {
+        const policy = await computeBookingCoinPolicy(updatedBooking);
+        const coins = Number(policy?.requiredCoins || 0);
+        if (
+          coins > 0 &&
+          Array.isArray(updatedBooking.service) &&
+          updatedBooking.service.length
+        ) {
+          // Put the full amount on the first service and zero the rest, so the
+          // per-service sum equals the resolved coin value.
+          updatedBooking.service.forEach((s, i) => {
+            s.coinDeduction = i === 0 ? coins : 0;
+          });
+          await updatedBooking.save({ validateBeforeSave: false });
+        } else if (coins <= 0) {
+          console.warn(
+            "[updateBookingField] convert-to-lead: could not resolve vendor coins",
+            "(city may be empty or has no PricingConfig.vendorCoins) for booking",
+            String(bookingId),
+          );
+        }
+      } catch (e) {
+        console.error(
+          "[updateBookingField] coin stamp on convert failed:",
+          e?.message,
+        );
+      }
+    }
+
     return res.status(200).json({
       success: true,
       message: `Updated ${field}`,
