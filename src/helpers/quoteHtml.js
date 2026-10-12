@@ -116,6 +116,9 @@ const buildRoomWise = (quote, measurement) => {
     for (const b of breakdown) {
       const sqft = Number(b?.sqft ?? 0);
       const price = Number(b?.price ?? 0);
+      // Hide deselected surfaces (0 area and 0 cost) — e.g. an unticked
+      // ceiling. A genuine "without paint" surface keeps its area and is kept.
+      if (sqft <= 0 && price <= 0) continue;
       const paintName = b?.paintName || "Paint";
       const type = b?.type || "";
       // Mode-agnostic paints collapse Fresh + Repaint into one row (empty mode
@@ -188,10 +191,14 @@ const buildServiceWise = (quote) => {
   for (const ln of lines) {
     const breakdown = Array.isArray(ln?.breakdown) ? ln.breakdown : [];
     for (const b of breakdown) {
-      const key = `${b?.paintName || "Paint"}__${b?.type || ""}`;
-      const prev = paintMap.get(key);
       const sqft = Number(b?.sqft ?? 0);
       const price = Number(b?.price ?? 0);
+      // Skip deselected surfaces (0 area and 0 cost) so a ceiling the vendor
+      // unticked doesn't linger as a ₹0 row in Service-wise Cost. A genuine
+      // "without paint" surface keeps its area (sqft > 0) and is NOT skipped.
+      if (sqft <= 0 && price <= 0) continue;
+      const key = `${b?.paintName || "Paint"}__${b?.type || ""}`;
+      const prev = paintMap.get(key);
       if (!prev) {
         paintMap.set(key, {
           kind: "paint",
