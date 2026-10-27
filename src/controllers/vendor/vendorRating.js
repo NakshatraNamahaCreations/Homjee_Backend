@@ -2,6 +2,27 @@
 
 const VendorRating = require("../../models/vendor/vendorRating");
 const mongoose = require("mongoose");
+const UserBooking = require("../../models/user/userBookings");
+const City = require("../../models/city/City");
+
+// #6 — resolve the city-specific Google review link for a booking. Falls back
+// to null (the rating page then uses its own default link).
+async function resolveCityFeedbackLink(bookingId) {
+  try {
+    const bk = await UserBooking.findById(bookingId)
+      .select("address.city")
+      .lean();
+    const cityName = bk?.address?.city;
+    if (!cityName) return null;
+    const cityDoc = await City.findOne({
+      city: new RegExp(`^\\s*${String(cityName).trim()}\\s*$`, "i"),
+    }).lean();
+    return cityDoc?.feedbackLink || null;
+  } catch (e) {
+    console.error("[rating] city feedback link lookup failed:", e?.message);
+    return null;
+  }
+}
 
 exports.addVendorRating = async (req, res) => {
   try {
@@ -29,9 +50,14 @@ exports.addVendorRating = async (req, res) => {
         isLocked: true,
       });
 
+      // #6 — redirect 3-4-5 star customers to the city-specific Google review
+      // link saved in admin settings (City.feedbackLink).
+      const googleUrl = await resolveCityFeedbackLink(bookingId);
+
       return res.json({
         success: true,
-        redirect: true, // frontend will redirect to Google Review
+        redirect: true, // frontend redirects to the review link
+        googleUrl, // city-specific; null → frontend uses its default
       });
     }
 
