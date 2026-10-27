@@ -1,11 +1,9 @@
 const ManualPayment = require("../../models/user/manualPayment.js");
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment";
-// Same env var the main booking flow uses (note: USER_PAYMENT ends with "/",
-// this URL must not — strip it so both point at the same live site).
-const redirectionUrl = (
-  process.env.USER_PAYMENT || "https://homjee-website.netlify.app/checkout/payment/"
-).replace(/\/$/, "");
+// Hardcoded to the final production site (same page the main booking flow uses)
+// so a stale USER_PAYMENT env value can't point customers at an old domain.
+const redirectionUrl = "https://homjee-website.netlify.app/checkout/payment";
 
 exports.createManualPayment = async (req, res) => {
   try {

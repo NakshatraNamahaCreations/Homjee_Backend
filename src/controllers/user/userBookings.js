@@ -145,9 +145,10 @@ async function loadActiveHiringsForVendor(vendorId) {
 }
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment/";
-const redirectionUrl =
-  process.env.USER_PAYMENT ||
-  "https://homjee-website.netlify.app/checkout/payment/";
+// Customer booking/payment page. Hardcoded to the final production site so a
+// stale USER_PAYMENT env value on the server can't send customers to an old
+// domain. Change here if the website domain ever changes.
+const redirectionUrl = "https://homjee-website.netlify.app/checkout/payment/";
 const vendorRatingURL =
   process.env.VENDOR_RATING ||
   "https://homjee-website.netlify.app/vendor-ratings";
