@@ -1,4 +1,11 @@
 const ManualPayment = require("../../models/user/manualPayment.js");
+const { sendWhatsAppTemplate } = require("../../helpers/finbiteWhatsapp");
+
+// #11 — Finbite template for the "Create Payment Link" WhatsApp. It shows the
+// "Homjee has requested a payment" text and a Pay Now URL button whose base URL
+// is the site root; the dynamic suffix is the payment-page path.
+// NOTE: confirm this matches the APPROVED template name/params on Finbite.
+const MANUAL_PAYMENT_TEMPLATE = "payment_link_request";
 
 // const redirectionUrl = "http://localhost:5173/checkout/payment";
 // Hardcoded to the final production site (same page the main booking flow uses)
@@ -42,6 +49,22 @@ exports.createManualPayment = async (req, res) => {
     manualPayment.payment.providerRef = `razorpay_${bookingId}`;
 
     await manualPayment.save();
+
+    // #11 — send the payment link to the customer over WhatsApp with a Pay Now
+    // button that opens the payment page. The template's URL button base is the
+    // site root, so the dynamic suffix is the path after the domain.
+    // Best-effort: never block link creation on a WhatsApp hiccup.
+    try {
+      if (phone) {
+        const payPath = paymentLinkUrl.replace(/^https?:\/\/[^/]+\//, "");
+        await sendWhatsAppTemplate(phone, MANUAL_PAYMENT_TEMPLATE, {
+          bodyParams: [name || "there", String(Number(amount))],
+          buttons: [{ type: "button", sub_type: "url", text: payPath }],
+        });
+      }
+    } catch (e) {
+      console.error("[createManualPayment] WA payment link failed:", e?.message);
+    }
 
     return res.status(201).json({
       success: true,

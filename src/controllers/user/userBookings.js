@@ -6199,8 +6199,13 @@ exports.recordAdminRefund = async (req, res) => {
     // best-effort — never block the refund on a WhatsApp hiccup).
     try {
       const c = booking?.customer || {};
-      if (c.phone && booking?.serviceType === "house_painting") {
-        await sendWhatsAppTemplate(c.phone, "hp_refund_confirmation", {
+      if (c.phone) {
+        // #7 — service-aware: HP and DC each have their own refund template.
+        const refundTpl =
+          booking?.serviceType === "deep_cleaning"
+            ? "dc_refund_confirmation"
+            : "hp_refund_confirmation";
+        await sendWhatsAppTemplate(c.phone, refundTpl, {
           bodyParams: [c.name || "there", String(amt)],
         });
       }
@@ -6313,9 +6318,14 @@ exports.bookingCancelledbyAdmin = async (req, res) => {
     }
 
     // 2) Refund confirmation, only when a refund was given alongside the cancel.
-    if (c.phone && st === "house_painting" && Number(refundAmount) > 0) {
+    //    #7 — service-aware so DC refunds also get a confirmation.
+    if (c.phone && Number(refundAmount) > 0) {
       try {
-        const r = await sendWhatsAppTemplate(c.phone, "hp_refund_confirmation", {
+        const refundTpl =
+          st === "deep_cleaning"
+            ? "dc_refund_confirmation"
+            : "hp_refund_confirmation";
+        const r = await sendWhatsAppTemplate(c.phone, refundTpl, {
           bodyParams: [c.name || "there", String(refundAmount)],
         });
         console.log("[bookingCancelledbyAdmin] WA refund sent:", JSON.stringify(r));
@@ -6428,8 +6438,13 @@ exports.approveCancelRequestAndRefund = async (req, res) => {
     // {{1}} name, {{2}} refund amount. No buttons.
     try {
       const c = booking?.customer || {};
-      if (booking?.serviceType === "house_painting" && refundAmount > 0 && c.phone) {
-        await sendWhatsAppTemplate(c.phone, "hp_refund_confirmation", {
+      if (refundAmount > 0 && c.phone) {
+        // #7 — service-aware: HP and DC each have their own refund template.
+        const refundTpl =
+          booking?.serviceType === "deep_cleaning"
+            ? "dc_refund_confirmation"
+            : "hp_refund_confirmation";
+        await sendWhatsAppTemplate(c.phone, refundTpl, {
           bodyParams: [c.name || "there", String(refundAmount)],
         });
       }
@@ -8316,6 +8331,27 @@ exports.updateManualPayment = async (req, res) => {
     });
 
     await booking.save();
+
+    // #8 — when the admin records a CASH payment, confirm it to the customer
+    // over WhatsApp (service-aware). Best-effort; never blocks the save.
+    // NOTE: confirm these template names/params match the APPROVED Finbite ones.
+    try {
+      const c = booking?.customer || {};
+      if (c.phone && String(d.paymentMethod).toLowerCase() === "cash") {
+        const cashTpl =
+          String(serviceType).toLowerCase() === "deep_cleaning"
+            ? "dc_cash_payment_confirmation"
+            : "hp_cash_payment_confirmation";
+        await sendWhatsAppTemplate(c.phone, cashTpl, {
+          bodyParams: [c.name || "there", String(Number(amount) || 0)],
+        });
+      }
+    } catch (e) {
+      console.error(
+        "[updateManualPayment] WA cash confirmation failed:",
+        e?.message,
+      );
+    }
 
     try {
       const assigned = isAssignedToVendor(booking);
