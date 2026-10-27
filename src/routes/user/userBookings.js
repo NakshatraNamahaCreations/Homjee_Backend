@@ -8,6 +8,7 @@ router.post("/create-enquiry-lead", bookingController.createEnquiryLead);
 router.post("/create-admin-booking", bookingController.adminCreateBooking);
 // router.patch('/:id/mark-as-lead', bookingController.markAsLead); // new routes to udpate enquiry to lead
 router.get("/get-all-leads", bookingController.getAllLeadsBookings);
+router.get("/money-dashboard", bookingController.getMoneyDashboard);
 router.get("/get-all-enquiries", bookingController.getAllEnquiries);
 router.get("/get-all-bookings", bookingController.getAllBookings);
 

@@ -2442,6 +2442,324 @@ exports.getAllLeadsBookings = async (req, res) => {
   }
 };
 
+// ===========================================================================
+// MONEY DASHBOARD — unified feed for the admin Money Dashboard (per spec).
+// Returns the 7 summary metrics + a Paid list + a Pending list, where each
+// row carries a transaction `type` (customer_payment | cash_payment | refund |
+// manual_payment | coins_sold) so the admin can render type-conditional cells.
+// Filters: city, service, startDate, endDate (date applied per-transaction).
+// ===========================================================================
+exports.getMoneyDashboard = async (req, res) => {
+  try {
+    const ManualPayment = require("../../models/user/manualPayment");
+    const VendorTransaction = require("../../models/vendor/wallet"); // exports walletTransaction
+
+    const { service, city, startDate, endDate } = req.query;
+
+    const start = startDate ? new Date(startDate) : null;
+    const end = endDate ? new Date(endDate) : null;
+    if (end) end.setHours(23, 59, 59, 999);
+    const hasDateFilter = !!(start || end);
+    const inRange = (d) => {
+      if (!d) return false;
+      const t = new Date(d).getTime();
+      if (Number.isNaN(t)) return false;
+      if (start && t < start.getTime()) return false;
+      if (end && t > end.getTime()) return false;
+      return true;
+    };
+    const passDate = (d) => (!hasDateFilter ? true : inRange(d));
+
+    const norm = (v) => String(v || "").trim().toLowerCase();
+    const cityMatches = (c) =>
+      !city || city === "All Cities" || norm(c) === norm(city);
+    const serviceMatches = (s) =>
+      !service || service === "All Services" || norm(s) === norm(service);
+
+    const svcLabel = (st) =>
+      st === "house_painting"
+        ? "House Painting"
+        : st === "deep_cleaning"
+        ? "Deep Cleaning"
+        : String(st || "").replace(/_/g, " ");
+
+    const CANCELLED = new Set([
+      "Customer Cancelled",
+      "Admin Cancelled",
+      "Cancelled",
+      "Cancelled Rescheduled",
+      "Customer Unreachable",
+      "Customer Denied",
+    ]);
+
+    const remarkFor = (p) => {
+      if (p?.purpose) return String(p.purpose);
+      if (p?.installment)
+        return `${String(p.installment).charAt(0).toUpperCase()}${String(
+          p.installment,
+        ).slice(1)} installment`;
+      return "";
+    };
+
+    // ---- bookings (city/service filtered; date applied per-transaction) ----
+    const bQuery = { isEnquiry: false };
+    if (service && service !== "All Services")
+      bQuery["service.category"] = service;
+    if (city && city !== "All Cities") {
+      const esc = String(city).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      bQuery["address.city"] = { $regex: new RegExp(`^${esc}$`, "i") };
+    }
+    const bookings = await UserBooking.find(bQuery).lean();
+
+    const paid = [];
+    const pending = [];
+    let totalSales = 0;
+    let onlinePayment = 0;
+    let cashPayment = 0;
+    let amountYetToBeCollected = 0;
+    let amountUnpaid = 0;
+
+    for (const b of bookings) {
+      const bd = b.bookingDetails || {};
+      const custName = b.customer?.name || "";
+      const vendor = b.assignedProfessional?.name || "";
+      const svc = svcLabel(b.serviceType);
+      const cty = b.address?.city || "";
+      const bookingId = bd.booking_id || "";
+      const mongoId = String(b._id);
+      const isCancelled = CANCELLED.has(bd.status);
+
+      // -- paid customer / cash payments --
+      // Prefer the real payment history (payments[]). When it's empty (most
+      // bookings only track milestones), derive the paid rows from the paid
+      // firstPayment / secondPayment / finalPayment milestones instead.
+      const payHistory = (bd.payments || []).filter((p) => Number(p.amount) > 0);
+      const paidEntries = payHistory.length
+        ? payHistory.map((p, idx) => ({
+            installment: p.installment || String(idx + 1),
+            amount: Number(p.amount || 0),
+            at: p.at,
+            method: p.method,
+            providerRef: p.providerRef,
+            purpose: p.purpose,
+          }))
+        : [
+            ["first", bd.firstPayment],
+            ["second", bd.secondPayment],
+            ["final", bd.finalPayment],
+          ]
+            .filter(([, m]) => m && m.status === "paid" && Number(m.amount) > 0)
+            .map(([inst, m]) => ({
+              installment: inst,
+              amount: Number(m.amount || 0),
+              at: m.paidAt,
+              method: m.method,
+              providerRef: null,
+              purpose: null,
+            }));
+
+      paidEntries.forEach((p, idx) => {
+        const amt = Number(p.amount || 0);
+        if (amt <= 0) return;
+        if (!passDate(p.at)) return;
+        const isCash = p.method === "Cash";
+        totalSales += amt;
+        if (isCash) cashPayment += amt;
+        else onlinePayment += amt;
+        paid.push({
+          type: isCash ? "cash_payment" : "customer_payment",
+          invoiceNumber: `INV-${bookingId || mongoId.slice(-6)}-${
+            p.installment || idx + 1
+          }`,
+          amount: amt,
+          dateTime: p.at,
+          customerName: custName,
+          bookingId,
+          bookingMongoId: mongoId,
+          paymentId: isCash ? "Cash" : p.providerRef || "",
+          vendor,
+          remark: remarkFor(p),
+          service: svc,
+          city: cty,
+        });
+      });
+
+      // -- refund --
+      const refund = Number(bd.refundAmount || 0);
+      if (refund > 0) {
+        const when = bd.cancelApprovedAt || bd.refundedAt || b.updatedAt || b.createdAt;
+        if (passDate(when)) {
+          totalSales -= refund;
+          paid.push({
+            type: "refund",
+            invoiceNumber: `REF-${bookingId || mongoId.slice(-6)}`,
+            amount: -refund,
+            dateTime: when,
+            customerName: custName,
+            bookingId,
+            bookingMongoId: mongoId,
+            paymentId: "Refund",
+            vendor,
+            remark: "Refund",
+            service: svc,
+            city: cty,
+          });
+        }
+      }
+
+      // -- outstanding / pending for this booking --
+      if (!isCancelled) {
+        const finalTotal = Number(bd.finalTotal || 0);
+        const paidAmt = Number(bd.paidAmount || 0);
+        const yet = Number(
+          bd.amountYetToPay != null ? bd.amountYetToPay : Math.max(0, finalTotal - paidAmt),
+        );
+        if (yet > 0) {
+          amountYetToBeCollected += yet;
+          if (paidAmt <= 0) amountUnpaid += yet;
+          const when = b.updatedAt || b.createdAt;
+          pending.push({
+            type: "customer_payment",
+            amount: yet,
+            dateTime: when,
+            customerName: custName,
+            bookingId,
+            bookingMongoId: mongoId,
+            vendor,
+            remark: bd?.paymentLink?.installmentStage || "",
+            service: svc,
+            city: cty,
+          });
+        }
+      }
+    }
+
+    // ---- manual payments (context != coins) ----
+    const manuals = await ManualPayment.find({ context: { $ne: "coins" } }).lean();
+    for (const m of manuals) {
+      if (!serviceMatches(m.service) || !cityMatches(m.city)) continue;
+      const amt = Number(m.amount || 0);
+      const status = m.payment?.status;
+      if (status === "Paid") {
+        const when = m.payment?.paidAt || m.updatedAt || m.createdAt;
+        if (!passDate(when)) continue;
+        totalSales += amt;
+        const isCash = m.payment?.method === "Cash";
+        if (isCash) cashPayment += amt;
+        else onlinePayment += amt;
+        paid.push({
+          type: "manual_payment",
+          invoiceNumber: `MAN-${String(m._id).slice(-6)}`,
+          amount: amt,
+          dateTime: when,
+          customerName: m.name || "",
+          bookingId: "Manual payment",
+          bookingMongoId: null,
+          paymentId: isCash ? "Cash" : m.payment?.providerRef || "",
+          vendor: "",
+          remark: m.context || "",
+          service: m.service || "",
+          city: m.city || "",
+        });
+      } else if (status === "Pending") {
+        const when = m.createdAt;
+        if (!passDate(when)) continue;
+        pending.push({
+          type: "manual_payment",
+          amount: amt,
+          dateTime: when,
+          customerName: m.name || "",
+          bookingId: "Manual payment",
+          bookingMongoId: null,
+          vendor: "",
+          remark: m.context || "",
+          service: m.service || "",
+          city: m.city || "",
+        });
+      }
+    }
+
+    // ---- coins sold (manual coin sales + wallet recharges) ----
+    let coinsSold = 0; // count of coins
+    let incomeFromCoins = 0; // money from coins
+    const coinManuals = await ManualPayment.find({
+      type: "vendor",
+      context: "coins",
+      "payment.status": "Paid",
+    }).lean();
+    for (const m of coinManuals) {
+      if (!cityMatches(m.city)) continue;
+      const when = m.payment?.paidAt || m.createdAt;
+      if (!passDate(when)) continue;
+      const amt = Number(m.amount || 0);
+      incomeFromCoins += amt;
+      paid.push({
+        type: "coins_sold",
+        invoiceNumber: `COIN-${String(m._id).slice(-6)}`,
+        amount: amt,
+        dateTime: when,
+        customerName: m.name || "",
+        bookingId: "Coins",
+        bookingMongoId: null,
+        paymentId: m.payment?.providerRef || "",
+        vendor: m.name || "",
+        remark: "Coins",
+        service: "Coins",
+        city: m.city || "",
+      });
+    }
+    const walletRecharges = await VendorTransaction.find({
+      transactionType: "wallet recharge",
+      type: "added",
+    }).lean();
+    for (const w of walletRecharges) {
+      const when = w.createdAt || w.date;
+      if (!passDate(when)) continue;
+      const money = Number(w.totalPaid || 0);
+      incomeFromCoins += money;
+      coinsSold += Number(w.coin || 0);
+      paid.push({
+        type: "coins_sold",
+        invoiceNumber: `COIN-${String(w._id).slice(-6)}`,
+        amount: money,
+        dateTime: when,
+        customerName: "",
+        bookingId: "Coins",
+        bookingMongoId: null,
+        paymentId: "",
+        vendor: "",
+        remark: `${Number(w.coin || 0)} coins`,
+        service: "Coins",
+        city: "",
+      });
+    }
+
+    paid.sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
+    pending.sort((a, b) => new Date(b.dateTime) - new Date(a.dateTime));
+
+    const r = (n) => Math.round(Number(n) || 0);
+    return res.status(200).json({
+      success: true,
+      summary: {
+        totalSales: r(totalSales),
+        amountYetToBeCollected: r(amountYetToBeCollected),
+        amountUnpaid: r(amountUnpaid),
+        coinsSold: r(coinsSold),
+        incomeFromCoins: r(incomeFromCoins),
+        onlinePayment: r(onlinePayment),
+        cashPayment: r(cashPayment),
+      },
+      paid,
+      pending,
+    });
+  } catch (error) {
+    console.error("getMoneyDashboard error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Server error", error: error.message });
+  }
+};
+
 exports.getAllEnquiries = async (req, res) => {
   try {
     const filter = buildFilter({
