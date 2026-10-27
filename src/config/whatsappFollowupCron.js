@@ -139,12 +139,37 @@ const RULES = [
     ],
   },
   {
-    // #14 — 24 h after hiring, final reminder, still Pending Hiring & unpaid.
+    // #5/#14 — final booking-payment reminder, still Pending Hiring & unpaid.
+    // Fire at the EARLIER of (24 h after hiring) or (11:00 IST one day before
+    // the project start date), so the customer is reminded before the 12:00 IST
+    // day-before auto-cancel.
     id: "bookingPaymentReminder2",
     anchor: "hiring",
     template: "hp_booking_payment_reminder_2",
     afterMins: 24 * 60,
     capMins: 36 * 60,
+    // Absolute target time (honored by runRule in place of the afterMins age).
+    sendAt: (b) => {
+      const marked = b?.assignedProfessional?.hiring?.markedDate;
+      const after24h = marked
+        ? moment(marked).valueOf() + 24 * 60 * 60 * 1000
+        : null;
+      // projectStartDate is a Date at 10:30 IST on the start day → take 11:00
+      // IST on the previous day.
+      const psd = b?.bookingDetails?.projectStartDate;
+      const preStart = psd
+        ? moment(psd)
+            .utcOffset(330)
+            .startOf("day")
+            .subtract(1, "day")
+            .hour(11)
+            .minute(0)
+            .second(0)
+            .valueOf()
+        : null;
+      const times = [after24h, preStart].filter((x) => x != null);
+      return times.length ? Math.min(...times) : null;
+    },
     bodyParams: (b) => [
       b?.customer?.name || "there",
       b?.selectedSlot?.slotDate
@@ -458,7 +483,15 @@ async function runRule(rule) {
   for (const b of bookings) {
     // The enquiry anchor is time-windowed in Mongo (createdDate); every other
     // anchor (startjob, hiring) enforces the window here in JS.
-    if (rule.anchor !== "enquiry") {
+    if (typeof rule.sendAt === "function") {
+      // Absolute target time (e.g. "11:00 the day before project start, or 24h
+      // after hiring, whichever is earlier"). Fire once now has reached it, but
+      // not if we're already well past it (capMins late-cap).
+      const target = rule.sendAt(b);
+      if (target == null) continue;
+      if (now < target) continue;
+      if (now - target > rule.capMins * 60 * 1000) continue;
+    } else if (rule.anchor !== "enquiry") {
       const t = anchorTime(rule, b);
       if (t == null) continue;
       const ageMin = (now - t) / 60000;
