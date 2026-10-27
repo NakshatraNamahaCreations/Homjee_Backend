@@ -1348,12 +1348,16 @@ exports.createBooking = async (req, res) => {
     // ------------------------------
     const updatedBooking = await UserBooking.findById(booking._id).lean();
 
-    // #4 booking confirmation — send the moment the booking is created, for
-    // EVERY booking, paid or not. House Painting site-visit leads take no
-    // online payment, so gating this on isEnquiry/payment meant those
-    // customers never got a confirmation. (Payment-milestone messages
-    // #15/#21/#26/#14 are separate and still fire after payment.)
-    await sendBookingConfirmation(updatedBooking);
+    // #4/#10 booking confirmation — send ONLY when the booking is already a
+    // real lead (isEnquiry === false). House Painting site-visit leads take no
+    // online payment, so they are isEnquiry:false here and DO get it. Bookings
+    // that still pay online (Deep Cleaning, HP with site-visit charges) stay
+    // isEnquiry:true and must NOT get a "Booking Confirmation" before paying —
+    // their confirmation fires from payment.service after the payment succeeds
+    // (WhatsApp bug #10). (Payment-milestone messages are separate.)
+    if (updatedBooking?.isEnquiry === false) {
+      await sendBookingConfirmation(updatedBooking);
+    }
 
     // Fan out to eligible vendors only once the booking is a real lead
     // (isEnquiry === false). For the online-payment path, the fan-out fires

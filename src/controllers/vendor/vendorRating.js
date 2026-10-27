@@ -17,8 +17,9 @@ exports.addVendorRating = async (req, res) => {
       });
     }
 
-    // --- STEP 2: If rating is 4–5, no feedback needed: auto-save ---
-    if (rating >= 4) {
+    // --- STEP 2: If rating is 3–5, no comment needed: auto-save + redirect
+    // the customer to the public review link (#6: 3-4-5 stars → redirect). ---
+    if (rating >= 3) {
       await VendorRating.create({
         vendorId,
         bookingId,
@@ -34,7 +35,7 @@ exports.addVendorRating = async (req, res) => {
       });
     }
 
-    // --- STEP 3: For 1–3 stars, feedback is required ---
+    // --- STEP 3: For 1–2 stars, open the comment box and save the feedback ---
     // if (rating <= 3 && (!feedback || feedback.trim().length === 0)) {
     //     return res.status(400).json({
     //         success: false,
