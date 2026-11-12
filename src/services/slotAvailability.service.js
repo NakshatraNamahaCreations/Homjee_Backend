@@ -177,16 +177,51 @@ function calculateAvailableSlots({
     };
   }
 
-  // For DC, also enforce per-date team headcount via leaves. (Distance,
-  // archive, coins, KPI gates run in the controller before us — we only
-  // see eligible vendors here. The leave check is date-specific so it
-  // lives here next to the time math.)
+  // For DC, enforce per-date team headcount via leaves AND members already
+  // committed to other active hirings that overlap this date (#9b). Previously
+  // only leaves were subtracted, so a vendor whose team met minTeamMembers on
+  // paper — but had members tied up on an overlapping (incl. multi-day) job —
+  // still passed the booking gate, then failed at job start with
+  // "no team members available". We now mirror checkVendorAvailabilityRange:
+  // a member is free only if NOT on leave this date AND NOT busy on another
+  // active hiring overlapping this date.
+  //
+  // Busy members are derived from the bookings already loaded for this engine:
+  // any active-hiring booking whose projectDate (or slot date) includes `date`
+  // marks its assigned team members busy for that vendor.
+  const busyMembersByVendor = new Map();
+  if (serviceType === "deep_cleaning") {
+    for (const b of bookings) {
+      const vid = b.assignedProfessional?.professionalId;
+      const hiring = b.assignedProfessional?.hiring;
+      if (!vid || !hiring) continue;
+      if (hiring.status && hiring.status !== "active") continue;
+      const projectDates = Array.isArray(hiring.projectDate)
+        ? hiring.projectDate.map(String)
+        : hiring.projectDate
+          ? [String(hiring.projectDate)]
+          : [];
+      const overlaps = projectDates.length
+        ? projectDates.includes(String(date))
+        : String(b.selectedSlot?.slotDate) === String(date);
+      if (!overlaps) continue;
+      const key = String(vid);
+      if (!busyMembersByVendor.has(key)) busyMembersByVendor.set(key, new Set());
+      (hiring.teamMember || []).forEach((tm) =>
+        busyMembersByVendor.get(key).add(String(tm.memberId)),
+      );
+    }
+  }
+
   const eligibleVendors =
     serviceType === "deep_cleaning"
       ? vendors.filter((v) => {
           const team = Array.isArray(v.team) ? v.team : [];
+          const busy = busyMembersByVendor.get(String(v._id)) || new Set();
           const free = team.filter(
-            (m) => !(m.markedLeaves || []).includes(date),
+            (m) =>
+              !(m.markedLeaves || []).includes(date) &&
+              !busy.has(String(m._id)),
           );
           return free.length >= (minTeamMembers || 1);
         })

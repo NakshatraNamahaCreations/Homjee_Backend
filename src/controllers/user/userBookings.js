@@ -4168,12 +4168,14 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
     const callerVendorId = String(req.query.vendorId || "").trim();
     let vendorStatus = "live";
     let isArchived = false;
+    let isShadowBanned = false;
 
     if (callerVendorId) {
       try {
         const v = await vendorAuthSchema.findById(callerVendorId).lean();
         if (v) {
           isArchived = !!v.isArchived;
+          isShadowBanned = !!v.shadowBanned;
           const activeBookings = await loadActiveHiringsForVendor(v._id);
           vendorStatus = computeVendorStatus(v, { activeBookings });
         }
@@ -4181,6 +4183,18 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
         console.error("vendor status gate (deep_cleaning) failed:", e);
         // Fall through — never let the gate hard-fail the existing flow.
       }
+    }
+
+    // #10 — a shadow-banned vendor must receive NO new leads anywhere. Fanout
+    // already excludes them from invites/pushes; this also hides new leads from
+    // the in-app nearby-leads feed so a banned vendor can't see/accept them.
+    if (isShadowBanned) {
+      return res.status(200).json({
+        success: true,
+        bookings: [],
+        vendorStatus: "shadow_banned",
+        allowed: false,
+      });
     }
 
     if (isArchived) {
@@ -4409,12 +4423,14 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
     const callerVendorId = String(req.query.vendorId || "").trim();
     let vendorStatus = "live";
     let isArchived = false;
+    let isShadowBanned = false;
 
     if (callerVendorId) {
       try {
         const v = await vendorAuthSchema.findById(callerVendorId).lean();
         if (v) {
           isArchived = !!v.isArchived;
+          isShadowBanned = !!v.shadowBanned;
           const activeBookings = await loadActiveHiringsForVendor(v._id);
           vendorStatus = computeVendorStatus(v, { activeBookings });
         }
@@ -4422,6 +4438,19 @@ exports.getBookingForNearByVendorsHousePainting = async (req, res) => {
         console.error("vendor status gate (house_painting) failed:", e);
         // Fall through — never let the gate hard-fail the existing flow.
       }
+    }
+
+    // #10 — a shadow-banned vendor receives NO new leads anywhere, including
+    // this in-app nearby-leads feed (fanout already excludes them from
+    // invites/pushes).
+    if (isShadowBanned) {
+      return res.status(200).json({
+        success: true,
+        isPerformanceLow: false,
+        bookings: [],
+        vendorStatus: "shadow_banned",
+        allowed: false,
+      });
     }
 
     if (isArchived) {
@@ -6154,7 +6183,11 @@ exports.recordAdminRefund = async (req, res) => {
     }
 
     const d = booking.bookingDetails || {};
-    const paid = Number(d.paidAmount || 0);
+    // #7a — the Total Amount Paid by the customer includes the House Painting
+    // site-visit charge (tracked separately from paidAmount). Without it the
+    // refundable cap excluded the site visit, so a full refund could not be
+    // processed.
+    const paid = Number(d.paidAmount || 0) + Number(d.siteVisitCharges || 0);
     const already = Number(d.refundAmount || 0);
     const refundable = Math.max(0, paid - already);
 
@@ -6251,7 +6284,9 @@ exports.bookingCancelledbyAdmin = async (req, res) => {
     const amt = Number(refundAmount) || 0;
     if (amt > 0) {
       const alreadyRefunded = Number(d.refundAmount || 0);
-      const paid = Number(d.paidAmount || 0);
+      // #7a — include the site-visit charge in the amount paid so the full
+      // refund (installments + site visit) can be processed.
+      const paid = Number(d.paidAmount || 0) + Number(d.siteVisitCharges || 0);
       const refundableNow = Math.max(0, paid - alreadyRefunded);
       // Cap the NEW refund so the cumulative total never exceeds what was paid.
       const applied = Math.min(amt, refundableNow);
@@ -7970,6 +8005,29 @@ exports.updateManualPayment = async (req, res) => {
     // activateInstallmentStage(d, stage);
     ensureInstallmentTargets(d, finalTotal, serviceType);
     const stage = normalizeStage(req.body.installmentStage, serviceType, d);
+
+    // #8 — A second / final payment (cash OR online) can only be collected once
+    // the VENDOR has explicitly requested it. We must check the stage's
+    // requestedAmount BEFORE activateInstallmentStage(), because that call
+    // auto-fills requestedAmount from the plan target — which let admin process
+    // (e.g.) the final payment in cash with no vendor request, prematurely
+    // hiding the "End Job" button and stranding the lead in "Project Ongoing".
+    // The booking / first payment needs no request.
+    const stageKeyPre =
+      stage === "first"
+        ? "firstPayment"
+        : stage === "second"
+          ? "secondPayment"
+          : "finalPayment";
+    const preRequested = Number(d[stageKeyPre]?.requestedAmount || 0);
+    if (stage !== "first" && !(preRequested > 0)) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "The vendor has not requested this payment yet. Ask the vendor to request the next payment before collecting it.",
+      });
+    }
+
     activateInstallmentStage(d, stage);
 
     // ✅ stage due lock
@@ -9473,6 +9531,24 @@ exports.updateEnquiry = async (req, res) => {
         await sendBookingConfirmation(updatedBooking);
       } catch (e) {
         console.error("[updateEnquiry] WA confirmation failed:", e?.message);
+      }
+
+      // #9a — this finalize path (e.g. a free House Painting site-visit lead)
+      // flips isEnquiry:false here but previously NEVER fanned the lead out to
+      // vendors, so no vendor was invited/pushed. Mirror createBooking: await
+      // the fan-out (so Render doesn't kill it after the response) and bust the
+      // slot cache. Paid paths (DC / paid site visit) stay isEnquiry:true and
+      // fan out from payment.service after payment — they are unaffected.
+      try {
+        await fanOutLeadToEligibleVendors(updatedBooking);
+      } catch (err) {
+        console.error("[updateEnquiry] fanout failed:", err?.message);
+      }
+      const sDate = updatedBooking?.selectedSlot?.slotDate;
+      if (sDate) {
+        invalidateForDate(sDate).catch((err) =>
+          console.error("[updateEnquiry] cache invalidate failed:", err?.message),
+        );
       }
     }
 

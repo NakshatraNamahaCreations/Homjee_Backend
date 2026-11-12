@@ -710,6 +710,59 @@ router.put("/admin/reschedule-booking/:bookingId", async (req, res) => {
     }
 
     /* --------------------------------------------------
+       #3 HIRED PROJECT → UPDATE SAME BOOKING (NO CLONE/RESET)
+       A hired House Painting (or Deep Cleaning) project that is rescheduled
+       must NOT go back to the start survey stage. Previously the "responded"
+       path cloned a new booking with status "Pending", which reopened the lead
+       to vendors and lost the hiring/payment state. Per spec we now just change
+       the date & time on the SAME booking and keep everything else (status,
+       assigned vendor, hiring, payments) exactly as it is. The vendor-slot
+       conflict guard above already ensured the vendor is free at the new slot.
+    -------------------------------------------------- */
+    const isHiredProject =
+      Boolean(booking.assignedProfessional?.hiring?.hiredDate) ||
+      booking.bookingDetails?.firstPayment?.status === "paid" ||
+      [
+        "Hired",
+        "Project Ongoing",
+        "Waiting for final payment",
+        "Project Completed",
+        "Job Ongoing",
+        "Job Completed",
+      ].includes(booking.bookingDetails?.status);
+
+    if (isHiredProject) {
+      const originalSlotPatch =
+        booking?.originalSlot?.slotDate || booking?.originalSlot?.slotTime
+          ? {}
+          : {
+              "originalSlot.slotDate": booking?.selectedSlot?.slotDate || "",
+              "originalSlot.slotTime": booking?.selectedSlot?.slotTime || "",
+            };
+
+      await UserBooking.updateOne(
+        { _id: bookingId },
+        {
+          $set: {
+            "selectedSlot.slotDate": slotDate,
+            "selectedSlot.slotTime": slotTime,
+            ...originalSlotPatch,
+          },
+        },
+        { session },
+      );
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return res.json({
+        success: true,
+        message: "Project rescheduled — date & time updated",
+        mode: "same-booking-hired",
+      });
+    }
+
+    /* --------------------------------------------------
        CASE 1: NOT RESPONDED → UPDATE SAME BOOKING
     -------------------------------------------------- */
 
