@@ -6,6 +6,9 @@ const { startLeadFanoutCron } = require("./src/config/leadFanoutCron");
 const {
   startWhatsappFollowupCron,
 } = require("./src/config/whatsappFollowupCron");
+const {
+  startManualPaymentExpiryCron,
+} = require("./src/config/manualPaymentExpiryCron");
 
 dotenv.config({ quiet: true });
 
@@ -18,6 +21,8 @@ startLeadFanoutCron();
 // Automated WhatsApp enquiry follow-ups (5 min / 1 h / 24 h). Only sends
 // templates that are approved and enabled in whatsappFollowupCron.js.
 startWhatsappFollowupCron();
+// #6d/#7d: auto-expire manual + buy-coins payment links 24h after creation.
+startManualPaymentExpiryCron();
 
 const PORT = process.env.PORT || 9000;
 

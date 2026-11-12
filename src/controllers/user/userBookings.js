@@ -556,8 +556,10 @@ const storeVendorPaymentNotification = async ({
 }) => {
   try {
     const paidAt = new Date();
-    const paidDate = moment(paidAt).format("DD/MM/YYYY"); // dd/mm/yyyy in most cases
-    const paidTime = moment(paidAt).format("hh:mm:ss A");
+    // #8b: format in IST (UTC+5:30) — the server runs in UTC, which made the
+    // vendor-app payment time display ~5.5h off.
+    const paidDate = moment(paidAt).utcOffset(330).format("DD/MM/YYYY");
+    const paidTime = moment(paidAt).utcOffset(330).format("hh:mm:ss A");
 
     const customerName = booking?.customer?.name || "-";
 
@@ -2535,18 +2537,35 @@ exports.getMoneyDashboard = async (req, res) => {
       const isCancelled = CANCELLED.has(bd.status);
 
       // -- paid customer / cash payments --
-      // Prefer the real payment history (payments[]). When it's empty (most
-      // bookings only track milestones), derive the paid rows from the paid
-      // firstPayment / secondPayment / finalPayment milestones instead.
-      const payHistory = (bd.payments || []).filter((p) => Number(p.amount) > 0);
+      // #5c: read the REAL payment ledger, which lives at the ROOT of the
+      // booking (`b.payments`), NOT under bookingDetails. The old code read
+      // `bd.payments` — which never exists — so payHistory was always empty and
+      // every booking fell back to the milestone summary. That milestone path
+      // (a) missed the House Painting site-visit charge entirely (it is never a
+      // milestone), (b) collapsed a part-cash/part-online installment into one
+      // row with a single method, and (c) carried no payment id. The root
+      // `payments[]` array is a clean, de-duplicated ledger — one entry per real
+      // transaction, each with its own amount / method / purpose / providerRef /
+      // timestamp — so mapping it one-to-one fixes all three:
+      //   - site_visit rows now appear (#5c "Site Visit Charges"),
+      //   - a cash part and an online part become TWO separate rows with
+      //     different invoice numbers and the online payment id (#5c cash+online),
+      //   - the razorpay payment id is shown instead of an empty value (#5a).
+      // Milestones remain the fallback only for legacy bookings that have no
+      // payments[] ledger, so nothing is double-counted (we use one source OR
+      // the other per booking, never both).
+      const payHistory = (b.payments || []).filter((p) => Number(p.amount) > 0);
       const paidEntries = payHistory.length
         ? payHistory.map((p, idx) => ({
             installment: p.installment || String(idx + 1),
             amount: Number(p.amount || 0),
             at: p.at,
             method: p.method,
-            providerRef: p.providerRef,
+            // Prefer the actual razorpay payment id; fall back to providerRef
+            // (which for online installments is the order id).
+            providerRef: p.razorpayPaymentId || p.providerRef,
             purpose: p.purpose,
+            seq: idx, // used to keep split-payment invoice numbers unique
           }))
         : [
             ["first", bd.firstPayment],
@@ -2554,13 +2573,14 @@ exports.getMoneyDashboard = async (req, res) => {
             ["final", bd.finalPayment],
           ]
             .filter(([, m]) => m && m.status === "paid" && Number(m.amount) > 0)
-            .map(([inst, m]) => ({
+            .map(([inst, m], idx) => ({
               installment: inst,
               amount: Number(m.amount || 0),
               at: m.paidAt,
               method: m.method,
               providerRef: null,
               purpose: null,
+              seq: idx,
             }));
 
       paidEntries.forEach((p, idx) => {
@@ -2573,9 +2593,11 @@ exports.getMoneyDashboard = async (req, res) => {
         else onlinePayment += amt;
         paid.push({
           type: isCash ? "cash_payment" : "customer_payment",
+          // Include the sequence so a split cash+online installment produces two
+          // distinct invoice numbers (#5c) rather than colliding on one.
           invoiceNumber: `INV-${bookingId || mongoId.slice(-6)}-${
-            p.installment || idx + 1
-          }`,
+            p.installment || "pay"
+          }-${(p.seq ?? idx) + 1}`,
           amount: amt,
           dateTime: p.at,
           customerName: custName,
@@ -2613,7 +2635,27 @@ exports.getMoneyDashboard = async (req, res) => {
       }
 
       // -- outstanding / pending for this booking --
-      if (!isCancelled) {
+      // #6c: a House Painting lead only belongs in the pending list once the
+      // booking payment is successful (status Hired onwards / firstPayment
+      // paid / a hiring date exists). Before that — quote finalised, survey,
+      // negotiation, pending-hiring — it must NOT appear, and its amount must
+      // not count toward "Amount yet to be collected". A cancelled project is
+      // already excluded by !isCancelled, which also removes it from pending.
+      // Deep Cleaning keeps its existing behaviour (booking payment is its
+      // first payment, so its pending = the final payment).
+      const isHP = b.serviceType === "house_painting";
+      const hpHired =
+        bd.status === "Hired" ||
+        bd.status === "Project Ongoing" ||
+        bd.status === "Waiting for final payment" ||
+        bd.status === "Project Completed" ||
+        bd.status === "Job Ongoing" ||
+        bd.status === "Job Completed" ||
+        bd?.firstPayment?.status === "paid" ||
+        !!b?.assignedProfessional?.hiring?.hiredDate;
+      const pendingAllowed = isHP ? hpHired : true;
+
+      if (!isCancelled && pendingAllowed) {
         const finalTotal = Number(bd.finalTotal || 0);
         const paidAmt = Number(bd.paidAmount || 0);
         const yet = Number(
@@ -2668,7 +2710,18 @@ exports.getMoneyDashboard = async (req, res) => {
         });
       } else if (status === "Pending") {
         const when = m.createdAt;
-        if (!passDate(when)) continue;
+        // #6d/#7d: a manual / buy-coins payment link auto-expires 24h after it
+        // is created. An expired, still-unpaid link must not appear in (or
+        // count toward) the pending list. The expiry cron flips these to
+        // "Failed"; this guard also covers the few minutes before it runs.
+        const ageMs = Date.now() - new Date(when).getTime();
+        if (Number.isFinite(ageMs) && ageMs > 24 * 60 * 60 * 1000) continue;
+        // #6e: the pending list reacts only to the city/service filters, never
+        // to the selected time frame — so NO passDate() filter here (the old
+        // `if (!passDate(when)) continue;` has been removed).
+        // #2: manual pending payments were shown in the pending list but their
+        // amount was never added to "Amount yet to be collected". Count it now.
+        amountYetToBeCollected += amt;
         pending.push({
           type: "manual_payment",
           amount: amt,
@@ -3026,6 +3079,79 @@ exports.getBookingForNearByVendorsDeepCleaning = async (req, res) => {
 };
 
 // deep cleaning metric
+/* -------------------------------------------------------------------------
+   Shared performance-metric helpers (Performance Dashboard spec).
+   Used by the two vendor-app endpoints below. Field paths verified against
+   the UserBooking model:
+     - booking_payment_received_datetime -> assignedProfessional.hiring.hiredDate
+       || bookingDetails.firstPayment.paidAt
+     - survey_start_time / start_job_time -> assignedProfessional.startedDate
+     - booking_datetime -> createdDate
+     - scheduled slot -> selectedSlot.{slotDate,slotTime}
+     - project total (excl. site visit, new total on scope change) -> finalTotal
+     - final payment -> bookingDetails.finalPayment.status === "paid"
+------------------------------------------------------------------------- */
+const PERF_CANCELLED = new Set([
+  "Customer Cancelled",
+  "Admin Cancelled",
+  "Cancelled",
+  "Cancelled Rescheduled",
+  "Customer Unreachable",
+  "Customer Denied",
+]);
+const perfCreatedAt = (l) => l.createdDate || l.createdAt || null;
+const perfProjectTotal = (l) => Number(l.bookingDetails?.finalTotal || 0);
+const perfHiredAt = (l) =>
+  l.assignedProfessional?.hiring?.hiredDate ||
+  l.bookingDetails?.firstPayment?.paidAt ||
+  null;
+const perfIsHired = (l) => {
+  const s = (l.bookingDetails?.status || "").toString().trim().toLowerCase();
+  return (
+    !!perfHiredAt(l) ||
+    l.bookingDetails?.firstPayment?.status === "paid" ||
+    [
+      "hired",
+      "project ongoing",
+      "waiting for final payment",
+      "project completed",
+      "job ongoing",
+      "job completed",
+    ].includes(s)
+  );
+};
+const perfSurveyAt = (l) => l.assignedProfessional?.startedDate || null;
+const perfFinalPaid = (l) =>
+  l.bookingDetails?.finalPayment?.status === "paid";
+const perfInMonth = (d, start, end) => {
+  if (!d) return false;
+  const t = new Date(d).getTime();
+  return Number.isFinite(t) && t >= start && t <= end;
+};
+// On-Time: start_job_time <= slot + 30 min grace. null => job not started.
+const perfOnTimeStatus = (l) => {
+  const sd = l.selectedSlot?.slotDate;
+  const st = l.selectedSlot?.slotTime;
+  const started = l.assignedProfessional?.startedDate;
+  const startedT = l.assignedProfessional?.startedTime;
+  if (!started || !sd || !st) return null;
+  const slotM = moment(`${sd} ${st}`, "YYYY-MM-DD hh:mm A");
+  const startM = startedT
+    ? moment(
+        `${moment(started).format("YYYY-MM-DD")} ${startedT}`,
+        "YYYY-MM-DD hh:mm A",
+      )
+    : moment(started);
+  if (!slotM.isValid() || !startM.isValid()) return null;
+  return startM.diff(slotM, "minutes") <= 30;
+};
+// A lead is relevant to a vendor if invited OR assigned to them.
+const perfRelevantToVendor = (l, vendorId) =>
+  (l.invitedVendors || []).some(
+    (v) => String(v.professionalId) === String(vendorId),
+  ) ||
+  String(l.assignedProfessional?.professionalId || "") === String(vendorId);
+
 exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
   try {
     const { vendorId, lat, long, timeframe } = req.params;
@@ -3108,117 +3234,79 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
     }
 
     // -------------------------------
-    //  FETCH BOOKINGS
+    //  DATASET PER TIMEFRAME (spec)
+    //    "last"  -> the vendor's 50 most-recent leads (ignore all dates)
+    //    "month" -> the vendor's leads, each metric filtered by its OWN
+    //               timestamp within the current month
     // -------------------------------
-    let bookingsQuery = UserBooking.find(query);
+    const nearby = await UserBooking.find(baseQuery)
+      .sort({ createdDate: -1 })
+      .limit(1000)
+      .exec();
+    const vendorLeads = nearby.filter((l) =>
+      perfRelevantToVendor(l, vendorId),
+    );
 
-    if (timeframe === "last") {
-      bookingsQuery = bookingsQuery.sort({ createdDate: -1 }).limit(50);
-    }
+    const isLast = timeframe === "last";
+    const monthStart = moment().startOf("month").valueOf();
+    const monthEnd = moment().endOf("month").valueOf();
 
-    const bookings = await bookingsQuery.exec();
-
-    if (!bookings.length) {
-      return res.status(200).json({
-        responseRate: 0,
-        cancellationRate: 0,
-        averageGsv: 0,
-        totalLeads: 0,
-        respondedLeads: 0,
-        cancelledLeads: 0,
-        timeframe,
-        averageRating: 0,
-        totalRatings: 0,
-        strikes: 0,
-      });
-    }
-
-    // -------------------------------
-    //  METRIC COUNTERS
-    // -------------------------------
-    // Client requirement: "Total Leads" must reflect the leads this vendor
-    // actually RESPONDED to — not every nearby/notified lead. Because a lead is
-    // broadcast to all eligible vendors in the radius, counting nearby leads
-    // makes the same lead show up in every vendor's Total Leads. So we now
-    // count invitations (for the response-rate denominator) and responses
-    // separately, and expose respondedLeads as totalLeads.
-    let invitedLeads = 0; // leads this vendor was actually invited to
-    let respondedLeads = 0;
-    let cancelledLeads = 0;
-    let totalRespondedGsv = 0; // ✅ only responded leads sum
-
-    // -------------------------------
-    //  PROCESS EACH BOOKING
-    // -------------------------------
-    for (const booking of bookings) {
-      // Find vendor invite
-      const vendorInvitation = (booking.invitedVendors || []).find(
-        (v) => String(v.professionalId) === String(vendorId),
-      );
-      if (!vendorInvitation) continue;
-
-      invitedLeads += 1;
-
-      const status = vendorInvitation.responseStatus;
-
-      // ✅ Responded = accepted OR customer_cancelled (counts as responded)
-      const isResponded =
-        status === "accepted" || status === "customer_cancelled";
-
-      // Compute booking cart value (GSV basis)
-      const bookingGsv = (booking.service || []).reduce(
-        (sum, s) => sum + Number(s.price || 0) * Number(s.quantity || 0),
-        0,
-      );
-
-      // ✅ Only responded leads contribute to GSV
-      if (isResponded) {
-        respondedLeads += 1;
-        totalRespondedGsv += bookingGsv;
-      }
-
-      // ✅ Vendor cancellation KPI logic (within 3 hours before slot)
-      if (
-        status === "customer_cancelled" &&
-        vendorInvitation.cancelledBy === "internal" &&
-        vendorInvitation.cancelledAt
-      ) {
-        const bookedSlot = moment(
-          `${booking?.selectedSlot?.slotDate} ${booking?.selectedSlot?.slotTime}`,
-          "YYYY-MM-DD hh:mm A",
+    // Total-leads denominator: last -> 50 most recent; month -> created this month.
+    const batch = isLast
+      ? vendorLeads.slice(0, 50)
+      : vendorLeads.filter((l) =>
+          perfInMonth(perfCreatedAt(l), monthStart, monthEnd),
         );
+    const totalLeads = batch.length;
 
-        const cancelledAt = moment(vendorInvitation.cancelledAt);
-        const diffHours = bookedSlot.diff(cancelledAt, "hours", true);
+    // In "last" mode count within the 50-batch; in "month" mode count across the
+    // vendor's leads filtered by each metric's own timestamp.
+    const metricList = (condFn, tsFn) =>
+      isLast
+        ? batch.filter(condFn)
+        : vendorLeads.filter(
+            (l) => condFn(l) && perfInMonth(tsFn(l), monthStart, monthEnd),
+          );
 
-        if (diffHours >= 0 && diffHours <= 3) {
-          cancelledLeads += 1;
-        }
-      }
-    }
+    // #7 Avg GSV — hired projects, finalTotal (new total on scope change).
+    const hiredArr = metricList(perfIsHired, perfHiredAt);
+    const averageGsv = hiredArr.length
+      ? hiredArr.reduce((s, l) => s + perfProjectTotal(l), 0) / hiredArr.length
+      : 0;
 
-    // -------------------------------
-    //  FINAL METRICS
-    // -------------------------------
-    // Response rate = responded / invited (the true denominator).
-    const responseRate =
-      invitedLeads > 0 ? (respondedLeads / invitedLeads) * 100 : 0;
+    // #8a On-Time % — on-time jobs / jobs started (start_job_time).
+    const startedArr = metricList(
+      (l) => perfOnTimeStatus(l) !== null,
+      perfSurveyAt,
+    );
+    const onTimeLeads = startedArr.filter(
+      (l) => perfOnTimeStatus(l) === true,
+    ).length;
+    const onTimeStartedRate = startedArr.length
+      ? (onTimeLeads / startedArr.length) * 100
+      : 0;
 
-    const cancellationRate =
-      respondedLeads > 0 ? (cancelledLeads / respondedLeads) * 100 : 0;
-
-    // ✅ Avg GSV = total responded value / responded count
-    const averageGsv =
-      respondedLeads > 0 ? totalRespondedGsv / respondedLeads : 0;
+    // #8b Cancellation % — cancelled status / total leads.
+    const cancelledArr = metricList(
+      (l) => PERF_CANCELLED.has(l.bookingDetails?.status),
+      perfCreatedAt,
+    );
+    const cancelledLeads = cancelledArr.length;
+    const cancellationRate = totalLeads
+      ? (cancelledLeads / totalLeads) * 100
+      : 0;
 
     return res.status(200).json({
-      responseRate: parseFloat(responseRate.toFixed(2)),
+      // On-Time % replaces the old Response %. responseRate is kept pointing at
+      // On-Time % for backward-compatibility with the existing vendor-app UI.
+      onTimeStartedRate: parseFloat(onTimeStartedRate.toFixed(2)),
+      onTimeLeads,
+      startedLeads: startedArr.length,
+      responseRate: parseFloat(onTimeStartedRate.toFixed(2)),
       cancellationRate: parseFloat(cancellationRate.toFixed(2)),
       averageGsv: parseFloat(averageGsv.toFixed(2)),
-      // Total Leads now = leads this vendor responded to (client requirement).
-      totalLeads: respondedLeads,
-      invitedLeads, // kept for reference / response-rate denominator
-      respondedLeads,
+      totalLeads,
+      hiredLeads: hiredArr.length,
       cancelledLeads,
       timeframe,
       averageRating: parseFloat(averageRating.toFixed(2)),
@@ -3299,126 +3387,66 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       strikes = ratingStats[0].strikes || 0;
     }
 
-    // ---------------- Fetch bookings ----------------
-    // We need to compute "recent 50 hired leads" (or fewer),
-    // so fetch a window and stop once we collected 50 HIRED.
-    let bookingsQuery = UserBooking.find(query).sort({ createdDate: -1 });
+    // ---------------- Dataset per timeframe (spec) ----------------
+    //   "last"  -> the vendor's 50 most-recent leads (ignore all dates)
+    //   "month" -> the vendor's leads, each metric filtered by its OWN
+    //              timestamp within the current month
+    const nearby = await UserBooking.find(baseQuery)
+      .sort({ createdDate: -1 })
+      .limit(1000)
+      .exec();
+    const vendorLeads = nearby.filter((l) =>
+      perfRelevantToVendor(l, vendorId),
+    );
 
-    // month can also exceed 50, so still fetch enough
-    const fetchLimit = 500; // safe window; adjust if your volume is huge
-    const bookings = await bookingsQuery.limit(fetchLimit).exec();
+    const isLast = timeframe === "last";
+    const monthStart = moment().startOf("month").valueOf();
+    const monthEnd = moment().endOf("month").valueOf();
 
-    if (!bookings.length) {
-      return res.status(200).json({
-        surveyRate: 0,
-        hiringRate: 0,
-        averageGsv: 0,
-        totalLeads: 0,
-        surveyLeads: 0,
-        hiredLeads: 0,
-        timeframe,
-        averageRating: 0,
-        totalRatings: 0,
-        strikes: 0,
-      });
-    }
+    // Total-leads denominator: last -> 50 most recent; month -> created this month.
+    const batch = isLast
+      ? vendorLeads.slice(0, 50)
+      : vendorLeads.filter((l) =>
+          perfInMonth(perfCreatedAt(l), monthStart, monthEnd),
+        );
+    const totalLeads = batch.length;
 
-    // ---------------- Metrics ----------------
-    // "Total Leads" now counts leads this vendor RESPONDED to (accepted / was
-    // assigned), not merely notified — same client requirement as DC, so a lead
-    // broadcast to many vendors isn't counted against every one of them.
-    let invitedLeads = 0; // relevant to this vendor (invited OR assigned)
-    let respondedLeads = 0; // accepted / assigned to this vendor
-    let surveyLeads = 0;
-    let hiredLeads = 0; // total hired in fetched window (we cap selection at 50)
-    let selectedHiredCount = 0; // ✅ used for Avg GSV denominator (<= 50)
-    let totalSelectedHiredGsv = 0;
+    const metricList = (condFn, tsFn) =>
+      isLast
+        ? batch.filter(condFn)
+        : vendorLeads.filter(
+            (l) => condFn(l) && perfInMonth(tsFn(l), monthStart, monthEnd),
+          );
 
-    for (const booking of bookings) {
-      const invited = (booking.invitedVendors || []).find(
-        (v) => String(v.professionalId) === String(vendorId),
-      );
+    // #4 Survey % — surveys (survey_start_time) / total leads.
+    const surveyLeads = metricList(
+      (l) => !!perfSurveyAt(l),
+      perfSurveyAt,
+    ).length;
+    const surveyRate = totalLeads ? (surveyLeads / totalLeads) * 100 : 0;
 
-      const assignedToVendor =
-        String(booking?.assignedProfessional?.professionalId || "") ===
-        String(vendorId);
+    // #5 Hiring % — hirings (booking_payment_received) / total leads.
+    const hiredArr = metricList(perfIsHired, perfHiredAt);
+    const hiredLeads = hiredArr.length;
+    const hiringRate = totalLeads ? (hiredLeads / totalLeads) * 100 : 0;
 
-      // lead relevant to this vendor
-      if (!invited && !assignedToVendor) continue;
-
-      invitedLeads += 1;
-
-      // Responded = the vendor accepted the lead (or won/was assigned it).
-      const responded =
-        assignedToVendor || invited?.responseStatus === "accepted";
-      if (responded) respondedLeads += 1;
-
-      // ------ SURVEY LOGIC ------
-      const isSurvey =
-        booking?.bookingDetails &&
-        (booking.bookingDetails.status === "Project Ongoing" ||
-          booking.bookingDetails.status === "Survey Ongoing" ||
-          booking.bookingDetails.status === "Survey Completed" ||
-          !!booking?.assignedProfessional?.startedDate ||
-          !!booking?.bookingDetails?.isSurveyStarted);
-
-      if (isSurvey) surveyLeads += 1;
-
-      // ------ HIRING LOGIC ------
-      const isHired =
-        booking?.bookingDetails &&
-        (booking.bookingDetails.status === "Hired" ||
-          booking.bookingDetails.status === "Project Ongoing" ||
-          booking.bookingDetails.status === "Waiting for final payment" ||
-          booking.bookingDetails.status === "Project Completed" ||
-          (booking.bookingDetails.firstPayment &&
-            booking.bookingDetails.firstPayment.status === "paid") ||
-          !!booking?.assignedProfessional?.hiring?.hiredDate);
-
-      if (isHired) {
-        hiredLeads += 1;
-
-        // ✅ select only the most recent 50 hired leads (or fewer)
-        if (selectedHiredCount < 50) {
-          const gsv = Number(booking?.bookingDetails?.finalTotal || 0);
-          totalSelectedHiredGsv += gsv;
-          selectedHiredCount += 1;
-        }
-
-        // If we've selected 50 hired leads, we can stop early (since sorted desc)
-        if (selectedHiredCount >= 50) break;
-      }
-    }
-
-    // KPIs — rates are now against responded leads (of the leads I took, how
-    // many reached survey / hiring).
-    const surveyRate =
-      respondedLeads > 0 ? (surveyLeads / respondedLeads) * 100 : 0;
-    const hiringRate =
-      respondedLeads > 0 ? (hiredLeads / respondedLeads) * 100 : 0;
-
-    // ✅ Avg GSV = (sum of selected hired lead values) / (count of selected hired leads)
-    // selectedHiredCount is <= 50, could be below 50
-    const averageGsv =
-      selectedHiredCount > 0 ? totalSelectedHiredGsv / selectedHiredCount : 0;
+    // #3 Avg GSV — hired projects, finalTotal (new total on scope change),
+    // excluding site-visit charges (finalTotal already excludes them).
+    const averageGsv = hiredArr.length
+      ? hiredArr.reduce((s, l) => s + perfProjectTotal(l), 0) / hiredArr.length
+      : 0;
 
     return res.status(200).json({
       surveyRate: parseFloat(surveyRate.toFixed(2)),
       hiringRate: parseFloat(hiringRate.toFixed(2)),
       averageGsv: parseFloat(averageGsv.toFixed(2)),
-      // Total Leads now = leads this vendor responded to (client requirement).
-      totalLeads: respondedLeads,
-      invitedLeads, // kept for reference
-      respondedLeads,
+      totalLeads,
       surveyLeads,
       hiredLeads,
       timeframe,
       averageRating: parseFloat(averageRating.toFixed(2)),
       totalRatings,
       strikes,
-      // helpful for debugging/validation
-      selectedHiredCount, // ✅ shows whether we used 50 or less
-      totalSelectedHiredGsv: parseFloat(totalSelectedHiredGsv.toFixed(2)),
     });
   } catch (error) {
     console.error("Error calculating house painters vendor metrics:", error);
@@ -3767,40 +3795,53 @@ exports.getOverallPerformance = async (req, res) => {
   try {
     const { city = "All", period = "all" } = req.query;
 
-    /* -----------------------------
-        1. PREPARE DATE FILTER
-    ----------------------------- */
-    let dateFilter = {};
+    /* -----------------------------------------------------------------
+       PERFORMANCE DASHBOARD — rewritten to the spec.
+       Key principles:
+         - Each metric is filtered by its OWN trigger timestamp within the
+           selected month (NOT one global createdDate filter).
+         - Denominators follow the spec: Survey%/Hiring%/Cancellation% use
+           TOTAL LEADS; On-Time% uses JOBS STARTED (not total leads).
+         - Avg GSV = sum(project total of HIRED projects) / count(hired),
+           using finalTotal (which already excludes site-visit charges and is
+           overwritten with the NEW total when a scope change is approved).
+         - The bottom Vendor table ignores the time filter and uses each
+           vendor's last 50 leads (honouring only the city filter).
+    ----------------------------------------------------------------- */
 
+    // ---- month window (null = "all" => no time filter) ----
+    let monthStart = null;
+    let monthEnd = null;
     if (period === "this_month") {
-      dateFilter.createdDate = {
-        $gte: moment().startOf("month").toDate(),
-      };
+      monthStart = moment().startOf("month").toDate();
+      monthEnd = moment().endOf("month").toDate();
+    } else if (period === "last_month") {
+      monthStart = moment().subtract(1, "month").startOf("month").toDate();
+      monthEnd = moment().subtract(1, "month").endOf("month").toDate();
+    }
+    const inMonth = (d) => {
+      if (!monthStart) return true; // "all"
+      if (!d) return false;
+      const t = new Date(d).getTime();
+      return (
+        Number.isFinite(t) &&
+        t >= monthStart.getTime() &&
+        t <= monthEnd.getTime()
+      );
+    };
+
+    // ---- #1 City filter: case-INSENSITIVE exact match (the old exact,
+    // case-sensitive match on address.city is why the city filter "did not
+    // work" when the stored casing/spacing differed). ----
+    const cityFilter = {};
+    if (city && city !== "All") {
+      const esc = String(city).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      cityFilter["address.city"] = { $regex: new RegExp(`^${esc}$`, "i") };
     }
 
-    if (period === "last_month") {
-      dateFilter.createdDate = {
-        $gte: moment().subtract(1, "month").startOf("month").toDate(),
-        $lte: moment().subtract(1, "month").endOf("month").toDate(),
-      };
-    }
-
-    /* -----------------------------
-        2. CITY FILTER
-    ----------------------------- */
-    let cityFilter = {};
-    if (city !== "All") {
-      cityFilter["address.city"] = city;
-    }
-
-    /* -----------------------------
-        3. FETCH ALL LEADS
-    ----------------------------- */
-    const leads = await UserBooking.find({
-      ...dateFilter,
-      ...cityFilter,
-      isEnquiry: false,
-    });
+    // Fetch ALL non-enquiry leads for the city. No date filter here — each
+    // metric applies its own timestamp window below.
+    const leads = await UserBooking.find({ ...cityFilter, isEnquiry: false });
 
     const normalize = (v) => (v ?? "").toString().trim().toLowerCase();
     const isHP = (lead) =>
@@ -3811,360 +3852,293 @@ exports.getOverallPerformance = async (req, res) => {
     const hpLeads = leads.filter(isHP);
     const dcLeads = leads.filter(isDC);
 
-    /* -----------------------------
-        4. CALCULATE GSV
-    ----------------------------- */
-    const calcGSV = (arr) => {
-      let total = 0;
-      arr.forEach((l) => {
-        l.service?.forEach((s) => {
-          total += (s.price || 0) * (s.quantity || 1);
-        });
-      });
-      return total;
+    /* ---- shared field accessors (exact schema paths per spec) ---- */
+    const CANCELLED = new Set([
+      "Customer Cancelled",
+      "Admin Cancelled",
+      "Cancelled",
+      "Cancelled Rescheduled",
+      "Customer Unreachable",
+      "Customer Denied",
+    ]);
+    // Project total EXCLUDING site visit. finalTotal already excludes the
+    // site-visit charge and is overwritten with the approved new total on a
+    // scope change — so it is both the "new total" and site-visit-free.
+    const projectTotal = (l) => Number(l.bookingDetails?.finalTotal || 0);
+    // booking_payment_received_datetime (HP hiring payment / DC first payment)
+    const hiredAt = (l) =>
+      l.assignedProfessional?.hiring?.hiredDate ||
+      l.bookingDetails?.firstPayment?.paidAt ||
+      null;
+    const isHired = (l) => {
+      const s = normalize(l.bookingDetails?.status);
+      return (
+        !!hiredAt(l) ||
+        l.bookingDetails?.firstPayment?.status === "paid" ||
+        [
+          "hired",
+          "project ongoing",
+          "waiting for final payment",
+          "project completed",
+          "job ongoing",
+          "job completed",
+        ].includes(s)
+      );
     };
+    const surveyAt = (l) => l.assignedProfessional?.startedDate || null; // survey_start_time / start_job_time (DC)
+    const createdAt = (l) => l.createdDate || l.createdAt || null; // booking_datetime
+    const finalPaid = (l) =>
+      l.bookingDetails?.finalPayment?.status === "paid"; // DC "Project Completed"
+    // On-Time: start_job_time <= slot + 30 min grace. null => job not started.
+    const onTimeStatus = (l) => {
+      const sd = l.selectedSlot?.slotDate;
+      const st = l.selectedSlot?.slotTime;
+      const started = l.assignedProfessional?.startedDate;
+      const startedT = l.assignedProfessional?.startedTime;
+      if (!started || !sd || !st) return null;
+      const slotM = moment(`${sd} ${st}`, "YYYY-MM-DD hh:mm A");
+      const startM = startedT
+        ? moment(
+            `${moment(started).format("YYYY-MM-DD")} ${startedT}`,
+            "YYYY-MM-DD hh:mm A",
+          )
+        : moment(started);
+      if (!slotM.isValid() || !startM.isValid()) return null;
+      return startM.diff(slotM, "minutes") <= 30;
+    };
+    const respondedFor = (l, type) =>
+      type === "hp"
+        ? !!l.assignedProfessional?.acceptedDate
+        : l.invitedVendors?.[0]?.responseStatus === "accepted";
 
-    /* -----------------------------
-        5. HOUSE PAINTING METRICS
-    ----------------------------- */
-    let hpResponded = 0;
-    let hpSurvey = 0;
-    let hpHiring = 0;
-    let hpVendorRatings = new Map(); // Store ratings by vendor for aggregation
+    // ===================== CARD METRICS (admin, time-based) =====================
+    // Total leads = leads created (booking_datetime) in the selected month.
+    const hpLeadsMonth = hpLeads.filter((l) => inMonth(createdAt(l)));
+    const dcLeadsMonth = dcLeads.filter((l) => inMonth(createdAt(l)));
 
-    // Process house painting leads
-    for (const lead of hpLeads) {
-      const prof = lead.assignedProfessional;
-      if (!prof) continue;
+    // #3 HP Avg GSV — hired projects whose booking-payment-received is in month.
+    const hpHiredMonth = hpLeads.filter(
+      (l) => isHired(l) && inMonth(hiredAt(l)),
+    );
+    const hpAvgGsv = hpHiredMonth.length
+      ? hpHiredMonth.reduce((s, l) => s + projectTotal(l), 0) /
+        hpHiredMonth.length
+      : 0;
 
-      if (prof.acceptedDate) hpResponded++;
-      if (prof.startedDate) hpSurvey++;
+    // #4 HP Survey % — surveys (survey_start_time in month) / total leads in month.
+    const hpSurveyCount = hpLeads.filter(
+      (l) => surveyAt(l) && inMonth(surveyAt(l)),
+    ).length;
+    const hpSurveyPct = hpLeadsMonth.length
+      ? (hpSurveyCount / hpLeadsMonth.length) * 100
+      : 0;
 
-      const status = normalize(lead.bookingDetails?.status);
+    // #5 HP Hiring % — hirings (booking-payment-received in month) / total leads.
+    const hpHiringPct = hpLeadsMonth.length
+      ? (hpHiredMonth.length / hpLeadsMonth.length) * 100
+      : 0;
 
-      const isHired =
-        status === "hired" ||
-        status === "project ongoing" ||
-        lead.bookingDetails?.firstPayment?.status === "paid";
+    // #7 DC Avg GSV — hired projects, finalTotal (new total on scope change).
+    const dcHiredMonth = dcLeads.filter(
+      (l) => isHired(l) && inMonth(hiredAt(l)),
+    );
+    const dcAvgGsv = dcHiredMonth.length
+      ? dcHiredMonth.reduce((s, l) => s + projectTotal(l), 0) /
+        dcHiredMonth.length
+      : 0;
 
-      if (isHired) hpHiring++;
+    // #8a DC On-Time % — on-time jobs / jobs started (start_job_time in month).
+    const dcStartedMonth = dcLeads.filter(
+      (l) => onTimeStatus(l) !== null && inMonth(surveyAt(l)),
+    );
+    const dcOnTimeStarted = dcStartedMonth.filter(
+      (l) => onTimeStatus(l) === true,
+    ).length;
+    const dcOnTimePct = dcStartedMonth.length
+      ? (dcOnTimeStarted / dcStartedMonth.length) * 100
+      : 0;
 
-      // Collect vendor IDs for rating calculation
-      const vendorId = prof.professionalId;
-      if (vendorId && !hpVendorRatings.has(vendorId)) {
-        // Calculate ratings for this vendor
-        const ratings = await calculateVendorRatings(
-          vendorId,
-          period === "this_month" ? "month" : "last",
-        );
-        hpVendorRatings.set(vendorId, ratings);
-      }
-    }
+    // #8b DC Cancellation % — cancelled status / total leads in month.
+    const dcCancelledCount = dcLeadsMonth.filter((l) =>
+      CANCELLED.has(l.bookingDetails?.status),
+    ).length;
+    const dcCancelPct = dcLeadsMonth.length
+      ? (dcCancelledCount / dcLeadsMonth.length) * 100
+      : 0;
 
-    const hpTotalGsv = calcGSV(hpLeads);
-    const hpAvgGsv = hpLeads.length ? hpTotalGsv / hpLeads.length : 0;
-
-    // Calculate overall ratings for house painting category
-    let hpTotalRatingsSum = 0;
-    let hpTotalRatingsCount = 0;
-    let hpTotalStrikes = 0;
-
-    hpVendorRatings.forEach((ratingData) => {
-      hpTotalRatingsSum += ratingData.averageRating * ratingData.totalRatings;
-      hpTotalRatingsCount += ratingData.totalRatings;
-      hpTotalStrikes += ratingData.strikes;
-    });
-
-    const hpAverageRating =
-      hpTotalRatingsCount > 0 ? hpTotalRatingsSum / hpTotalRatingsCount : 0;
-
-    /* -----------------------------
-        6. DEEP CLEANING METRICS
-    ----------------------------- */
-    let dcResponded = 0;
-    let dcCancelled = 0;
-    // On-Time aggregates: how many DC leads had a start recorded and
-    // how many of those started within 30 min of the slot. Drives the
-    // new On-Time % metric that replaces Response % in DC dashboards.
-    let dcStarted = 0;
-    let dcOnTimeStarted = 0;
-    let dcVendorRatings = new Map();
-
-    // Process deep cleaning leads
-    for (const lead of dcLeads) {
-      const invited = lead.invitedVendors?.[0];
-      if (!invited) continue;
-
-      if (invited.responseStatus === "accepted") dcResponded++;
-
-      // FIX: Proper cancellation counting logic
-      if (invited.responseStatus === "customer_cancelled") {
-        const slot = moment(
-          `${lead.selectedSlot.slotDate} ${lead.selectedSlot.slotTime}`,
-          "YYYY-MM-DD hh:mm A",
-        );
-        const cancelled = moment(invited.cancelledAt);
-        const diff = slot.diff(cancelled, "hours", true);
-
-        if (diff >= 0 && diff <= 3) {
-          dcCancelled++;
-        }
-      }
-
-      // On-Time accumulation
-      const startedDate = lead?.assignedProfessional?.startedDate;
-      const startedTime = lead?.assignedProfessional?.startedTime;
-      const slotDate = lead?.selectedSlot?.slotDate;
-      const slotTime = lead?.selectedSlot?.slotTime;
-      if (startedDate && slotDate && slotTime) {
-        dcStarted++;
-        const slotMoment = moment(
-          `${slotDate} ${slotTime}`,
-          "YYYY-MM-DD hh:mm A",
-        );
-        const startMoment = startedTime
-          ? moment(
-              `${moment(startedDate).format("YYYY-MM-DD")} ${startedTime}`,
-              "YYYY-MM-DD hh:mm A",
-            )
-          : moment(startedDate);
-        if (
-          slotMoment.isValid() &&
-          startMoment.isValid() &&
-          startMoment.diff(slotMoment, "minutes") < 30
-        ) {
-          dcOnTimeStarted++;
-        }
-      }
-
-      // Collect vendor ID for rating calculation
-      const vendorId = invited.professionalId;
-      if (vendorId && !dcVendorRatings.has(vendorId)) {
-        const ratings = await calculateVendorRatings(
-          vendorId,
-          period === "this_month" ? "month" : "last",
-        );
-        dcVendorRatings.set(vendorId, ratings);
-      }
-    }
-
-    const dcTotalGsv = calcGSV(dcLeads);
-    const dcAvgGsv = dcLeads.length ? dcTotalGsv / dcLeads.length : 0;
-
-    // Calculate overall ratings for deep cleaning category
-    let dcTotalRatingsSum = 0;
-    let dcTotalRatingsCount = 0;
-    let dcTotalStrikes = 0;
-
-    dcVendorRatings.forEach((ratingData) => {
-      dcTotalRatingsSum += ratingData.averageRating * ratingData.totalRatings;
-      dcTotalRatingsCount += ratingData.totalRatings;
-      dcTotalStrikes += ratingData.strikes;
-    });
-
-    const dcAverageRating =
-      dcTotalRatingsCount > 0 ? dcTotalRatingsSum / dcTotalRatingsCount : 0;
-
-    /* -----------------------------
-        7. VENDOR-WISE METRICS
-    ----------------------------- */
-    const getVendorStats = async (arr, type) => {
-      const map = {};
-
-      for (const lead of arr) {
-        let vendorId;
-        let prof;
-
-        if (type === "hp") {
-          prof = lead.assignedProfessional;
-          if (!prof) continue;
-          vendorId = prof.professionalId;
-        } else {
-          // For DC, find the vendor in invitedVendors
-          // const invited = lead.invitedVendors?.find(
-          //   (iv) => String(iv.professionalId) === String(vendorId),
-          // );   // wrong
-          const invited = lead.invitedVendors?.[0];
-          if (!invited) continue;
-          prof = invited;
-          vendorId = invited.professionalId;
-          if (
-            lead.assignedProfessional &&
-            String(lead.assignedProfessional.professionalId) ===
-              String(vendorId)
-          ) {
-            prof = {
-              ...invited,
-              name: lead.assignedProfessional.name,
-              acceptedDate: lead.assignedProfessional.acceptedDate,
-              startedDate: lead.assignedProfessional.startedDate,
-            };
-          } else {
-            prof = invited;
-          }
-        }
-
-        if (!vendorId) continue;
-
-        if (!map[vendorId]) {
-          // Get vendor ratings
-          const ratings = await calculateVendorRatings(
-            vendorId,
+    // ---- category ratings (aggregate each vendor's ratings once) ----
+    const aggregateCategoryRatings = async (arr, getVendorId) => {
+      const seen = new Map();
+      for (const l of arr) {
+        const vid = getVendorId(l);
+        if (vid && !seen.has(String(vid))) {
+          const r = await calculateVendorRatings(
+            vid,
             period === "this_month" ? "month" : "last",
           );
-
-          map[vendorId] = {
-            vendorId: vendorId,
-            name: prof.name || "Unknown",
-            totalLeads: 0,
-            responded: 0,
-            survey: 0,
-            hired: 0,
-            cancelled: 0,
-            onTimeStarted: 0,
-            gsv: 0,
-            ratingSum:
-              ratings.totalRatings > 0
-                ? ratings.averageRating * ratings.totalRatings
-                : 0,
-            ratingCount: ratings.totalRatings,
-            strikes: ratings.strikes,
-          };
+          seen.set(String(vid), r);
         }
+      }
+      let sum = 0;
+      let count = 0;
+      let strikes = 0;
+      seen.forEach((r) => {
+        sum += (r.averageRating || 0) * (r.totalRatings || 0);
+        count += r.totalRatings || 0;
+        strikes += r.strikes || 0;
+      });
+      return {
+        averageRating: count > 0 ? sum / count : 0,
+        totalRatings: count,
+        strikes,
+      };
+    };
+    const hpRating = await aggregateCategoryRatings(
+      hpLeadsMonth,
+      (l) => l.assignedProfessional?.professionalId,
+    );
+    const dcRating = await aggregateCategoryRatings(
+      dcLeadsMonth,
+      (l) => l.invitedVendors?.[0]?.professionalId,
+    );
+    const hpAverageRating = hpRating.averageRating;
+    const hpTotalRatingsCount = hpRating.totalRatings;
+    const hpTotalStrikes = hpRating.strikes;
+    const dcAverageRating = dcRating.averageRating;
+    const dcTotalRatingsCount = dcRating.totalRatings;
+    const dcTotalStrikes = dcRating.strikes;
 
-        const v = map[vendorId];
-
-        v.totalLeads++;
-
-        if (prof.acceptedDate) v.responded++;
-        if (prof.startedDate) {
-          v.survey++;
-          // On-Time tracking: started within 30 min of customer's slot.
-          // Per spec — drives the new On-Time % metric for Deep Cleaning,
-          // which replaces Response % in the dashboards (Response % can't
-          // be meaningfully computed once leads broadcast to all vendors).
-          const slotDate = lead?.selectedSlot?.slotDate;
-          const slotTime = lead?.selectedSlot?.slotTime;
-          const startedDate = lead?.assignedProfessional?.startedDate;
-          const startedTime = lead?.assignedProfessional?.startedTime;
-          if (slotDate && slotTime && startedDate) {
-            const slotMoment = moment(
-              `${slotDate} ${slotTime}`,
-              "YYYY-MM-DD hh:mm A",
-            );
-            const startMoment = startedTime
-              ? moment(
-                  `${moment(startedDate).format("YYYY-MM-DD")} ${startedTime}`,
-                  "YYYY-MM-DD hh:mm A",
-                )
-              : moment(startedDate);
-            if (
-              slotMoment.isValid() &&
-              startMoment.isValid() &&
-              startMoment.diff(slotMoment, "minutes") < 30
-            ) {
-              v.onTimeStarted++;
-            }
-          }
+    /* -----------------------------------------------------------------
+        #9 VENDOR PERFORMANCE TABLE (bottom of admin panel)
+        Always based on each vendor's LAST 50 leads, ignoring the time
+        filter, but honouring the city filter (already applied to `leads`).
+        Survey/Hiring/Cancellation denominators = total leads in the 50-batch;
+        On-Time denominator = jobs started; DC "Project Completed" = final
+        payment received.
+    ----------------------------------------------------------------- */
+    const buildVendorTable = async (arr, type) => {
+      // group every (city-filtered, all-time) lead by its vendor
+      const byVendor = new Map();
+      for (const l of arr) {
+        let vid;
+        let name;
+        if (type === "hp") {
+          const prof = l.assignedProfessional;
+          if (!prof?.professionalId) continue;
+          vid = String(prof.professionalId);
+          name = prof.name;
+        } else {
+          const inv = l.invitedVendors?.[0];
+          if (!inv?.professionalId) continue;
+          vid = String(inv.professionalId);
+          name =
+            l.assignedProfessional &&
+            String(l.assignedProfessional.professionalId) === vid
+              ? l.assignedProfessional.name
+              : inv.name;
         }
-
-        const status = normalize(lead.bookingDetails?.status);
-        const isHired =
-          status === "hired" ||
-          status === "project ongoing" ||
-          lead.bookingDetails?.firstPayment?.status === "paid";
-
-        if (isHired) v.hired++;
-
-        if (type === "dc") {
-          if (prof.responseStatus === "customer_cancelled") {
-            const slot = moment(
-              `${lead.selectedSlot.slotDate} ${lead.selectedSlot.slotTime}`,
-              "YYYY-MM-DD hh:mm A",
-            );
-            const cancelled = moment(prof.cancelledAt);
-            const diff = slot.diff(cancelled, "hours", true);
-
-            if (diff >= 0 && diff <= 3) {
-              v.cancelled++;
-            }
-          }
-        }
-
-        lead.service?.forEach((s) => {
-          v.gsv += (s.price || 0) * (s.quantity || 1);
-        });
+        if (!byVendor.has(vid)) byVendor.set(vid, { name, leads: [] });
+        byVendor.get(vid).leads.push(l);
       }
 
-      // Convert map to array and calculate final metrics
-      return Object.values(map).map((v) => ({
-        ...v,
-        responseRate: v.totalLeads
-          ? parseFloat(((v.responded / v.totalLeads) * 100).toFixed(2))
-          : 0,
-        surveyRate: v.responded
-          ? parseFloat(((v.survey / v.responded) * 100).toFixed(2))
-          : 0,
-        hiringRate: v.responded
-          ? parseFloat(((v.hired / v.responded) * 100).toFixed(2))
-          : 0,
-        cancellationRate: v.responded
-          ? parseFloat(((v.cancelled / v.responded) * 100).toFixed(2))
-          : 0,
-        // On-Time % = on-time-started / total-started, per spec.
-        // Used by DC dashboards instead of responseRate.
-        onTimeStartedRate: v.survey
-          ? parseFloat(((v.onTimeStarted / v.survey) * 100).toFixed(2))
-          : 0,
-        avgRating:
-          v.ratingCount > 0
-            ? parseFloat((v.ratingSum / v.ratingCount).toFixed(2))
-            : 0,
-        strikes: v.strikes,
-      }));
+      const out = [];
+      for (const [vid, info] of byVendor) {
+        // last 50 leads for this vendor (most recently created first)
+        const batch = info.leads
+          .slice()
+          .sort((a, b) => new Date(createdAt(b)) - new Date(createdAt(a)))
+          .slice(0, 50);
+        const total = batch.length;
+
+        let responded = 0;
+        let survey = 0;
+        let hired = 0;
+        let started = 0;
+        let onTimeStarted = 0;
+        let cancelled = 0;
+        let completed = 0;
+        let gsv = 0;
+        for (const l of batch) {
+          if (respondedFor(l, type)) responded++;
+          if (surveyAt(l)) survey++;
+          if (isHired(l)) hired++;
+          const ot = onTimeStatus(l);
+          if (ot !== null) {
+            started++;
+            if (ot === true) onTimeStarted++;
+          }
+          if (CANCELLED.has(l.bookingDetails?.status)) cancelled++;
+          if (finalPaid(l)) completed++;
+          gsv += projectTotal(l);
+        }
+
+        // #9 — vendor table ignores the time filter, so ratings use "last".
+        const ratings = await calculateVendorRatings(vid, "last");
+        const pct = (num, den) =>
+          den ? parseFloat(((num / den) * 100).toFixed(2)) : 0;
+
+        out.push({
+          vendorId: vid,
+          name: info.name || "Unknown",
+          totalLeads: total,
+          responded,
+          survey,
+          hired,
+          cancelled,
+          onTimeStarted,
+          started,
+          completed, // DC projects completed (final payment received)
+          gsv: parseFloat(gsv.toFixed(2)),
+          responseRate: pct(responded, total),
+          surveyRate: pct(survey, total), // denominator = total leads (spec)
+          hiringRate: pct(hired, total),
+          cancellationRate: pct(cancelled, total),
+          onTimeStartedRate: pct(onTimeStarted, started), // denom = jobs started
+          completedRate: pct(completed, total), // DC completion %
+          avgRating:
+            ratings.totalRatings > 0
+              ? parseFloat(ratings.averageRating.toFixed(2))
+              : 0,
+          strikes: ratings.strikes || 0,
+        });
+      }
+      return out;
     };
 
-    const hpVendorStats = await getVendorStats(hpLeads, "hp");
-    const dcVendorStats = await getVendorStats(dcLeads, "dc");
+    const hpVendorStats = await buildVendorTable(hpLeads, "hp");
+    const dcVendorStats = await buildVendorTable(dcLeads, "dc");
 
     /* -----------------------------
-        8. SEND RESPONSE
+        SEND RESPONSE
     ----------------------------- */
     return res.status(200).json({
       housePainting: {
-        totalLeads: hpLeads.length,
-        surveyPercentage: hpResponded
-          ? Math.min((hpSurvey / hpResponded) * 100, 100)
-          : 0,
-        hiringPercentage: hpResponded
-          ? Math.min((hpHiring / hpResponded) * 100, 100)
-          : 0,
+        totalLeads: hpLeadsMonth.length,
+        surveyPercentage: parseFloat(hpSurveyPct.toFixed(2)),
+        hiringPercentage: parseFloat(hpHiringPct.toFixed(2)),
         averageGsv: parseFloat(hpAvgGsv.toFixed(2)),
         averageRating: parseFloat(hpAverageRating.toFixed(2)),
         strikes: hpTotalStrikes,
         totalRatings: hpTotalRatingsCount,
-        cancellationPercentage: 0, // House painting doesn't have cancellation in your current logic
+        cancellationPercentage: 0, // HP has no cancellation metric in the spec
+        surveyLeads: hpSurveyCount,
+        hiredLeads: hpHiredMonth.length,
       },
 
       deepCleaning: {
-        totalLeads: dcLeads.length,
-        responsePercentage: dcLeads.length
-          ? Math.min((dcResponded / dcLeads.length) * 100, 100)
-          : 0,
-        cancellationPercentage: dcResponded
-          ? Math.min((dcCancelled / dcResponded) * 100, 100)
-          : 0,
-        // On-Time % aggregate (DC dashboards display this instead of
-        // Response %). On-time = job started within 30 min of slot.
-        onTimeStartedPercentage: dcStarted
-          ? parseFloat(((dcOnTimeStarted / dcStarted) * 100).toFixed(2))
-          : 0,
+        totalLeads: dcLeadsMonth.length,
+        // responsePercentage kept for backward-compatibility (not in the spec);
+        // the dashboard shows On-Time % instead.
+        responsePercentage: 0,
+        cancellationPercentage: parseFloat(dcCancelPct.toFixed(2)),
+        onTimeStartedPercentage: parseFloat(dcOnTimePct.toFixed(2)),
         onTimeStartedLeads: dcOnTimeStarted,
-        startedLeads: dcStarted,
+        startedLeads: dcStartedMonth.length,
         averageGsv: parseFloat(dcAvgGsv.toFixed(2)),
         averageRating: parseFloat(dcAverageRating.toFixed(2)),
         strikes: dcTotalStrikes,
         totalRatings: dcTotalRatingsCount,
+        cancellationLeads: dcCancelledCount,
       },
 
       vendors: {
@@ -5523,8 +5497,14 @@ exports.getCustomerPaymentsForMD = async (req, res) => {
         })
         .map((p) => {
           const paidAt = p.at ? new Date(p.at) : null;
-          const paidDate = paidAt ? moment(paidAt).format("DD/MM/YYYY") : "";
-          const paidTime = paidAt ? moment(paidAt).format("hh:mm:ss A") : "";
+          // #8b: the server runs in UTC, so moment(paidAt).format() showed the
+          // time ~5.5h off in the vendor app. Force IST (UTC+5:30).
+          const paidDate = paidAt
+            ? moment(paidAt).utcOffset(330).format("DD/MM/YYYY")
+            : "";
+          const paidTime = paidAt
+            ? moment(paidAt).utcOffset(330).format("hh:mm:ss A")
+            : "";
 
           const installment = p.installment || "";
           const paymentType =
