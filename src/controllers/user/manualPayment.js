@@ -1,5 +1,17 @@
 const ManualPayment = require("../../models/user/manualPayment.js");
 const { sendWhatsAppTemplate } = require("../../helpers/finbiteWhatsapp");
+const { getRazorpayClient } = require("../../payments/razorpay.client");
+const { verifyRazorpaySignature } = require("../../payments/razorpay.util");
+
+// #6d/#7d: a manual / buy-coins payment link is valid for 24h from creation.
+const LINK_TTL_MS = 24 * 60 * 60 * 1000;
+const isLinkExpired = (doc) => {
+  if (!doc) return true;
+  if (doc.payment?.status === "Failed") return true;
+  if (doc.payment?.isActive === false) return true;
+  const ageMs = Date.now() - new Date(doc.createdAt).getTime();
+  return Number.isFinite(ageMs) && ageMs > LINK_TTL_MS;
+};
 
 // #11 — Finbite template for the "Create Payment Link" WhatsApp. It shows the
 // "Homjee has requested a payment" text and a Pay Now URL button whose base URL
@@ -80,13 +92,98 @@ exports.createManualPayment = async (req, res) => {
   }
 };
 
+// #5c/#7d — STEP 1: create a Razorpay order for a manual / buy-coins payment
+// link. The customer opens the WhatsApp link, this creates the order, and the
+// Razorpay checkout modal collects real money. (Previously the "Pay Now" button
+// on the website just marked the record paid without charging anything, so no
+// real payment id was ever captured and nothing reached the paid list.)
+exports.createManualPaymentOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const doc = await ManualPayment.findById(id);
+    if (!doc) {
+      return res
+        .status(404)
+        .json({ success: false, message: "Manual payment record not found." });
+    }
+    if (doc.payment?.status === "Paid") {
+      return res
+        .status(400)
+        .json({ success: false, message: "This payment has already been paid." });
+    }
+    // #6d/#7d — reject expired links so money can't be collected on a dead link.
+    if (isLinkExpired(doc)) {
+      return res.status(410).json({
+        success: false,
+        message: "This payment link has expired. Please request a new one.",
+      });
+    }
+    const amount = Number(doc.amount || 0);
+    if (!(amount > 0)) {
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid payment amount." });
+    }
+
+    const rzp = getRazorpayClient();
+    let order;
+    try {
+      order = await rzp.orders.create({
+        amount: Math.round(amount * 100), // paise
+        currency: "INR",
+        receipt: `man_${String(id).slice(-12)}`,
+        notes: {
+          manualPaymentId: String(id),
+          context: doc.context || "others",
+        },
+      });
+    } catch (e) {
+      console.error("[createManualPaymentOrder] rzp order failed:", e?.error || e);
+      return res.status(400).json({
+        success: false,
+        message: "Razorpay order creation failed",
+        razorpay: e?.error || e?.message || "unknown_error",
+      });
+    }
+
+    // Store the order id until the payment is verified (overwritten with the
+    // real pay_ id on success). This also lets verify reject an order mismatch.
+    doc.payment.providerRef = order.id;
+    await doc.save();
+
+    return res.status(200).json({
+      success: true,
+      action: "PAYMENT_ORDER_CREATED",
+      razorpayOrder: {
+        keyId: process.env.RAZORPAY_KEY_ID,
+        orderId: order.id,
+        amount, // rupees — payWithRazorpay converts to paise
+        currency: "INR",
+      },
+    });
+  } catch (error) {
+    console.error("createManualPaymentOrder error:", error);
+    return res
+      .status(500)
+      .json({ success: false, message: "Internal Server Error" });
+  }
+};
+
+// #5c/#5a/#7d — STEP 2: verify the Razorpay signature and record the payment.
+// Only a genuinely verified payment flips the record to "Paid" and stores the
+// REAL razorpay payment id (pay_...) in providerRef, so it shows in the money
+// dashboard paid list with the correct payment id (not the order id).
 exports.markManualPaymentPaid = async (req, res) => {
   try {
     const { id } = req.params;
-    const { method, providerRef } = req.body; // 👈 from payload
+    const {
+      razorpay_order_id,
+      razorpay_payment_id,
+      razorpay_signature,
+      method,
+    } = req.body;
 
     const payment = await ManualPayment.findById(id);
-
     if (!payment) {
       return res.status(404).json({
         success: false,
@@ -94,18 +191,67 @@ exports.markManualPaymentPaid = async (req, res) => {
       });
     }
 
-    // Update payment details
+    // Idempotent: already paid is a success, not an error.
+    if (payment.payment?.status === "Paid") {
+      return res.status(200).json({
+        success: true,
+        message: "Payment already recorded.",
+        data: payment,
+      });
+    }
+
+    // #6d/#7d — do not accept payment on an expired link.
+    if (isLinkExpired(payment)) {
+      return res.status(410).json({
+        success: false,
+        message: "This payment link has expired. Please request a new one.",
+      });
+    }
+
+    // Require a verifiable Razorpay payload (the old fake "mark paid" path is
+    // removed — a link must be genuinely paid to be recorded).
+    if (!(razorpay_order_id && razorpay_payment_id && razorpay_signature)) {
+      return res.status(400).json({
+        success: false,
+        message: "Razorpay verification details are required.",
+      });
+    }
+
+    const ok = verifyRazorpaySignature({
+      orderId: razorpay_order_id,
+      paymentId: razorpay_payment_id,
+      signature: razorpay_signature,
+    });
+    if (!ok) {
+      return res.status(400).json({
+        success: false,
+        message: "Razorpay signature verification failed.",
+      });
+    }
+
+    // If we created an order for this record, the paid order must match it.
+    if (
+      payment.payment?.providerRef &&
+      payment.payment.providerRef.startsWith("order_") &&
+      payment.payment.providerRef !== razorpay_order_id
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Order mismatch for this payment link.",
+      });
+    }
+
     payment.payment.status = "Paid";
-    payment.payment.method = method ;
-    payment.payment.providerRef = providerRef ;
+    payment.payment.method = method || "UPI";
+    payment.payment.providerRef = razorpay_payment_id; // real pay_ id (#5a)
     payment.payment.isActive = false;
     payment.payment.paidAt = new Date();
 
     await payment.save();
-  
+
     res.status(200).json({
       success: true,
-      message: "Payment marked as Paid successfully.",
+      message: "Payment verified & recorded successfully.",
       data: payment,
     });
   } catch (error) {
