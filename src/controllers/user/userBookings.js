@@ -5779,12 +5779,31 @@ exports.rescheduleBooking = async (req, res) => {
       }
     }
 
+    // #3 — a HIRED House Painting / Deep Cleaning project that is rescheduled
+    // must NOT revert to the start-survey "Rescheduled" state. Keep its current
+    // status (and all hiring/payment state) and only change the date & time.
+    // Only a pre-survey (not-yet-hired) booking moves to "Rescheduled". (The
+    // admin reschedule path already does this; the vendor path did not.)
+    const isHiredProject =
+      Boolean(booking.assignedProfessional?.hiring?.hiredDate) ||
+      booking.bookingDetails?.firstPayment?.status === "paid" ||
+      [
+        "Hired",
+        "Project Ongoing",
+        "Waiting for final payment",
+        "Project Completed",
+        "Job Ongoing",
+        "Job Completed",
+      ].includes(booking.bookingDetails?.status);
+
     // ✅ Update booking safely
     const setPatch = {
-      "bookingDetails.status": "Rescheduled",
       "selectedSlot.slotDate": slotDate,
       "selectedSlot.slotTime": slotTime,
     };
+    if (!isHiredProject) {
+      setPatch["bookingDetails.status"] = "Rescheduled";
+    }
     // #15 — preserve the ORIGINAL slot the first time a vendor reschedules, so
     // the admin panel shows the original booking time (the admin-reschedule
     // path already stamps originalSlot; the vendor path did not).
