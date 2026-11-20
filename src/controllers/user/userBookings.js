@@ -6193,11 +6193,20 @@ exports.recordAdminRefund = async (req, res) => {
     }
 
     const d = booking.bookingDetails || {};
-    // #7a — the Total Amount Paid by the customer includes the House Painting
-    // site-visit charge (tracked separately from paidAmount). Without it the
-    // refundable cap excluded the site visit, so a full refund could not be
-    // processed.
-    const paid = Number(d.paidAmount || 0) + Number(d.siteVisitCharges || 0);
+    // #7a — Total Amount Paid = the actual money received, read from the payments
+    // ledger (which already includes the site-visit charge when collected). The
+    // old `paidAmount + siteVisitCharges` double-counted the site visit for
+    // bookings whose paidAmount already included it (a ₹2 charge became ₹4), so
+    // the refundable cap was too high. Fall back to the milestone + site-visit
+    // figures only for legacy bookings with no ledger.
+    const ledgerPaid = (booking.payments || []).reduce(
+      (s, p) => s + Number(p?.amount || 0),
+      0,
+    );
+    const paid =
+      ledgerPaid > 0
+        ? ledgerPaid
+        : Number(d.paidAmount || 0) + Number(d.siteVisitCharges || 0);
     const already = Number(d.refundAmount || 0);
     const refundable = Math.max(0, paid - already);
 
@@ -6294,9 +6303,17 @@ exports.bookingCancelledbyAdmin = async (req, res) => {
     const amt = Number(refundAmount) || 0;
     if (amt > 0) {
       const alreadyRefunded = Number(d.refundAmount || 0);
-      // #7a — include the site-visit charge in the amount paid so the full
-      // refund (installments + site visit) can be processed.
-      const paid = Number(d.paidAmount || 0) + Number(d.siteVisitCharges || 0);
+      // #7a — use the payments ledger (actual money received, site visit
+      // included) instead of paidAmount + siteVisitCharges, which double-counted
+      // the site visit for bookings whose paidAmount already included it.
+      const ledgerPaid = (booking.payments || []).reduce(
+        (s, p) => s + Number(p?.amount || 0),
+        0,
+      );
+      const paid =
+        ledgerPaid > 0
+          ? ledgerPaid
+          : Number(d.paidAmount || 0) + Number(d.siteVisitCharges || 0);
       const refundableNow = Math.max(0, paid - alreadyRefunded);
       // Cap the NEW refund so the cumulative total never exceeds what was paid.
       const applied = Math.min(amt, refundableNow);
