@@ -67,6 +67,7 @@ async function filterEligibleVendors({
 }) {
   const reasons = {
     archived: false,
+    shadowBanned: false,
     pincodeMismatch: false,
     outsideRadius: false,
     lowCoins: false,
@@ -93,6 +94,17 @@ async function filterEligibleVendors({
     if (v.isArchived) {
       reasons.archived = true;
       recordDebug(v, "archived");
+      continue;
+    }
+
+    // #10 Shadow ban — a shadow-banned vendor must not be bookable at all, not
+    // just excluded from new-lead notifications. Dropping them from the eligible
+    // set means a time slot is offered to a customer ONLY when a non-banned
+    // vendor can serve it; if the banned vendor was the only option, the slot
+    // correctly shows as unavailable (no booking can be created against them).
+    if (v.shadowBanned) {
+      reasons.shadowBanned = true;
+      recordDebug(v, "shadow_banned");
       continue;
     }
 
