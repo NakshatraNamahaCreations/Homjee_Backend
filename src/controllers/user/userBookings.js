@@ -3145,11 +3145,21 @@ const perfOnTimeStatus = (l) => {
   if (!slotM.isValid() || !startM.isValid()) return null;
   return startM.diff(slotM, "minutes") <= 30;
 };
-// A lead is relevant to a vendor if invited OR assigned to them.
+// A lead is relevant to a vendor if invited OR assigned to them. (Legacy — this
+// over-counts: a single lead broadcast to many vendors showed in all of their
+// performance numbers. Kept only for reference; use perfLeadBelongsToVendor.)
 const perfRelevantToVendor = (l, vendorId) =>
   (l.invitedVendors || []).some(
     (v) => String(v.professionalId) === String(vendorId),
   ) ||
+  String(l.assignedProfessional?.professionalId || "") === String(vendorId);
+
+// #2/#6/#7 — a lead belongs to a vendor's performance ONLY when that vendor
+// actually took it, i.e. they are the assigned professional (the vendor who
+// accepted/responded; first-accept-wins supersedes the rest). This makes every
+// metric vendor-specific and counts each broadcast lead for exactly one vendor,
+// instead of counting it for every vendor it was merely offered to.
+const perfLeadBelongsToVendor = (l, vendorId) =>
   String(l.assignedProfessional?.professionalId || "") === String(vendorId);
 
 exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
@@ -3243,8 +3253,11 @@ exports.getVendorPerformanceMetricsDeepCleaning = async (req, res) => {
       .sort({ createdDate: -1 })
       .limit(1000)
       .exec();
+    // #6/#7 — only this vendor's OWN leads (ones they were assigned/accepted),
+    // not every lead they were merely invited to. This de-duplicates broadcast
+    // leads and makes Avg GSV / On-Time / Cancellation vendor-specific.
     const vendorLeads = nearby.filter((l) =>
-      perfRelevantToVendor(l, vendorId),
+      perfLeadBelongsToVendor(l, vendorId),
     );
 
     const isLast = timeframe === "last";
@@ -3395,8 +3408,10 @@ exports.getVendorPerformanceMetricsHousePainting = async (req, res) => {
       .sort({ createdDate: -1 })
       .limit(1000)
       .exec();
+    // #2 — only this vendor's OWN (assigned/accepted) leads, so a broadcast lead
+    // counts for exactly one vendor and Survey/Hiring/Avg GSV are vendor-specific.
     const vendorLeads = nearby.filter((l) =>
-      perfRelevantToVendor(l, vendorId),
+      perfLeadBelongsToVendor(l, vendorId),
     );
 
     const isLast = timeframe === "last";
@@ -3999,7 +4014,7 @@ exports.getOverallPerformance = async (req, res) => {
     );
     const dcRating = await aggregateCategoryRatings(
       dcLeadsMonth,
-      (l) => l.invitedVendors?.[0]?.professionalId,
+      (l) => l.assignedProfessional?.professionalId,
     );
     const hpAverageRating = hpRating.averageRating;
     const hpTotalRatingsCount = hpRating.totalRatings;
@@ -4017,26 +4032,19 @@ exports.getOverallPerformance = async (req, res) => {
         payment received.
     ----------------------------------------------------------------- */
     const buildVendorTable = async (arr, type) => {
-      // group every (city-filtered, all-time) lead by its vendor
+      // #9 — group every (city-filtered, all-time) lead by the vendor who
+      // actually took it (the assigned professional), for BOTH HP and DC. The
+      // old code grouped DC leads under invitedVendors[0] — an arbitrary invited
+      // vendor — so a broadcast lead was attributed to the wrong vendor and
+      // counted once instead of per responder. Grouping by assignedProfessional
+      // de-duplicates (one vendor per lead) and makes every metric below
+      // vendor-specific, identical to the vendor-app logic.
       const byVendor = new Map();
       for (const l of arr) {
-        let vid;
-        let name;
-        if (type === "hp") {
-          const prof = l.assignedProfessional;
-          if (!prof?.professionalId) continue;
-          vid = String(prof.professionalId);
-          name = prof.name;
-        } else {
-          const inv = l.invitedVendors?.[0];
-          if (!inv?.professionalId) continue;
-          vid = String(inv.professionalId);
-          name =
-            l.assignedProfessional &&
-            String(l.assignedProfessional.professionalId) === vid
-              ? l.assignedProfessional.name
-              : inv.name;
-        }
+        const prof = l.assignedProfessional;
+        if (!prof?.professionalId) continue;
+        const vid = String(prof.professionalId);
+        const name = prof.name;
         if (!byVendor.has(vid)) byVendor.set(vid, { name, leads: [] });
         byVendor.get(vid).leads.push(l);
       }
@@ -4059,7 +4067,9 @@ exports.getOverallPerformance = async (req, res) => {
         let completed = 0;
         let gsv = 0;
         for (const l of batch) {
-          if (respondedFor(l, type)) responded++;
+          // Every lead here is one this vendor took (assigned), so it is by
+          // definition responded-to.
+          responded++;
           if (surveyAt(l)) survey++;
           if (isHired(l)) hired++;
           const ot = onTimeStatus(l);
