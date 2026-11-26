@@ -37,6 +37,7 @@ const {
 const {
   fanOutLeadToEligibleVendors,
 } = require("../../services/leadFanout.service");
+const { sendPushToVendors } = require("../../services/pushNotification.service");
 const {
   filterEligibleVendors,
   extractPincode,
@@ -589,6 +590,27 @@ const storeVendorPaymentNotification = async ({
         formattedPaymentDate: `${paidDate} ${paidTime}`,
       },
     });
+
+    // #12: also deliver a PUSH notification (like the new-lead alert), so the
+    // vendor is alerted immediately instead of only seeing it in-app. The push
+    // taps onto a non-urgent channel. Best-effort & non-blocking: the push
+    // service no-ops if Firebase isn't configured, so this never breaks the
+    // payment flow.
+    try {
+      await sendPushToVendors([String(vendorId)], {
+        title: "Payment Received 💰",
+        body: msg,
+        channelId: "payment-alerts-v1",
+        data: {
+          type: "PAYMENT",
+          bookingId: String(bookingUniqueId),
+          leadId: String(booking?._id || ""),
+          amount: Number(amount),
+        },
+      });
+    } catch (e) {
+      console.log("vendor payment push error (non-blocking):", e?.message || e);
+    }
   } catch (e) {
     console.log("vendor payment notification create error:", e?.message || e);
   }
