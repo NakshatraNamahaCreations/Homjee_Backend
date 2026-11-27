@@ -5730,7 +5730,7 @@ exports.updateStatus = async (req, res) => {
         }
       } else if (c.phone && status === "Customer Cancelled") {
         if (st === "house_painting") {
-          await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled", {
+          await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled_v2", {
             bodyParams: [c.name || "there"],
           });
         } else if (st === "deep_cleaning") {
@@ -5864,7 +5864,7 @@ exports.rescheduleBooking = async (req, res) => {
             .map((x) => String(x || "").trim())
             .filter(Boolean)
             .join(", ") || "your address";
-        await sendWhatsAppTemplate(c.phone, "hp_customer_reschedule", {
+        await sendWhatsAppTemplate(c.phone, "hp_customer_reschedule_v2", {
           bodyParams: [c.name || "there", slot, addr],
         });
       } else if (c.phone && booking?.serviceType === "deep_cleaning") {
@@ -6382,7 +6382,7 @@ exports.bookingCancelledbyAdmin = async (req, res) => {
     // 1) Lead-cancelled message (always, regardless of refund).
     if (c.phone && st === "house_painting") {
       try {
-        const r = await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled", {
+        const r = await sendWhatsAppTemplate(c.phone, "hp_customer_cancelled_v2", {
           bodyParams: [c.name || "there"],
         });
         console.log("[bookingCancelledbyAdmin] WA cancel sent:", JSON.stringify(r));
