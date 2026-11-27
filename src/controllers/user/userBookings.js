@@ -8449,7 +8449,7 @@ exports.updateManualPayment = async (req, res) => {
             ? "dc_cash_payment_confirmation"
             : "hp_cash_payment_confirmation";
         await sendWhatsAppTemplate(c.phone, cashTpl, {
-          bodyParams: [c.name || "there", String(Number(amount) || 0)],
+          bodyParams: [c.name || "there", String(Number(currentPaid) || 0)],
         });
       }
     } catch (e) {
@@ -8474,7 +8474,8 @@ exports.updateManualPayment = async (req, res) => {
             vendorId: booking.assignedProfessional?.professionalId, // ✅ your booking vendorId
             booking,
             stage,
-            amount,
+            amount: currentPaid, // was an undefined `amount` var → threw, so no
+            // cash notification/push ever fired; currentPaid is this txn's amount
             method: d.paymentMethod,
             providerRef: providerRef,
           });

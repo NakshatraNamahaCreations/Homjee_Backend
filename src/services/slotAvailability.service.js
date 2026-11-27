@@ -249,25 +249,25 @@ function calculateAvailableSlots({
 
   // Bookings that have been PAID (isEnquiry=false) but no vendor has
   // accepted yet (assignedProfessional unset) consume one unit of vendor
-  // capacity at their selected slot, but we don't know which vendor. We
-  // track them as a per-slot-time counter and subtract from freeVendorIds
-  // when computing slot availability — this is what prevents the
-  // "customer paid → slot still showing free for others" bug.
-  // Key: canonical "08:00 AM" → count of unassigned-but-paid commitments.
+  // capacity for their whole service WINDOW, but we don't know which vendor.
   //
-  // We canonicalize via toTime(toMinutes(label)) on BOTH sides so a stored
-  // "10:00 AM" / "10:00 am" / "10:00 AM " / "10:0 AM" all collide on the
-  // same bucket. Without this, the counter "looked" populated in logs but
-  // the lookup at slot-display time missed → slot was wrongly available.
-  const unassignedCommitments = new Map();
+  // #9a: previously we tracked these as a per-exact-slot-label counter, so a
+  // paid-unassigned commitment reserved ONLY its own start label and left the
+  // travel-adjacent slots free. (Assigned bookings and holds already block
+  // adjacent slots via blockFromCommitment, but unassigned-paid ones didn't.)
+  // The symptom: while a hold existed the adjacent slot was blocked, then once
+  // the hold expired the adjacent slot "became free" again and another
+  // customer could book it — and that follow-on booking then had no real
+  // vendor free, so lead fanout found nobody and sent no notifications.
+  //
+  // Fix: model each unassigned-paid commitment as a full [start, end+travel]
+  // WINDOW (same builder as assigned bookings/holds) and, at slot time, count
+  // how many such windows OVERLAP each candidate — that many vendors of
+  // capacity are consumed across the whole window, adjacent slots included.
+  const unassignedWindows = []; // [{start, end}] one per paid-unassigned commitment
   const canonLabel = (label) => {
     const m = toMinutes(label);
     return m == null ? null : toTime(m);
-  };
-  const bumpUnassigned = (label) => {
-    const k = canonLabel(label);
-    if (!k) return;
-    unassignedCommitments.set(k, (unassignedCommitments.get(k) || 0) + 1);
   };
 
   // ── Holds first ──
@@ -343,16 +343,26 @@ function calculateAvailableSlots({
           consumedByOwnHold = true;
         }
       }
+      // #9a: if this paid-unassigned booking is NOT already covered by its own
+      // leftover hold (which pushBlock already blocked, travel buffer and all),
+      // reserve one vendor of capacity across its full service window so the
+      // travel-adjacent slots stay blocked too — not just the exact start.
       if (!consumedByOwnHold) {
-        bumpUnassigned(b.selectedSlot?.slotTime);
+        const startMin = toMinutes(b.selectedSlot?.slotTime);
+        const dur = durationFromBooking(b);
+        if (startMin != null && dur) {
+          unassignedWindows.push(
+            blockFromCommitment(startMin, dur, b.serviceType),
+          );
+        }
       }
     }
   }
 
-  if (unassignedCommitments.size) {
+  if (unassignedWindows.length) {
     console.log(
-      "[slots] unassignedCommitments by slot:",
-      [...unassignedCommitments.entries()],
+      "[slots] unassigned-paid commitment windows (travel-buffered):",
+      unassignedWindows,
     );
   }
   if (heldVendorsBySlotCustomer.size) {
@@ -422,11 +432,16 @@ function calculateAvailableSlots({
     }
 
     const label = toTime(s);
-    // Subtract paid-but-unassigned bookings at this exact slot time — they
-    // each consume one of the freeVendorIds even though we don't know which.
-    // If commitments equal/exceed free vendors, the slot has no real capacity
-    // left, so render it unavailable.
-    const consumed = unassignedCommitments.get(label) || 0;
+    // #9a: subtract paid-but-unassigned commitments whose service WINDOW
+    // overlaps this candidate (not just those that start on this exact label) —
+    // each consumes one of the freeVendorIds even though we don't know which.
+    // This keeps the travel-adjacent slots reserved for the whole window, so a
+    // freed hold can no longer re-open an adjacent slot that has no real vendor
+    // left. If commitments equal/exceed free vendors, the slot has no real
+    // capacity left, so render it unavailable.
+    const consumed = unassignedWindows.filter(
+      (w) => candidate.start < w.end && candidate.end > w.start,
+    ).length;
     const trueFreeCount = freeVendorIds.length - consumed;
 
     if (trueFreeCount > 0) {
@@ -440,7 +455,7 @@ function calculateAvailableSlots({
         eligibleVendors: eligibleVendors.length,
         freeVendors: freeVendorIds.length,
         blockedVendors: blockedVendorIds.length,
-        unassignedCommitments: consumed,
+        unassignedOverlapping: consumed,
         trueFreeCount,
       });
     }
